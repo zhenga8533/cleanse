@@ -9,6 +9,18 @@ license.workspace = true
 [dependencies]
 cleanse-model.workspace = true
 cleanse-platform.workspace = true
+dua-core.workspace = true
+rayon.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[target.'cfg(windows)'.dev-dependencies]
+junction.workspace = true
+
+[[bench]]
+name = "walk"
+harness = false
 
 [lints]
 workspace = true

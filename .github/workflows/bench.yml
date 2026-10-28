@@ -1,0 +1,47 @@
+name: Walker benchmark
+
+on:
+  pull_request:
+    paths:
+      - crates/cleanse-core/src/scan/**
+      - crates/cleanse-core/benches/**
+      - xtask/src/gen_tree.rs
+      - .github/workflows/bench.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  walk:
+    name: Walk (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      OS: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Generate a 200k-entry tree
+        run: cargo xtask gen-tree "$RUNNER_TEMP/walk-tree"
+      - name: Benchmark
+        run: |
+          cargo bench -p cleanse-core --bench walk -- "$RUNNER_TEMP/walk-tree" --runs 7 | tee bench.txt
+          { echo "### $OS"; echo '```text'; cat bench.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

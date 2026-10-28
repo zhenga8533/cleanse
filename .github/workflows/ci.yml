@@ -55,7 +55,7 @@ jobs:
         with:
           tool: cargo-nextest
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-      - run: cargo nextest run --workspace --all-targets --locked
+      - run: cargo nextest run --workspace --locked
       - run: cargo test --workspace --doc --locked
 
   deny:

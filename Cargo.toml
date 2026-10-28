@@ -16,6 +16,11 @@ cleanse-model = { path = "crates/cleanse-model", version = "0.1.0" }
 cleanse-platform = { path = "crates/cleanse-platform", version = "0.1.0" }
 
 clap = { version = "4.5", features = ["derive"] }
+dua-core = "5.0"
+rayon = "1.12"
+
+junction = "2.1"
+tempfile = "3.27"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

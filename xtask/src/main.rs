@@ -2,8 +2,10 @@
 
 #![allow(
     clippy::disallowed_methods,
-    reason = "xtask exists to run development tools as subprocesses"
+    reason = "xtask runs development tools and writes benchmark fixtures"
 )]
+
+mod gen_tree;
 
 use std::env;
 use std::process::{Command, ExitCode};
@@ -12,8 +14,9 @@ const USAGE: &str = "\
 usage: cargo xtask <task>
 
 tasks:
-  ci      run the same checks as CI: rustfmt, clippy, tests, cargo-deny, typos, taplo
-  help    show this message";
+  ci                                run the same checks as CI: rustfmt, clippy, tests, cargo-deny, typos, taplo
+  gen-tree <dir> [--entries <n>]    create a synthetic directory tree for benchmarks (default 200000 entries)
+  help                              show this message";
 
 struct Check {
     name: &'static str,
@@ -47,7 +50,7 @@ const CI_CHECKS: &[Check] = &[
     Check {
         name: "tests",
         program: "cargo",
-        args: &["nextest", "run", "--workspace", "--all-targets", "--locked"],
+        args: &["nextest", "run", "--workspace", "--locked"],
         install: Some("cargo install --locked cargo-nextest"),
     },
     Check {
@@ -77,8 +80,10 @@ const CI_CHECKS: &[Check] = &[
 ];
 
 fn main() -> ExitCode {
-    match env::args().nth(1).as_deref() {
+    let args: Vec<String> = env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
         Some("ci") => ci(),
+        Some("gen-tree") => gen_tree::run(&args[1..]),
         Some("help" | "-h" | "--help") => {
             println!("{USAGE}");
             ExitCode::SUCCESS

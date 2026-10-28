@@ -37,6 +37,12 @@ correctness is high. This guide covers setup, conventions, and how changes are r
 | Run the tests | `cargo nextest run --workspace` |
 | Run every CI check | `cargo xtask ci` |
 | Preview the docs | `mdbook serve docs` |
+| Create a synthetic tree for benchmarks | `cargo xtask gen-tree <dir> [--entries <n>]` |
+| Benchmark the directory walker (read-only) | `cargo bench -p cleanse-core --bench walk -- <dir>` |
+
+Antivirus software inspects every file and directory open, so walker benchmarks on a machine
+with real-time scanning measure the scanner as much as the walker. The `Walker benchmark`
+workflow runs the same comparison on GitHub's runners.
 
 ## Project layout
 
