@@ -1,0 +1,14 @@
+[package]
+name = "cleanse-core"
+description = "Read-only scanning, rule matching, safety evaluation, and planning for Cleanse"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+cleanse-model.workspace = true
+cleanse-platform.workspace = true
+
+[lints]
+workspace = true

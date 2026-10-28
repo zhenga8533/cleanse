@@ -1,0 +1,16 @@
+# Only cleanse-exec (and, later, the elevated helper) may change the filesystem or spawn
+# processes. Anything else that genuinely needs one of these must opt in locally with
+# `#[allow(clippy::disallowed_methods, reason = "...")]`. See docs/src/adr/0002-single-mutator.md.
+disallowed-methods = [
+    { path = "std::fs::remove_file", reason = "only cleanse-exec may delete (ADR 0002)" },
+    { path = "std::fs::remove_dir", reason = "only cleanse-exec may delete (ADR 0002)" },
+    { path = "std::fs::remove_dir_all", reason = "only cleanse-exec may delete (ADR 0002)" },
+    { path = "std::fs::rename", reason = "only cleanse-exec may move files (ADR 0002)" },
+    { path = "std::fs::copy", reason = "only cleanse-exec may write files (ADR 0002)" },
+    { path = "std::fs::write", reason = "only cleanse-exec may write files (ADR 0002)" },
+    { path = "std::fs::File::create", reason = "only cleanse-exec may write files (ADR 0002)" },
+    { path = "std::fs::set_permissions", reason = "only cleanse-exec may change permissions (ADR 0002)" },
+    { path = "std::process::Command::new", reason = "rules never run commands; only cleanse-exec may spawn processes (ADR 0003)" },
+]
+
+allow-unwrap-in-tests = true

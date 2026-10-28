@@ -1,0 +1,16 @@
+[package]
+name = "cleanse-engine"
+description = "Session API over the Cleanse scan, plan, and apply pipeline"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+cleanse-core.workspace = true
+cleanse-exec.workspace = true
+cleanse-model.workspace = true
+cleanse-platform.workspace = true
+
+[lints]
+workspace = true

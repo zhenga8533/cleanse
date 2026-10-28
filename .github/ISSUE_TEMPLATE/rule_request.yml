@@ -1,0 +1,41 @@
+name: Rule request
+description: Suggest something new for Cleanse to detect, or a fix to an existing rule
+labels: [rules]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What should Cleanse detect?
+      description: Which app or tool creates it, and what it contains.
+    validations:
+      required: true
+  - type: textarea
+    id: listing
+    attributes:
+      label: Directory listing
+      description: |
+        Names and sizes only, never file contents. For example `dir /s` on Windows,
+        or `ls -la` and `du -sh *` on macOS and Linux.
+      render: text
+  - type: textarea
+    id: regenerate
+    attributes:
+      label: How does it come back?
+      description: |
+        Does the app recreate it on its own, or does the user need to run a command
+        or download something again?
+    validations:
+      required: true
+  - type: textarea
+    id: docs
+    attributes:
+      label: Documentation
+      description: Links to official docs that describe this directory, if any.
+  - type: checkboxes
+    id: platforms
+    attributes:
+      label: Platforms
+      options:
+        - label: Windows
+        - label: macOS
+        - label: Linux

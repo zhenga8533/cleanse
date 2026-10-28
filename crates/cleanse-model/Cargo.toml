@@ -1,0 +1,10 @@
+[package]
+name = "cleanse-model"
+description = "Shared data model for Cleanse: candidates, risk tiers, plans, and journal records"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true

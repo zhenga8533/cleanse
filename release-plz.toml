@@ -1,0 +1,45 @@
+[workspace]
+# Nothing goes to crates.io until the first read-only preview (M1) is ready.
+publish = false
+# cargo-dist creates the GitHub Release (with binaries) from the tag release-plz pushes.
+git_release_enable = false
+# Only the CLI is tagged and changelogged; the library crates are internal for now.
+git_tag_enable = false
+changelog_update = false
+semver_check = false
+pr_labels = ["release"]
+
+[[package]]
+name = "cleanse-cli"
+git_tag_enable = true
+git_tag_name = "v{{ version }}"
+changelog_update = true
+changelog_path = "CHANGELOG.md"
+changelog_include = [
+    "cleanse-core",
+    "cleanse-engine",
+    "cleanse-exec",
+    "cleanse-model",
+    "cleanse-platform",
+]
+version_group = "cleanse"
+
+[[package]]
+name = "cleanse-core"
+version_group = "cleanse"
+
+[[package]]
+name = "cleanse-engine"
+version_group = "cleanse"
+
+[[package]]
+name = "cleanse-exec"
+version_group = "cleanse"
+
+[[package]]
+name = "cleanse-model"
+version_group = "cleanse"
+
+[[package]]
+name = "cleanse-platform"
+version_group = "cleanse"
