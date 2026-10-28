@@ -1,0 +1,46 @@
+name: False positive (safety)
+description: Cleanse flagged, or removed, something that should have been kept
+labels: [false-positive, priority]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you. These reports are handled before anything else.
+        Please redact usernames or other personal details from paths before posting.
+  - type: textarea
+    id: item
+    attributes:
+      label: What was flagged?
+      description: The path and what it actually contains or is used for.
+    validations:
+      required: true
+  - type: dropdown
+    id: outcome
+    attributes:
+      label: What happened to it?
+      options:
+        - Only flagged (nothing was removed)
+        - Quarantined
+        - Moved to the trash
+        - Deleted
+    validations:
+      required: true
+  - type: textarea
+    id: explain
+    attributes:
+      label: Output of `cleanse explain <path>`
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: Cleanse version
+      description: Output of `cleanse --version`
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows, macOS, Linux, Other]
+    validations:
+      required: true

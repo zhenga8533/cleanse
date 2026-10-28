@@ -1,0 +1,15 @@
+[package]
+name = "cleanse-exec"
+description = "Executes approved Cleanse plans: the only crate that changes the filesystem"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+cleanse-core.workspace = true
+cleanse-model.workspace = true
+cleanse-platform.workspace = true
+
+[lints]
+workspace = true

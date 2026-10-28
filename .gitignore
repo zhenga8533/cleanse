@@ -1,0 +1,6 @@
+/target
+/docs/book
+
+# insta snapshot review leftovers
+*.pending-snap
+*.snap.new

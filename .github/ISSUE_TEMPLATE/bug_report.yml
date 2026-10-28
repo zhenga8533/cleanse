@@ -1,0 +1,43 @@
+name: Bug report
+description: Something in Cleanse doesn't work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If Cleanse flagged or removed something it shouldn't have, please use the
+        **False positive** form instead so it gets priority.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The commands and flags you ran.
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: Cleanse version
+      description: Output of `cleanse --version`
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows, macOS, Linux, Other]
+    validations:
+      required: true
