@@ -7,7 +7,7 @@ use std::sync::Mutex;
 
 use cleanse_model::EntryKind;
 
-use super::{Descend, WalkReport, walk};
+use super::{Descend, WalkReport, measure, walk};
 
 /// Walks `root`, returning every entry relative to it, sorted. Directory sizes are zeroed
 /// because they differ between filesystems.
@@ -80,6 +80,27 @@ fn reports_every_entry_below_the_root_including_hidden_ones() {
         ]
     );
     assert!(report.errors.is_empty(), "{:?}", report.errors);
+}
+
+#[test]
+fn measures_contents_and_notes_what_the_safety_checks_need() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(root.path().join("a.txt"), "ab").unwrap();
+    fs::create_dir(root.path().join("sub")).unwrap();
+    fs::write(root.path().join("sub/b.txt"), "cde").unwrap();
+    fs::write(root.path().join("sub/.env.production"), "x").unwrap();
+    fs::write(root.path().join("sub/Disk.VMDK"), "").unwrap();
+
+    let measurement = measure(root.path()).unwrap();
+
+    assert_eq!(measurement.files, 4);
+    assert_eq!(measurement.size.logical, 6);
+    assert_eq!(measurement.size.guaranteed, measurement.size.on_disk);
+    assert_eq!(measurement.secret.as_deref(), Some(".env.production"));
+    assert_eq!(measurement.vm_disk.as_deref(), Some("disk.vmdk"));
+    assert!(measurement.newest_modified.is_some());
+    assert_eq!((measurement.unreadable, measurement.mounts), (0, 0));
+    assert!(!measurement.shared);
 }
 
 #[test]

@@ -3,10 +3,10 @@
     reason = "file identity, sync root, and token queries need Win32 calls that std doesn't wrap"
 )]
 
-use std::fs::{File, OpenOptions};
+use std::fs::{File, Metadata, OpenOptions};
 use std::io;
 use std::mem::size_of;
-use std::os::windows::fs::OpenOptionsExt;
+use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::path::Path;
 use std::ptr;
@@ -31,7 +31,7 @@ use windows_sys::Win32::Storage::FileSystem::{
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
-use crate::FileFacts;
+use crate::{FileFacts, ListedFacts};
 
 /// Reparse tags with this bit stand in for another name: symbolic links, junctions, and mount
 /// points. They're the only reparse points treated as links.
@@ -73,6 +73,15 @@ pub(crate) fn inspect(path: &Path) -> io::Result<FileFacts> {
         cloud_synced: in_sync_root(&file)?,
         offline: tag.FileAttributes & OFFLINE_ATTRIBUTES != 0,
     })
+}
+
+pub(crate) fn listed_facts(metadata: &Metadata) -> ListedFacts {
+    let offline = metadata.file_attributes() & OFFLINE_ATTRIBUTES != 0;
+    ListedFacts {
+        on_disk: if offline { 0 } else { metadata.len() },
+        links: None,
+        offline,
+    }
 }
 
 /// Asks the Cloud Files API whether the file is inside a registered sync root. Checking for a
