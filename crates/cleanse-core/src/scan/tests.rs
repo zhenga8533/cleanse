@@ -5,20 +5,13 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use super::{Entry, EntryKind, WalkReport, walk_dua, walk_parallel};
-
-type Walk = fn(&Path, &(dyn Fn(&Entry<'_>) + Sync)) -> io::Result<WalkReport>;
-
-const WALKERS: [(&str, Walk); 2] = [
-    ("parallel", |root, visit| walk_parallel(root, visit)),
-    ("dua", |root, visit| walk_dua(root, visit)),
-];
+use super::{EntryKind, WalkReport, walk};
 
 /// Walks `root`, returning every entry relative to it, sorted. Directory sizes are zeroed
 /// because they differ between filesystems.
-fn collect(walk: Walk, root: &Path) -> (Vec<(PathBuf, EntryKind, u64)>, WalkReport) {
+fn collect(root: &Path) -> (Vec<(PathBuf, EntryKind, u64)>, WalkReport) {
     let seen = Mutex::new(Vec::new());
-    let report = walk(root, &|entry| {
+    let report = walk(root, |entry| {
         let relative = entry.path.strip_prefix(root).unwrap().to_path_buf();
         let len = if entry.kind == EntryKind::Dir {
             0
@@ -57,22 +50,20 @@ fn reports_every_entry_below_the_root_including_hidden_ones() {
     fs::create_dir(root.path().join(".hidden")).unwrap();
     fs::write(root.path().join(".hidden/c"), "x").unwrap();
 
-    for (name, walk) in WALKERS {
-        let (seen, report) = collect(walk, root.path());
-        assert_eq!(
-            seen,
-            [
-                entry(".hidden", EntryKind::Dir, 0),
-                entry(".hidden/c", EntryKind::File, 1),
-                entry("a.txt", EntryKind::File, 3),
-                entry("sub", EntryKind::Dir, 0),
-                entry("sub/b.txt", EntryKind::File, 5),
-                entry("sub/deeper", EntryKind::Dir, 0),
-            ],
-            "{name}"
-        );
-        assert!(report.errors.is_empty(), "{name}: {:?}", report.errors);
-    }
+    let (seen, report) = collect(root.path());
+
+    assert_eq!(
+        seen,
+        [
+            entry(".hidden", EntryKind::Dir, 0),
+            entry(".hidden/c", EntryKind::File, 1),
+            entry("a.txt", EntryKind::File, 3),
+            entry("sub", EntryKind::Dir, 0),
+            entry("sub/b.txt", EntryKind::File, 5),
+            entry("sub/deeper", EntryKind::Dir, 0),
+        ]
+    );
+    assert!(report.errors.is_empty(), "{:?}", report.errors);
 }
 
 #[test]
@@ -82,14 +73,13 @@ fn reports_directory_links_without_following_them() {
     let root = tempfile::tempdir().unwrap();
     link_dir(outside.path(), &root.path().join("link"));
 
-    for (name, walk) in WALKERS {
-        let (seen, _) = collect(walk, root.path());
-        let kinds: Vec<_> = seen
-            .iter()
-            .map(|(path, kind, _)| (path.clone(), *kind))
-            .collect();
-        assert_eq!(kinds, [(PathBuf::from("link"), EntryKind::Link)], "{name}");
-    }
+    let (seen, _) = collect(root.path());
+
+    let kinds: Vec<_> = seen
+        .iter()
+        .map(|(path, kind, _)| (path.clone(), *kind))
+        .collect();
+    assert_eq!(kinds, [(PathBuf::from("link"), EntryKind::Link)]);
 }
 
 #[test]
@@ -102,24 +92,17 @@ fn rejects_a_root_that_is_not_a_directory() {
     let link = dir.path().join("link");
     link_dir(&target, &link);
 
-    for (name, walk) in WALKERS {
-        for root in [&file, &link] {
-            let error = walk(root, &|_| {}).unwrap_err();
-            assert_eq!(
-                error.kind(),
-                io::ErrorKind::NotADirectory,
-                "{name}: {}",
-                root.display()
-            );
-        }
+    for root in [&file, &link] {
+        let error = walk(root, |_| {}).unwrap_err();
         assert_eq!(
-            walk(&dir.path().join("missing"), &|_| {})
-                .unwrap_err()
-                .kind(),
-            io::ErrorKind::NotFound,
-            "{name}"
+            error.kind(),
+            io::ErrorKind::NotADirectory,
+            "{}",
+            root.display()
         );
     }
+    let missing = walk(&dir.path().join("missing"), |_| {}).unwrap_err();
+    assert_eq!(missing.kind(), io::ErrorKind::NotFound);
 }
 
 #[test]
@@ -134,18 +117,16 @@ fn walks_paths_longer_than_the_windows_max_path() {
     fs::create_dir_all(&deep).unwrap();
     fs::write(deep.join("bottom.txt"), "found").unwrap();
 
-    for (name, walk) in WALKERS {
-        let (seen, report) = collect(walk, root.path());
-        assert_eq!(seen.len(), 13, "{name}");
-        assert!(
-            seen.iter()
-                .any(|(path, kind, len)| path.ends_with("bottom.txt")
-                    && *kind == EntryKind::File
-                    && *len == 5),
-            "{name}"
-        );
-        assert!(report.errors.is_empty(), "{name}: {:?}", report.errors);
-    }
+    let (seen, report) = collect(root.path());
+
+    assert_eq!(seen.len(), 13);
+    assert!(
+        seen.iter()
+            .any(|(path, kind, len)| path.ends_with("bottom.txt")
+                && *kind == EntryKind::File
+                && *len == 5)
+    );
+    assert!(report.errors.is_empty(), "{:?}", report.errors);
 }
 
 #[cfg(any(windows, all(unix, not(target_os = "macos"))))]
@@ -166,19 +147,14 @@ fn keeps_file_names_that_are_not_valid_unicode() {
     let root = tempfile::tempdir().unwrap();
     fs::write(root.path().join(&name), "x").unwrap();
 
-    for (label, walk) in WALKERS {
-        let (seen, _) = collect(walk, root.path());
-        assert_eq!(
-            seen,
-            [(PathBuf::from(&name), EntryKind::File, 1)],
-            "{label}"
-        );
-    }
+    let (seen, _) = collect(root.path());
+
+    assert_eq!(seen, [(PathBuf::from(&name), EntryKind::File, 1)]);
 }
 
 #[cfg(unix)]
 #[test]
-fn reports_unreadable_directories_and_keeps_going() {
+fn reports_unreadable_directories_by_path_and_keeps_going() {
     use std::os::unix::fs::PermissionsExt;
 
     let root = tempfile::tempdir().unwrap();
@@ -190,31 +166,17 @@ fn reports_unreadable_directories_and_keeps_going() {
     // Root can read anything, so there's nothing to test when running as root.
     let running_as_root = fs::read_dir(&locked).is_ok();
 
-    let results: Vec<_> = WALKERS
-        .iter()
-        .map(|(name, walk)| (*name, collect(*walk, root.path())))
-        .collect();
+    let (seen, report) = collect(root.path());
     fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
     if running_as_root {
         return;
     }
 
-    for (name, (seen, report)) in results {
-        assert!(
-            seen.iter()
-                .any(|(path, ..)| path == Path::new("visible.txt")),
-            "{name}"
-        );
-        assert!(
-            !seen.iter().any(|(path, ..)| path.ends_with("hidden.txt")),
-            "{name}"
-        );
-        assert_eq!(report.errors.len(), 1, "{name}: {:?}", report.errors);
-        let expected = if name == "parallel" {
-            Some(locked.as_path())
-        } else {
-            None
-        };
-        assert_eq!(report.errors[0].path.as_deref(), expected, "{name}");
-    }
+    assert!(
+        seen.iter()
+            .any(|(path, ..)| path == Path::new("visible.txt"))
+    );
+    assert!(!seen.iter().any(|(path, ..)| path.ends_with("hidden.txt")));
+    assert_eq!(report.errors.len(), 1, "{:?}", report.errors);
+    assert_eq!(report.errors[0].path, locked);
 }

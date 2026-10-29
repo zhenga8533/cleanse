@@ -10,7 +10,7 @@ roots ─▶ Scan ─▶ Detect ─▶ Evaluate ─▶ Plan ─▶ [user approva
 ```
 
 1. **Scan** walks the chosen roots in parallel without following links or crossing
-   filesystems, and measures sizes.
+   filesystems, and measures sizes ([ADR 0007](adr/0007-directory-walker.md)).
 2. **Detect** matches entries against [rules](rules.md) and attaches evidence.
 3. **Evaluate** runs every match through the [safety gates](safety-model.md), which can allow,
    downgrade, or block it. Blocked items stay visible with the reason.

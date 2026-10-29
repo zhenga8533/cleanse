@@ -1,13 +1,11 @@
-﻿//! Times the directory walkers on a real tree. Read-only.
+﻿//! Times the directory walker on a real tree. Read-only.
 //!
 //! ```text
 //! cargo xtask gen-tree <dir>                                   # optional synthetic tree
 //! cargo bench -p cleanse-core --bench walk -- <dir> [--runs <n>]
 //! ```
 //!
-//! Each walker gets one untimed warm-up run so both start from the same OS cache state, then the
-//! timed runs alternate between walkers so drift (background I/O, thermal throttling) affects
-//! them equally.
+//! One untimed warm-up run fills the OS cache first, so the timed runs measure warm-cache walks.
 
 #![allow(
     clippy::cast_precision_loss,
@@ -16,24 +14,14 @@
 
 use std::env;
 use std::io;
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use cleanse_core::scan::{Entry, EntryKind, WalkReport, walk_dua, walk_parallel};
-
-type Walk = fn(&Path, &Totals) -> io::Result<WalkReport>;
-
-const WALKERS: [(&str, Walk); 2] = [
-    ("std + rayon", |root, totals| {
-        walk_parallel(root, |entry| totals.add(entry))
-    }),
-    ("dua-core", |root, totals| {
-        walk_dua(root, |entry| totals.add(entry))
-    }),
-];
+use cleanse_core::scan::{Entry, EntryKind, walk};
 
 #[derive(Default)]
 struct Totals {
@@ -76,10 +64,10 @@ impl Counts {
     }
 }
 
-fn run_once(walk: Walk, root: &Path) -> io::Result<(Duration, Counts)> {
+fn run_once(root: &Path) -> io::Result<(Duration, Counts)> {
     let totals = Totals::default();
     let start = Instant::now();
-    let report = walk(root, &totals)?;
+    let report = walk(root, |entry| totals.add(entry))?;
     let elapsed = start.elapsed();
     let counts = Counts {
         files: totals.files.into_inner(),
@@ -104,8 +92,7 @@ fn main() -> ExitCode {
         }
     };
     match benchmark(&root, runs) {
-        Ok(consistent) if consistent => ExitCode::SUCCESS,
-        Ok(_) => ExitCode::FAILURE,
+        Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("walk failed: {error}");
             ExitCode::FAILURE
@@ -135,75 +122,51 @@ fn parse_args() -> Result<(PathBuf, usize), String> {
     Ok((root.ok_or("missing <dir>")?, runs))
 }
 
-/// Returns whether both walkers found the same entries in their back-to-back warm-up runs.
-/// Later runs may legitimately differ if something writes to the tree during the benchmark.
-fn benchmark(root: &Path, runs: usize) -> io::Result<bool> {
-    let threads = thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
+fn benchmark(root: &Path, runs: usize) -> io::Result<()> {
+    let threads = thread::available_parallelism().map_or(1, NonZeroUsize::get);
     println!(
-        "root: {}\nthreads: {threads}, timed runs per walker: {runs}\n",
+        "root: {}\nthreads: {threads}, timed runs: {runs}\n",
         root.display()
     );
 
-    let mut times: [Vec<Duration>; 2] = Default::default();
-    let mut counts: [Option<Counts>; 2] = [None, None];
-    for (index, (_, walk)) in WALKERS.iter().enumerate() {
-        counts[index] = Some(run_once(*walk, root)?.1);
-    }
+    let (_, counts) = run_once(root)?;
+    let mut times = Vec::with_capacity(runs);
     for run in 0..runs {
-        let order = if run % 2 == 0 { [0, 1] } else { [1, 0] };
-        for index in order {
-            let (name, walk) = WALKERS[index];
-            let (elapsed, found) = run_once(walk, root)?;
-            if counts[index] != Some(found) {
-                println!(
-                    "note: {name} saw a different tree on run {run} (did something write to it?): \
-                     {found:?}"
-                );
-            }
-            times[index].push(elapsed);
-        }
-    }
-
-    println!(
-        "{:<12} {:>9} {:>9} {:>9} {:>14}",
-        "walker", "min", "median", "max", "entries/s"
-    );
-    for (index, (name, _)) in WALKERS.iter().enumerate() {
-        let times = &mut times[index];
-        times.sort();
-        let median = times[times.len() / 2];
-        let entries = counts[index].map_or(0, |counts| counts.entries());
-        println!(
-            "{name:<12} {:>9} {:>9} {:>9} {:>14}",
-            seconds(times[0]),
-            seconds(median),
-            seconds(times[times.len() - 1]),
-            thousands(entries as f64 / median.as_secs_f64()),
-        );
-    }
-
-    println!();
-    for (index, (name, _)) in WALKERS.iter().enumerate() {
-        if let Some(c) = counts[index] {
+        let (elapsed, found) = run_once(root)?;
+        if found != counts {
             println!(
-                "{name}: {} entries ({} files, {} dirs, {} links, {} other), {} MiB in files, \
-                 {} unreadable, {} on other filesystems",
-                c.entries(),
-                c.files,
-                c.dirs,
-                c.links,
-                c.other,
-                c.bytes / (1024 * 1024),
-                c.errors,
-                c.other_filesystems,
+                "note: run {run} saw a different tree (did something write to it?): {found:?}"
             );
         }
+        times.push(elapsed);
     }
-    let consistent = counts[0] == counts[1];
-    if !consistent {
-        println!("WARNING: the walkers disagree about what's in the tree");
-    }
-    Ok(consistent)
+    times.sort();
+    let median = times[times.len() / 2];
+
+    println!(
+        "{:>9} {:>9} {:>9} {:>14}",
+        "min", "median", "max", "entries/s"
+    );
+    println!(
+        "{:>9} {:>9} {:>9} {:>14}",
+        seconds(times[0]),
+        seconds(median),
+        seconds(times[times.len() - 1]),
+        thousands(counts.entries() as f64 / median.as_secs_f64()),
+    );
+    println!(
+        "\n{} entries ({} files, {} dirs, {} links, {} other), {} MiB in files, \
+         {} unreadable, {} on other filesystems",
+        counts.entries(),
+        counts.files,
+        counts.dirs,
+        counts.links,
+        counts.other,
+        counts.bytes / (1024 * 1024),
+        counts.errors,
+        counts.other_filesystems,
+    );
+    Ok(())
 }
 
 fn seconds(duration: Duration) -> String {

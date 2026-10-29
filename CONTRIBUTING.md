@@ -42,7 +42,7 @@ correctness is high. This guide covers setup, conventions, and how changes are r
 
 Antivirus software inspects every file and directory open, so walker benchmarks on a machine
 with real-time scanning measure the scanner as much as the walker. The `Walker benchmark`
-workflow runs the same comparison on GitHub's runners.
+workflow runs the benchmark on GitHub's runners whenever the walker code changes.
 
 ## Project layout
 

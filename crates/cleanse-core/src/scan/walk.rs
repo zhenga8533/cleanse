@@ -49,8 +49,8 @@ pub struct WalkReport {
 
 #[derive(Debug)]
 pub struct WalkError {
-    /// The entry or directory that couldn't be read, when the walker can tell.
-    pub path: Option<PathBuf>,
+    /// The entry or directory that couldn't be read.
+    pub path: PathBuf,
     pub error: io::Error,
 }
 
@@ -59,7 +59,8 @@ pub struct WalkError {
 ///
 /// Links are reported but never followed, directories on other filesystems are reported but
 /// not entered, and unreadable entries are collected in the report instead of ending the walk.
-pub fn walk_parallel<F>(root: &Path, visit: F) -> io::Result<WalkReport>
+/// ADR 0007 explains why this isn't built on a walker crate.
+pub fn walk<F>(root: &Path, visit: F) -> io::Result<WalkReport>
 where
     F: Fn(&Entry<'_>) + Sync,
 {
@@ -77,7 +78,7 @@ where
 
 /// Returns the root's metadata, rejecting anything that isn't a directory. A link to a
 /// directory is rejected too, because walks never follow links.
-pub(super) fn root_metadata(root: &Path) -> io::Result<Metadata> {
+fn root_metadata(root: &Path) -> io::Result<Metadata> {
     let metadata = fs::symlink_metadata(root)?;
     if metadata.is_dir() {
         Ok(metadata)
@@ -104,10 +105,7 @@ impl<F> State<F> {
     }
 
     fn error(&self, path: PathBuf, error: io::Error) {
-        self.report().errors.push(WalkError {
-            path: Some(path),
-            error,
-        });
+        self.report().errors.push(WalkError { path, error });
     }
 }
 

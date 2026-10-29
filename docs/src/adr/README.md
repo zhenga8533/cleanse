@@ -12,3 +12,4 @@ record supersedes an earlier one instead.
 | [0004](0004-risk-tiers-and-disposal.md) | Risk tiers and tiered disposal | Accepted |
 | [0005](0005-no-network.md) | No telemetry and no network in the engine | Accepted |
 | [0006](0006-license.md) | Dual MIT and Apache-2.0 license | Accepted |
+| [0007](0007-directory-walker.md) | A std-based parallel directory walker | Accepted |
