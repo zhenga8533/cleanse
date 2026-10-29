@@ -12,7 +12,9 @@ use std::path::Path;
 use std::ptr;
 
 use cleanse_model::{EntryKind, FileIdentity};
-use windows_sys::Win32::Foundation::{ERROR_CLOUD_FILE_NOT_UNDER_SYNC_ROOT, HANDLE};
+use windows_sys::Win32::Foundation::{
+    ERROR_CLOUD_FILE_NOT_UNDER_SYNC_ROOT, ERROR_INVALID_FUNCTION, HANDLE,
+};
 use windows_sys::Win32::Security::{
     GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation,
 };
@@ -77,9 +79,10 @@ pub(crate) fn inspect(path: &Path) -> io::Result<FileFacts> {
 /// cloud reparse tag doesn't work: the cloud filter disguises placeholders as plain files to
 /// ordinary processes, hiding the tag.
 fn in_sync_root(file: &File) -> io::Result<bool> {
-    // `HRESULT_FROM_WIN32`, which the API wraps its Win32 errors in.
-    const NOT_UNDER_SYNC_ROOT: i32 =
-        (0x8007_0000_u32 | ERROR_CLOUD_FILE_NOT_UNDER_SYNC_ROOT).cast_signed();
+    const NOT_UNDER_SYNC_ROOT: i32 = hresult_from_win32(ERROR_CLOUD_FILE_NOT_UNDER_SYNC_ROOT);
+    // What a volume without the Cloud Files filter answers, as on GitHub's Windows Server
+    // runners. Nothing on such a volume can be in a sync root.
+    const NO_CLOUD_FILTER: i32 = hresult_from_win32(ERROR_INVALID_FUNCTION);
 
     let mut info = CF_SYNC_ROOT_BASIC_INFO::default();
     let mut written = 0;
@@ -96,9 +99,14 @@ fn in_sync_root(file: &File) -> io::Result<bool> {
     };
     match result {
         0.. => Ok(true),
-        NOT_UNDER_SYNC_ROOT => Ok(false),
+        NOT_UNDER_SYNC_ROOT | NO_CLOUD_FILTER => Ok(false),
         error => Err(io::Error::from_raw_os_error(error)),
     }
+}
+
+/// `HRESULT_FROM_WIN32`: how the Cloud Files API reports Win32 errors.
+const fn hresult_from_win32(error: u32) -> i32 {
+    (0x8007_0000 | error).cast_signed()
 }
 
 /// A struct that `GetFileInformationByHandleEx` fills in, paired with the information class
