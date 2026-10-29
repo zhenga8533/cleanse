@@ -1,0 +1,67 @@
+[[rule]]
+id = "cmake.build_dir"
+name = "CMake build directories"
+category = "build_output"
+risk = "regenerable"
+explain = "A CMake build tree, identified by its CMakeCache.txt. Configuring and building again recreates it."
+regenerate = "Configure and build again, for example cmake -B build and cmake --build build."
+
+[rule.match]
+kind = "project_artifact"
+names = ["build", "out", "cmake-build-*"]
+contains = ["CMakeCache.txt"]
+
+[[rule.test]]
+tree = [
+    "lib/CMakeLists.txt",
+    "lib/build/CMakeCache.txt",
+    "lib/build/lib.o",
+    "lib/cmake-build-debug/CMakeCache.txt",
+]
+matches = ["lib/build", "lib/cmake-build-debug"]
+
+[[rule.test]]
+tree = ["lib/build/output.bin"]
+matches = []
+
+[[rule]]
+id = "zig.build"
+name = "Zig build output"
+category = "build_output"
+risk = "regenerable"
+explain = "Zig's build cache and install output. Building again recreates them."
+regenerate = "zig build"
+
+[rule.match]
+kind = "project_artifact"
+names = [".zig-cache", "zig-cache", "zig-out"]
+markers = ["build.zig"]
+
+[[rule.test]]
+tree = ["z/build.zig", "z/.zig-cache/h/x", "z/zig-out/bin/app"]
+matches = ["z/.zig-cache", "z/zig-out"]
+
+[[rule.test]]
+tree = ["z/zig-out/bin/app"]
+matches = []
+
+[[rule]]
+id = "swift.build"
+name = "Swift package build output"
+category = "build_output"
+risk = "regenerable"
+explain = "Build output from Swift Package Manager. Building again recreates it."
+regenerate = "swift build"
+
+[rule.match]
+kind = "project_artifact"
+names = [".build"]
+markers = ["Package.swift"]
+
+[[rule.test]]
+tree = ["pkg/Package.swift", "pkg/.build/debug/app"]
+matches = ["pkg/.build"]
+
+[[rule.test]]
+tree = ["pkg/.build/debug/app"]
+matches = []

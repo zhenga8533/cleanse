@@ -105,6 +105,9 @@ impl Candidate {
 pub enum Evidence {
     /// A file next to the item that marks the kind of project, like `Cargo.toml`.
     Marker { file: String },
+    /// A file inside the item that identifies what it is, like a virtual environment's
+    /// `pyvenv.cfg`.
+    Contains { file: String },
     /// A `CACHEDIR.TAG` file inside, the standard way tools mark regenerable caches.
     CacheDirTag,
     /// The project's Git configuration ignores the item.
@@ -115,6 +118,7 @@ impl fmt::Display for Evidence {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Marker { file } => write!(f, "Next to {file}"),
+            Self::Contains { file } => write!(f, "Contains {file}"),
             Self::CacheDirTag => f.write_str("Contains CACHEDIR.TAG, the standard cache marker"),
             Self::IgnoredByGit => f.write_str("Ignored by Git"),
         }

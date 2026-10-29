@@ -1,0 +1,196 @@
+[[rule]]
+id = "npm.cache"
+name = "npm download cache"
+category = "package_caches"
+risk = "regenerable"
+explain = "Packages npm has downloaded before. npm downloads them again when an install needs them."
+regenerate = "npm downloads packages again during the next install."
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "windows", base = "data_local", path = "npm-cache/_cacache" },
+    { os = "macos", base = "home", path = ".npm/_cacache" },
+    { os = "linux", base = "home", path = ".npm/_cacache" },
+]
+
+[[rule.test]]
+os = "windows"
+tree = ["data_local/npm-cache/_cacache/index-v5/00/x"]
+matches = ["data_local/npm-cache/_cacache"]
+
+[[rule.test]]
+os = "macos"
+tree = ["home/.npm/_cacache/index-v5/00/x"]
+matches = ["home/.npm/_cacache"]
+
+[[rule.test]]
+os = "linux"
+tree = ["home/.npm/_cacache/index-v5/00/x"]
+matches = ["home/.npm/_cacache"]
+
+[[rule.test]]
+# The same name anywhere else isn't npm's cache.
+tree = ["projects/.npm/_cacache/x"]
+matches = []
+
+[[rule]]
+id = "pip.cache"
+name = "pip download cache"
+category = "package_caches"
+risk = "regenerable"
+explain = "Packages pip has downloaded before. pip downloads them again when an install needs them."
+regenerate = "pip downloads packages again during the next install."
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "windows", base = "data_local", path = "pip/Cache" },
+    { os = "macos", base = "cache", path = "pip" },
+    { os = "linux", base = "cache", path = "pip" },
+]
+
+[[rule.test]]
+os = "windows"
+tree = ["data_local/pip/Cache/http-v2/x"]
+matches = ["data_local/pip/Cache"]
+
+[[rule.test]]
+os = "macos"
+tree = ["cache/pip/http-v2/x"]
+matches = ["cache/pip"]
+
+[[rule.test]]
+os = "linux"
+tree = ["cache/pip/http-v2/x"]
+matches = ["cache/pip"]
+
+[[rule.test]]
+tree = ["projects/pip/x"]
+matches = []
+
+[[rule]]
+id = "yarn.cache"
+name = "Yarn download cache"
+category = "package_caches"
+risk = "regenerable"
+explain = "Packages Yarn 1 has downloaded before. Yarn downloads them again when an install needs them."
+regenerate = "Yarn downloads packages again during the next install."
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "windows", base = "data_local", path = "Yarn/Cache" },
+    { os = "macos", base = "cache", path = "Yarn" },
+    { os = "linux", base = "cache", path = "yarn" },
+]
+
+[[rule.test]]
+os = "windows"
+tree = ["data_local/Yarn/Cache/v6/x"]
+matches = ["data_local/Yarn/Cache"]
+
+[[rule.test]]
+os = "macos"
+tree = ["cache/Yarn/v6/x"]
+matches = ["cache/Yarn"]
+
+[[rule.test]]
+os = "linux"
+tree = ["cache/yarn/v6/x"]
+matches = ["cache/yarn"]
+
+[[rule.test]]
+tree = ["projects/yarn/x"]
+matches = []
+
+[[rule]]
+id = "cargo.registry"
+name = "Cargo download cache"
+category = "package_caches"
+risk = "regenerable"
+explain = "Crates Cargo has downloaded, and their unpacked sources. Cargo downloads them again when a build needs them."
+regenerate = "Cargo downloads crates again during the next build."
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "windows", base = "home", path = ".cargo/registry/cache" },
+    { os = "windows", base = "home", path = ".cargo/registry/src" },
+    { os = "macos", base = "home", path = ".cargo/registry/cache" },
+    { os = "macos", base = "home", path = ".cargo/registry/src" },
+    { os = "linux", base = "home", path = ".cargo/registry/cache" },
+    { os = "linux", base = "home", path = ".cargo/registry/src" },
+]
+
+[[rule.test]]
+tree = [
+    "home/.cargo/registry/cache/index.crates.io/serde.crate",
+    "home/.cargo/registry/src/index.crates.io/serde/lib.rs",
+    "home/.cargo/bin/cargo-nextest",
+]
+matches = ["home/.cargo/registry/cache", "home/.cargo/registry/src"]
+
+[[rule.test]]
+# Installed tools and the registry index aren't part of the download cache.
+tree = ["home/.cargo/bin/cargo-nextest", "home/.cargo/registry/index/x"]
+matches = []
+
+[[rule]]
+id = "nuget.http_cache"
+name = "NuGet HTTP cache"
+category = "package_caches"
+risk = "regenerable"
+explain = "Package metadata and downloads NuGet has cached. NuGet fetches them again when a restore needs them."
+regenerate = "NuGet fetches packages again during the next restore."
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "windows", base = "data_local", path = "NuGet/v3-cache" },
+    { os = "macos", base = "home", path = ".local/share/NuGet/v3-cache" },
+    { os = "linux", base = "home", path = ".local/share/NuGet/v3-cache" },
+]
+
+[[rule.test]]
+os = "windows"
+tree = ["data_local/NuGet/v3-cache/x/list.dat"]
+matches = ["data_local/NuGet/v3-cache"]
+
+[[rule.test]]
+os = "linux"
+tree = ["home/.local/share/NuGet/v3-cache/x/list.dat"]
+matches = ["home/.local/share/NuGet/v3-cache"]
+
+[[rule.test]]
+tree = ["projects/NuGet/v3-cache/x"]
+matches = []
+
+[[rule]]
+id = "homebrew.cache"
+name = "Homebrew download cache"
+category = "package_caches"
+risk = "regenerable"
+explain = "Downloads Homebrew keeps after installing. Homebrew downloads them again if it needs them."
+regenerate = "Homebrew downloads them again when needed."
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "macos", base = "cache", path = "Homebrew" },
+    { os = "linux", base = "cache", path = "Homebrew" },
+]
+
+[[rule.test]]
+os = "macos"
+tree = ["cache/Homebrew/downloads/x.tar.gz"]
+matches = ["cache/Homebrew"]
+
+[[rule.test]]
+os = "linux"
+tree = ["cache/Homebrew/downloads/x.tar.gz"]
+matches = ["cache/Homebrew"]
+
+[[rule.test]]
+tree = ["projects/Homebrew/x"]
+matches = []

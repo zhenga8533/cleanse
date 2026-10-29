@@ -1,0 +1,56 @@
+[[rule]]
+id = "javascript.node_modules"
+name = "Node.js dependencies"
+category = "dependencies"
+risk = "regenerable"
+explain = "Packages installed by npm, pnpm, Yarn, or Bun. Installing again recreates them from package.json and the lockfile."
+regenerate = "Run your package manager's install command, such as npm install."
+
+[rule.match]
+kind = "project_artifact"
+names = ["node_modules"]
+markers = ["package.json"]
+
+[[rule.test]]
+tree = ["app/package.json", "app/node_modules/left-pad/index.js"]
+matches = ["app/node_modules"]
+
+[[rule.test]]
+# Nested node_modules belong to the outer match rather than matching separately.
+tree = [
+    "app/package.json",
+    "app/node_modules/a/package.json",
+    "app/node_modules/a/node_modules/b/index.js",
+]
+matches = ["app/node_modules"]
+
+[[rule.test]]
+# Without a package.json beside it, a node_modules folder isn't a project's.
+tree = ["tool/node_modules/x/index.js"]
+matches = []
+
+[[rule]]
+id = "javascript.framework_build"
+name = "JavaScript framework build output"
+category = "build_output"
+risk = "regenerable"
+explain = "Build output and caches from Next.js, Nuxt, SvelteKit, or Parcel. The next build or dev server run recreates them."
+regenerate = "Run the project's build or dev command."
+
+[rule.match]
+kind = "project_artifact"
+names = [".next", ".nuxt", ".svelte-kit", ".parcel-cache"]
+markers = ["package.json"]
+
+[[rule.test]]
+tree = [
+    "web/package.json",
+    "web/.next/cache/webpack/x",
+    "site/package.json",
+    "site/.svelte-kit/output/x",
+]
+matches = ["site/.svelte-kit", "web/.next"]
+
+[[rule.test]]
+tree = ["web/.next/cache/x"]
+matches = []

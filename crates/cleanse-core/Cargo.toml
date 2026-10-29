@@ -10,6 +10,8 @@ license.workspace = true
 cleanse-model.workspace = true
 cleanse-platform.workspace = true
 rayon.workspace = true
+serde.workspace = true
+toml.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

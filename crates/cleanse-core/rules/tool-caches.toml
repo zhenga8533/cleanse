@@ -1,0 +1,34 @@
+[[rule]]
+id = "go.build_cache"
+name = "Go build cache"
+category = "tool_caches"
+risk = "regenerable"
+explain = "Go's cache of compiled packages and test results. Go refills it as it builds, so the next builds are slower."
+regenerate = "Go refills it during the next build."
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "windows", base = "data_local", path = "go-build" },
+    { os = "macos", base = "cache", path = "go-build" },
+    { os = "linux", base = "cache", path = "go-build" },
+]
+
+[[rule.test]]
+os = "windows"
+tree = ["data_local/go-build/00/x-d"]
+matches = ["data_local/go-build"]
+
+[[rule.test]]
+os = "macos"
+tree = ["cache/go-build/00/x-d"]
+matches = ["cache/go-build"]
+
+[[rule.test]]
+os = "linux"
+tree = ["cache/go-build/00/x-d"]
+matches = ["cache/go-build"]
+
+[[rule.test]]
+tree = ["projects/go-build/x"]
+matches = []

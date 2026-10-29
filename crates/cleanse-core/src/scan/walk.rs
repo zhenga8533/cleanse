@@ -16,6 +16,13 @@ pub struct Entry<'a> {
     pub len: u64,
 }
 
+/// Whether a walk should enter the directory it just visited. Ignored for anything else.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Descend {
+    Yes,
+    No,
+}
+
 #[derive(Debug, Default)]
 pub struct WalkReport {
     /// Entries and directories that couldn't be read. Everything above them is incomplete.
@@ -32,14 +39,15 @@ pub struct WalkError {
 }
 
 /// Walks everything below `root` using `std::fs::read_dir` on a rayon thread pool, calling
-/// `visit` for each entry from many threads at once.
+/// `visit` for each entry from many threads at once. A directory is entered only if `visit`
+/// returns [`Descend::Yes`] for it.
 ///
 /// Links are reported but never followed, directories on other filesystems are reported but
 /// not entered, and unreadable entries are collected in the report instead of ending the walk.
 /// ADR 0007 explains why this isn't built on a walker crate.
 pub fn walk<F>(root: &Path, visit: F) -> io::Result<WalkReport>
 where
-    F: Fn(&Entry<'_>) + Sync,
+    F: Fn(&Entry<'_>) -> Descend + Sync,
 {
     let state = State {
         visit,
@@ -109,7 +117,7 @@ impl Filesystem {
 
 fn read_dir<'scope, F>(scope: &rayon::Scope<'scope>, dir: PathBuf, state: &'scope State<F>)
 where
-    F: Fn(&Entry<'_>) + Sync,
+    F: Fn(&Entry<'_>) -> Descend + Sync,
 {
     let entries = match fs::read_dir(&dir) {
         Ok(entries) => entries,
@@ -134,12 +142,12 @@ where
             }
         };
         let kind = EntryKind::from(metadata.file_type());
-        (state.visit)(&Entry {
+        let descend = (state.visit)(&Entry {
             path: &path,
             kind,
             len: metadata.len(),
         });
-        if kind == EntryKind::Dir {
+        if kind == EntryKind::Dir && descend == Descend::Yes {
             if Filesystem::of(&metadata) == state.filesystem {
                 scope.spawn(move |scope| read_dir(scope, path, state));
             } else {

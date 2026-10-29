@@ -1,0 +1,75 @@
+[[rule]]
+id = "python.venv"
+name = "Python virtual environments"
+category = "dependencies"
+risk = "regenerable"
+explain = "A virtual environment holding the project's installed packages. It can be recreated from the project's dependency list."
+regenerate = "Recreate it with your tool, such as uv sync, or python -m venv .venv followed by pip install -r requirements.txt."
+
+[rule.match]
+kind = "project_artifact"
+names = [".venv", "venv"]
+markers = [
+    "pyproject.toml",
+    "requirements.txt",
+    "setup.py",
+    "setup.cfg",
+    "Pipfile",
+    "poetry.lock",
+    "uv.lock",
+]
+contains = ["pyvenv.cfg"]
+
+[[rule.test]]
+tree = ["proj/pyproject.toml", "proj/.venv/pyvenv.cfg", "proj/.venv/lib/site.py"]
+matches = ["proj/.venv"]
+
+[[rule.test]]
+# Without a dependency list, the environment may be the only record of what was installed.
+tree = ["scratch/.venv/pyvenv.cfg"]
+matches = []
+
+[[rule.test]]
+# A folder named venv isn't a virtual environment unless it has pyvenv.cfg.
+tree = ["proj/requirements.txt", "proj/venv/notes.txt"]
+matches = []
+
+[[rule]]
+id = "python.bytecode"
+name = "Python bytecode caches"
+category = "build_output"
+risk = "safe"
+explain = "Compiled bytecode. Python writes it again the next time the code runs."
+
+[rule.match]
+kind = "project_artifact"
+names = ["__pycache__"]
+markers = ["*.py"]
+
+[[rule.test]]
+tree = ["pkg/module.py", "pkg/__pycache__/module.cpython-313.pyc"]
+matches = ["pkg/__pycache__"]
+
+[[rule.test]]
+tree = ["pkg/__pycache__/module.cpython-313.pyc"]
+matches = []
+
+[[rule]]
+id = "python.tool_caches"
+name = "Python tool caches"
+category = "build_output"
+risk = "safe"
+explain = "Caches from pytest, mypy, or Ruff, marked with CACHEDIR.TAG. The tools rebuild them on their next run."
+
+[rule.match]
+kind = "project_artifact"
+names = [".pytest_cache", ".mypy_cache", ".ruff_cache"]
+contains = ["CACHEDIR.TAG"]
+
+[[rule.test]]
+tree = ["proj/.ruff_cache/CACHEDIR.TAG", "proj/.ruff_cache/0.9.0/x"]
+matches = ["proj/.ruff_cache"]
+
+[[rule.test]]
+tree = ["proj/.mypy_cache/3.13/x.json"]
+matches = []
