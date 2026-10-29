@@ -24,3 +24,31 @@ matches = []
 [[rule.test]]
 tree = ["Lib/obj/project.assets.json"]
 matches = []
+
+[[rule]]
+id = "dotnet.bin"
+name = ".NET build output"
+category = "build_output"
+risk = "regenerable"
+explain = "Compiled output of a .NET project, which the project's Git ignore rules exclude. Building again recreates it."
+regenerate = "dotnet build"
+
+[rule.match]
+kind = "project_artifact"
+names = ["bin"]
+markers = ["*.csproj", "*.fsproj", "*.vbproj"]
+require_git_ignored = true
+
+[[rule.test]]
+git = true
+tree = ["App/App.csproj", "App/bin/Debug/App.dll"]
+files = { ".gitignore" = "bin/\nobj/\n" }
+tracked = ["App/App.csproj"]
+matches = ["App/bin"]
+
+[[rule.test]]
+# Some projects keep committed tools or scripts in bin.
+git = true
+tree = ["App/App.csproj", "App/bin/tool.exe"]
+tracked = ["App/App.csproj", "App/bin/tool.exe"]
+matches = []

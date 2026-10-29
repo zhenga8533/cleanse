@@ -13,3 +13,4 @@ record supersedes an earlier one instead.
 | [0005](0005-no-network.md) | No telemetry and no network in the engine | Accepted |
 | [0006](0006-license.md) | Dual MIT and Apache-2.0 license | Accepted |
 | [0007](0007-directory-walker.md) | A std-based parallel directory walker | Accepted |
+| [0008](0008-read-git-with-gix.md) | Read Git repositories with gix, never by running git | Accepted |
