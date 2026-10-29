@@ -5,7 +5,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use super::{EntryKind, WalkReport, walk};
+use cleanse_model::EntryKind;
+
+use super::{WalkReport, walk};
 
 /// Walks `root`, returning every entry relative to it, sorted. Directory sizes are zeroed
 /// because they differ between filesystems.

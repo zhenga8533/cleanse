@@ -5,4 +5,4 @@ mod walk;
 #[cfg(test)]
 mod tests;
 
-pub use walk::{Entry, EntryKind, WalkError, WalkReport, walk};
+pub use walk::{Entry, WalkError, WalkReport, walk};

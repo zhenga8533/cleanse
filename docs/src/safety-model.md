@@ -24,7 +24,10 @@ principles:
 ## Safety gates
 
 Every candidate passes these gates when the plan is built and again immediately before it is
-executed. A gate can allow an item, downgrade it to a riskier tier with a warning, or block it.
+executed. A gate can allow an item, add a warning (the item keeps its tier but isn't selected
+by default), or block it (the item becomes Protected). Only uncommitted changes, recent project
+activity, and data shared through hard links or clones are warnings; every other concern
+blocks, including any new kind of concern until it's deliberately classified.
 
 1. **Protected policy.** System directories, volume roots, the home folder and its top-level
    folders, SSH and GPG keys, credential stores, `.git` internals, browser profiles (only their
