@@ -14,3 +14,4 @@ disallowed-methods = [
 ]
 
 allow-unwrap-in-tests = true
+doc-valid-idents = ["OneDrive", "ReFS", ".."]
