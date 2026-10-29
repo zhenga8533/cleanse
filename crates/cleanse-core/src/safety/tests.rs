@@ -168,6 +168,14 @@ fn drive_roots_bundles_and_drive_system_folders_are_protected() {
         policy.check(&fake_path(&["repo", ".git", "lfs", "tmp"]), None, &[]),
         Some("a Git repository's internal data")
     );
+    assert_eq!(
+        policy.check(
+            &fake_path(&["apps", "Chat", "resources", "app", "node_modules"]),
+            None,
+            &[]
+        ),
+        Some("an installed app")
+    );
 }
 
 #[test]
@@ -513,6 +521,9 @@ fn canaries_are_never_removable() {
     canary(".vscode/extensions/ms-python/node_modules/x/index.js");
     canary("AppData/Local/Programs/App/resources/app/package.json");
     canary("AppData/Local/Programs/App/resources/app/node_modules/x/index.js");
+    // The same layout unpacked somewhere no OS reserves for apps, as Linux apps often are.
+    canary("apps/Chat/resources/app/package.json");
+    canary("apps/Chat/resources/app/node_modules/x/index.js");
     canary("projects/vm/node_modules/disks/ubuntu.vhdx");
     canary("projects/site/dist/.env");
     canary("projects/committed/dist/app.js");
@@ -556,5 +567,5 @@ fn canaries_are_never_removable() {
             );
         }
     }
-    assert_eq!(candidates.len(), 6, "{candidates:#?}");
+    assert_eq!(candidates.len(), 7, "{candidates:#?}");
 }

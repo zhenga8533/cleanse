@@ -45,8 +45,14 @@ const HOME_SUBTREES: &[(&str, &str)] = &[
 /// Never cleaned inside: a bundle is one unit, and its contents aren't build output.
 const BUNDLE_EXTENSIONS: &[&str] = &["app", "photoslibrary", "xcarchive"];
 
-/// Windows system folders that can appear at the root of any drive.
+/// Windows system folders that can appear at the root of any drive, including NTFS drives
+/// mounted on other systems.
 const DRIVE_SYSTEM_FOLDERS: &[&str] = &["$recycle.bin", "system volume information"];
+
+/// Electron apps keep their code in `resources/app` (`Contents/Resources/app` on macOS), with a
+/// `package.json` and `node_modules` that look like a project's. Apps can be installed or
+/// unpacked anywhere, especially on Linux, so the layout is recognized wherever it appears.
+const ELECTRON_APP: [&str; 2] = ["resources", "app"];
 
 /// Locations no rule can override (the safety model's first gate).
 #[derive(Debug)]
@@ -110,11 +116,18 @@ impl ProtectedPolicy {
             return Some("a drive's root folder");
         }
         let path_key = key(path);
-        if path_key
-            .iter()
-            .any(|part| DRIVE_SYSTEM_FOLDERS.contains(&part.as_str()))
-        {
+        if path_key.iter().any(|part| {
+            DRIVE_SYSTEM_FOLDERS
+                .iter()
+                .any(|folder| part.eq_ignore_ascii_case(folder))
+        }) {
             return Some("Windows system files");
+        }
+        if path_key.windows(2).any(|pair| {
+            pair[0].eq_ignore_ascii_case(ELECTRON_APP[0])
+                && pair[1].eq_ignore_ascii_case(ELECTRON_APP[1])
+        }) {
+            return Some("an installed app");
         }
         if path_key.iter().any(|part| is_bundle(part)) {
             return Some("the inside of an app bundle");
