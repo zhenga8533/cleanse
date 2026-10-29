@@ -1,3 +1,5 @@
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 /// What kind of thing an item is, for grouping results. Every rule declares one.
@@ -28,4 +30,23 @@ pub enum Category {
     Downloads,
     /// Unusually large files.
     LargeFiles,
+}
+
+impl fmt::Display for Category {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Dependencies => "Dependencies",
+            Self::BuildOutput => "Build output",
+            Self::PackageCaches => "Package caches",
+            Self::ToolCaches => "Tool caches",
+            Self::AiAgents => "AI agents",
+            Self::AiModels => "AI models",
+            Self::Git => "Git",
+            Self::Temp => "Temporary files",
+            Self::Logs => "Logs",
+            Self::BrowserCaches => "Browser caches",
+            Self::Downloads => "Downloads",
+            Self::LargeFiles => "Large files",
+        })
+    }
 }

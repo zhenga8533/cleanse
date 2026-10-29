@@ -1,3 +1,5 @@
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 /// How much is at stake if an item is removed, ordered from least to most.
@@ -23,6 +25,17 @@ impl Risk {
             Self::Review => Some(Disposal::Quarantine),
             Self::Protected => None,
         }
+    }
+}
+
+impl fmt::Display for Risk {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Safe => "Safe",
+            Self::Regenerable => "Regenerable",
+            Self::Review => "Review",
+            Self::Protected => "Protected",
+        })
     }
 }
 

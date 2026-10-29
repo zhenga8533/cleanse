@@ -11,6 +11,10 @@ cleanse-core.workspace = true
 cleanse-exec.workspace = true
 cleanse-model.workspace = true
 cleanse-platform.workspace = true
+rayon.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

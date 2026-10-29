@@ -220,6 +220,10 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "cleanse-engine",
+ "cleanse-model",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -245,6 +249,8 @@ dependencies = [
  "cleanse-exec",
  "cleanse-model",
  "cleanse-platform",
+ "rayon",
+ "tempfile",
 ]
 
 [[package]]

@@ -7,8 +7,21 @@ mind. It looks for regenerable build output, package-manager caches, AI coding a
 and everyday junk; tells you why each item is safe to remove and how it comes back; and never
 removes anything you haven't approved.
 
-> **Status: pre-alpha.** This repository holds the project foundation. Nothing has been
-> released yet, and the first release (v0.1) will be read-only.
+> **Status: pre-alpha.** The read-only preview works: `cleanse scan` and `cleanse explain`
+> find and assess what could be removed, and nothing is ever removed. Cleanup comes in v0.2.
+> There are no release binaries yet; build from source.
+
+## Try it
+
+```sh
+cleanse scan ~/code               # what could be removed, grouped by rule, largest first
+cleanse scan --show-protected     # also what's kept and why (defaults to your home folder)
+cleanse explain ~/code/app/node_modules
+cleanse rules                     # every rule; `cleanse rules show <id>` for one
+cleanse doctor                    # folders, rules, and capabilities on this system
+```
+
+Add `--json` to `scan` or `explain` for machine-readable output.
 
 ## What makes it different
 
@@ -73,7 +86,7 @@ Studio Build Tools with the "Desktop development with C++" workload. Then, in th
 
 ```sh
 rustup toolchain install          # installs the version pinned in rust-toolchain.toml
-cargo run --bin cleanse -- --help
+cargo build --release             # the binary is target/release/cleanse
 cargo xtask ci                    # runs the same checks as CI
 ```
 
