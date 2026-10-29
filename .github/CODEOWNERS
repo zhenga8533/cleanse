@@ -4,5 +4,5 @@
 # maintainer's review as more owners are added for the rest of the tree.
 /crates/cleanse-core/src/safety/ @zhenga8533
 /crates/cleanse-exec/ @zhenga8533
-/rules/agents/ @zhenga8533
+/crates/cleanse-core/rules/ai-agents.toml @zhenga8533
 /apps/elevate/ @zhenga8533

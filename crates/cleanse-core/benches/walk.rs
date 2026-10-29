@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use cleanse_core::scan::{Entry, walk};
+use cleanse_core::scan::{Descend, Entry, walk};
 use cleanse_model::EntryKind;
 
 #[derive(Default)]
@@ -68,7 +68,10 @@ impl Counts {
 fn run_once(root: &Path) -> io::Result<(Duration, Counts)> {
     let totals = Totals::default();
     let start = Instant::now();
-    let report = walk(root, |entry| totals.add(entry))?;
+    let report = walk(root, |entry| {
+        totals.add(entry);
+        Descend::Yes
+    })?;
     let elapsed = start.elapsed();
     let counts = Counts {
         files: totals.files.into_inner(),

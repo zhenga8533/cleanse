@@ -1,0 +1,20 @@
+[[rule]]
+id = "rust.target"
+name = "Rust build output"
+category = "build_output"
+risk = "regenerable"
+explain = "Compiled output from Cargo. Building again recreates it."
+regenerate = "cargo build"
+
+[rule.match]
+kind = "project_artifact"
+names = ["target"]
+markers = ["Cargo.toml"]
+
+[[rule.test]]
+tree = ["crate/Cargo.toml", "crate/target/CACHEDIR.TAG", "crate/target/debug/app"]
+matches = ["crate/target"]
+
+[[rule.test]]
+tree = ["site/target/index.html", "java/pom.xml", "java/target/app.jar"]
+matches = []

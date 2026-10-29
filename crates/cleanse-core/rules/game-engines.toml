@@ -1,0 +1,42 @@
+[[rule]]
+id = "godot.import_cache"
+name = "Godot import cache"
+category = "build_output"
+risk = "regenerable"
+explain = "Godot's cache of imported assets. The editor imports them again the next time the project opens."
+regenerate = "Open the project in Godot."
+
+[rule.match]
+kind = "project_artifact"
+names = [".godot"]
+markers = ["project.godot"]
+
+[[rule.test]]
+tree = ["game/project.godot", "game/.godot/imported/x"]
+matches = ["game/.godot"]
+
+[[rule.test]]
+tree = ["game/.godot/imported/x"]
+matches = []
+
+[[rule]]
+id = "unity.library"
+name = "Unity import cache"
+category = "build_output"
+risk = "regenerable"
+explain = "Unity's Library folder of imported assets. Unity rebuilds it when the project opens, which can take a while for large projects."
+regenerate = "Open the project in Unity."
+
+[rule.match]
+kind = "project_artifact"
+names = ["Library"]
+markers = ["ProjectSettings/ProjectVersion.txt"]
+
+[[rule.test]]
+tree = ["Game/ProjectSettings/ProjectVersion.txt", "Game/Library/ArtifactDB"]
+matches = ["Game/Library"]
+
+[[rule.test]]
+# macOS has a Library folder in every home directory; it's not a Unity project's.
+tree = ["home/Library/Caches/x"]
+matches = []

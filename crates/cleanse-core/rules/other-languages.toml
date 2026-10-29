@@ -1,0 +1,125 @@
+[[rule]]
+id = "dart.tool"
+name = "Dart tool data"
+category = "build_output"
+risk = "regenerable"
+explain = "Package configuration and build caches for a Dart or Flutter project. Fetching packages again recreates them."
+regenerate = "dart pub get (or flutter pub get)"
+
+[rule.match]
+kind = "project_artifact"
+names = [".dart_tool"]
+markers = ["pubspec.yaml"]
+
+[[rule.test]]
+tree = ["app/pubspec.yaml", "app/.dart_tool/package_config.json"]
+matches = ["app/.dart_tool"]
+
+[[rule.test]]
+tree = ["app/.dart_tool/package_config.json"]
+matches = []
+
+[[rule]]
+id = "elixir.build"
+name = "Elixir build output"
+category = "build_output"
+risk = "regenerable"
+explain = "Compiled output from Mix. Compiling again recreates it."
+regenerate = "mix compile"
+
+[rule.match]
+kind = "project_artifact"
+names = ["_build"]
+markers = ["mix.exs"]
+
+[[rule.test]]
+tree = ["app/mix.exs", "app/_build/dev/lib/app/ebin/x"]
+matches = ["app/_build"]
+
+[[rule.test]]
+tree = ["app/_build/dev/x"]
+matches = []
+
+[[rule]]
+id = "elixir.deps"
+name = "Elixir dependencies"
+category = "dependencies"
+risk = "regenerable"
+explain = "Dependencies fetched by Mix. Fetching them again downloads them."
+regenerate = "mix deps.get"
+
+[rule.match]
+kind = "project_artifact"
+names = ["deps"]
+markers = ["mix.exs"]
+
+[[rule.test]]
+tree = ["app/mix.exs", "app/deps/jason/mix.exs"]
+matches = ["app/deps"]
+
+[[rule.test]]
+tree = ["app/deps/jason/mix.exs"]
+matches = []
+
+[[rule]]
+id = "haskell.stack_work"
+name = "Stack build output"
+category = "build_output"
+risk = "regenerable"
+explain = "Build output from Stack. Building again recreates it."
+regenerate = "stack build"
+
+[rule.match]
+kind = "project_artifact"
+names = [".stack-work"]
+markers = ["stack.yaml"]
+
+[[rule.test]]
+tree = ["app/stack.yaml", "app/.stack-work/dist/x"]
+matches = ["app/.stack-work"]
+
+[[rule.test]]
+tree = ["app/.stack-work/dist/x"]
+matches = []
+
+[[rule]]
+id = "haskell.dist_newstyle"
+name = "Cabal build output"
+category = "build_output"
+risk = "regenerable"
+explain = "Build output from Cabal. Building again recreates it."
+regenerate = "cabal build"
+
+[rule.match]
+kind = "project_artifact"
+names = ["dist-newstyle"]
+markers = ["*.cabal", "cabal.project"]
+
+[[rule.test]]
+tree = ["app/app.cabal", "app/dist-newstyle/build/x"]
+matches = ["app/dist-newstyle"]
+
+[[rule.test]]
+tree = ["app/dist-newstyle/build/x"]
+matches = []
+
+[[rule]]
+id = "terraform.providers"
+name = "Terraform providers and modules"
+category = "dependencies"
+risk = "regenerable"
+explain = "Providers and modules downloaded by terraform init, which downloads them again."
+regenerate = "terraform init"
+
+[rule.match]
+kind = "project_artifact"
+names = [".terraform"]
+markers = ["*.tf"]
+
+[[rule.test]]
+tree = ["infra/main.tf", "infra/.terraform/providers/x"]
+matches = ["infra/.terraform"]
+
+[[rule.test]]
+tree = ["infra/.terraform/providers/x"]
+matches = []

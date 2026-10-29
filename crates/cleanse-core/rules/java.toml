@@ -1,0 +1,20 @@
+[[rule]]
+id = "java.maven_target"
+name = "Maven build output"
+category = "build_output"
+risk = "regenerable"
+explain = "Compiled classes and packages from Maven. Building again recreates them."
+regenerate = "mvn package"
+
+[rule.match]
+kind = "project_artifact"
+names = ["target"]
+markers = ["pom.xml"]
+
+[[rule.test]]
+tree = ["app/pom.xml", "app/target/classes/App.class", "app/target/app.jar"]
+matches = ["app/target"]
+
+[[rule.test]]
+tree = ["app/target/app.jar"]
+matches = []

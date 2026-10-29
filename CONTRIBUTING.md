@@ -84,16 +84,23 @@ The reasoning is in the [decision records](docs/src/adr/README.md).
 ## Changes that need extra care
 
 Safety checks (`crates/cleanse-core/src/safety/`), plan execution (`crates/cleanse-exec/`), AI
-agent rules (`rules/agents/`), and the elevated helper (`apps/elevate/`) always need a
-maintainer's review. In those PRs, describe what could go wrong and how the change prevents it,
+agent rules (`crates/cleanse-core/rules/ai-agents.toml`), and the elevated helper
+(`apps/elevate/`) always need a maintainer's review. In those PRs, describe what could go wrong and how the change prevents it,
 and add a test that would have caught the failure.
 
 ## Adding a rule
 
-The rule format lands with the first release (M1). Each rule will be a TOML file under
-`rules/<category>/` that explains what it matches and how the files come back, with at least
-one positive and one negative fixture. No Rust required. The design is in
-[docs/src/rules.md](docs/src/rules.md).
+Rules are TOML files in `crates/cleanse-core/rules/`, grouped by ecosystem. No Rust required:
+
+1. Add a `[[rule]]` to the matching file, or create a new file and add it to the `BUILTIN`
+   list in `crates/cleanse-core/src/rules.rs` (a test fails if you forget).
+2. Explain what it matches and how it comes back, and require real evidence: a marker file
+   next to the directory, or a file inside it. A directory name alone isn't enough.
+3. Add at least one `[[rule.test]]` that matches and one that doesn't, ideally the lookalike
+   most likely to be mistaken for it.
+4. Run `cargo nextest run -p cleanse-core rules`.
+
+The format and every field are described in [docs/src/rules.md](docs/src/rules.md).
 
 ## License
 

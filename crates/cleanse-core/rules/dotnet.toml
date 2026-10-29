@@ -1,0 +1,26 @@
+[[rule]]
+id = "dotnet.obj"
+name = ".NET intermediate build output"
+category = "build_output"
+risk = "regenerable"
+explain = "Intermediate files from building a .NET project, identified by project.assets.json. Building again recreates them."
+regenerate = "dotnet build"
+
+[rule.match]
+kind = "project_artifact"
+names = ["obj"]
+markers = ["*.csproj", "*.fsproj", "*.vbproj"]
+contains = ["project.assets.json"]
+
+[[rule.test]]
+tree = ["App/App.csproj", "App/obj/project.assets.json", "App/obj/Debug/App.dll"]
+matches = ["App/obj"]
+
+[[rule.test]]
+# Without project.assets.json, an obj folder could be anything.
+tree = ["App/App.csproj", "App/obj/notes.txt"]
+matches = []
+
+[[rule.test]]
+tree = ["Lib/obj/project.assets.json"]
+matches = []

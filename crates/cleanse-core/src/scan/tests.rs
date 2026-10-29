@@ -7,11 +7,19 @@ use std::sync::Mutex;
 
 use cleanse_model::EntryKind;
 
-use super::{WalkReport, walk};
+use super::{Descend, WalkReport, walk};
 
 /// Walks `root`, returning every entry relative to it, sorted. Directory sizes are zeroed
 /// because they differ between filesystems.
 fn collect(root: &Path) -> (Vec<(PathBuf, EntryKind, u64)>, WalkReport) {
+    collect_pruning(root, |_| false)
+}
+
+/// Like [`collect`], but doesn't enter directories for which `prune` returns true.
+fn collect_pruning(
+    root: &Path,
+    prune: impl Fn(&Path) -> bool + Sync,
+) -> (Vec<(PathBuf, EntryKind, u64)>, WalkReport) {
     let seen = Mutex::new(Vec::new());
     let report = walk(root, |entry| {
         let relative = entry.path.strip_prefix(root).unwrap().to_path_buf();
@@ -20,7 +28,13 @@ fn collect(root: &Path) -> (Vec<(PathBuf, EntryKind, u64)>, WalkReport) {
         } else {
             entry.len
         };
+        let descend = if prune(&relative) {
+            Descend::No
+        } else {
+            Descend::Yes
+        };
         seen.lock().unwrap().push((relative, entry.kind, len));
+        descend
     })
     .unwrap();
     let mut seen = seen.into_inner().unwrap();
@@ -69,6 +83,25 @@ fn reports_every_entry_below_the_root_including_hidden_ones() {
 }
 
 #[test]
+fn reports_a_pruned_directory_but_not_its_contents() {
+    let root = tempfile::tempdir().unwrap();
+    fs::create_dir_all(root.path().join("app/node_modules/pkg")).unwrap();
+    fs::write(root.path().join("app/node_modules/pkg/index.js"), "x").unwrap();
+    fs::write(root.path().join("app/main.js"), "x").unwrap();
+
+    let (seen, _) = collect_pruning(root.path(), |path| path.ends_with("node_modules"));
+
+    assert_eq!(
+        seen,
+        [
+            entry("app", EntryKind::Dir, 0),
+            entry("app/main.js", EntryKind::File, 1),
+            entry("app/node_modules", EntryKind::Dir, 0),
+        ]
+    );
+}
+
+#[test]
 fn reports_directory_links_without_following_them() {
     let outside = tempfile::tempdir().unwrap();
     fs::write(outside.path().join("secret.txt"), "keep me").unwrap();
@@ -95,7 +128,7 @@ fn rejects_a_root_that_is_not_a_directory() {
     link_dir(&target, &link);
 
     for root in [&file, &link] {
-        let error = walk(root, |_| {}).unwrap_err();
+        let error = walk(root, |_| Descend::Yes).unwrap_err();
         assert_eq!(
             error.kind(),
             io::ErrorKind::NotADirectory,
@@ -103,7 +136,7 @@ fn rejects_a_root_that_is_not_a_directory() {
             root.display()
         );
     }
-    let missing = walk(&dir.path().join("missing"), |_| {}).unwrap_err();
+    let missing = walk(&dir.path().join("missing"), |_| Descend::Yes).unwrap_err();
     assert_eq!(missing.kind(), io::ErrorKind::NotFound);
 }
 
