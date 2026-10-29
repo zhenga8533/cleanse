@@ -21,6 +21,12 @@ confidence-threshold = 0.93
 # The allow-list anticipates planned dependencies; unused entries aren't a problem.
 unused-allowed-license = "allow"
 
+# File-level copyleft: it applies to option-ext's own files, which we use unmodified, and not to
+# Cleanse. It comes in through dirs-sys, which `dirs` uses for known-folder lookup.
+[[licenses.exceptions]]
+crate = "option-ext"
+allow = ["MPL-2.0"]
+
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
