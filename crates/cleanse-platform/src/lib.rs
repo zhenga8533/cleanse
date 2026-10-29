@@ -68,6 +68,25 @@ pub struct FileFacts {
     pub offline: bool,
 }
 
+/// What a directory listing's metadata says about an entry, without extra system calls. Meant
+/// for every entry of a walk; [`Probe::inspect`] is the thorough version for single items.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ListedFacts {
+    /// Bytes allocated on disk. Windows listings don't include allocation, so there it's the
+    /// logical length, or 0 for cloud files whose data isn't on this device.
+    pub on_disk: u64,
+    /// How many hard links point at the same data, counting this one, where the listing says.
+    /// Unix listings do; Windows listings don't.
+    pub links: Option<u64>,
+    /// Some or all of the data isn't stored on this device.
+    pub offline: bool,
+}
+
+/// Reads [`ListedFacts`] from metadata a walk already has.
+pub fn listed_facts(metadata: &std::fs::Metadata) -> ListedFacts {
+    os::listed_facts(metadata)
+}
+
 /// Standard per-user folders, following any redirection, such as OneDrive moving Documents.
 /// Folders the system doesn't define are `None`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

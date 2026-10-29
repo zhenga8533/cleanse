@@ -131,8 +131,13 @@ impl fmt::Display for Evidence {
 pub enum Concern {
     /// The item is, is inside, or contains a location the protected policy covers.
     ProtectedLocation { what: String },
+    /// The item isn't inside any of the folders the user chose to scan.
+    OutsideScanRoots,
     /// Git tracks files inside the item.
     TrackedByGit,
+    /// The item is inside a Git repository that couldn't be read, so tracked files can't be
+    /// ruled out.
+    RepositoryUnreadable,
     /// The item contains files that look like they hold secrets, such as `.env`.
     PossibleSecrets { example: String },
     /// Part of the item couldn't be read, so its contents aren't fully known.
@@ -172,7 +177,11 @@ impl fmt::Display for Concern {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ProtectedLocation { what } => write!(f, "Protected location: {what}"),
+            Self::OutsideScanRoots => f.write_str("It's outside the folders chosen for the scan"),
             Self::TrackedByGit => f.write_str("Git tracks files inside it"),
+            Self::RepositoryUnreadable => f.write_str(
+                "Its Git repository couldn't be read, so tracked files can't be ruled out",
+            ),
             Self::PossibleSecrets { example } => {
                 write!(f, "Contains files that may hold secrets, such as {example}")
             }
@@ -317,7 +326,9 @@ mod tests {
             Concern::ProtectedLocation {
                 what: "SSH keys".into(),
             },
+            Concern::OutsideScanRoots,
             Concern::TrackedByGit,
+            Concern::RepositoryUnreadable,
             Concern::PossibleSecrets {
                 example: ".env".into(),
             },

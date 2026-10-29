@@ -14,6 +14,8 @@ pub struct Entry<'a> {
     pub kind: EntryKind,
     /// Logical size in bytes.
     pub len: u64,
+    /// What the directory listing reported. It describes a link itself, not its target.
+    pub metadata: &'a Metadata,
 }
 
 /// Whether a walk should enter the directory it just visited. Ignored for anything else.
@@ -146,6 +148,7 @@ where
             path: &path,
             kind,
             len: metadata.len(),
+            metadata: &metadata,
         });
         if kind == EntryKind::Dir && descend == Descend::Yes {
             if Filesystem::of(&metadata) == state.filesystem {

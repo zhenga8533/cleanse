@@ -1,6 +1,7 @@
 # Safety model
 
-> Status: design. The gates are implemented in M1 and execution in M2.
+> Status: the gates are implemented (see [what's not covered yet](#not-covered-yet)).
+> Execution comes in M2.
 
 Cleanse's job is to remove files, so its first job is to not remove the wrong ones. The
 principles:
@@ -50,6 +51,22 @@ blocks, including any new kind of concern until it's deliberately classified.
    never read, since that would download them.
 7. **Ownership and elevation.** Other users' files are blocked, and the main app refuses to
    apply a plan while running as administrator or root.
+
+Every match is measured in one walk that doesn't follow links: its size, file count, newest
+modification time, and anything inside that couldn't be read, is another filesystem, looks like
+a secret, or is a virtual machine disk. A file modified in the last ten minutes counts as in use.
+
+### Not covered yet
+
+- **Owning app running** and **other users' files**: need process and ownership checks, which
+  come with the AI agent rules in M2.
+- **Refusing to apply while elevated**: applies when plans can be applied, in M2.
+- **Browser profiles**: no rule matches inside them yet; they'll be protected before browser
+  cache rules arrive.
+- **Uncommitted changes** and **recent project activity** warnings: need a working-tree scan.
+- **Sizes on Windows** come from the directory listing, which has no allocation data. They count
+  each file's length, or nothing for cloud files that aren't downloaded. Compression and hard
+  links other than pnpm's store aren't reflected.
 
 ## Execution and recovery
 

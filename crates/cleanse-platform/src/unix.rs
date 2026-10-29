@@ -5,7 +5,7 @@ use std::path::Path;
 
 use cleanse_model::{EntryKind, FileIdentity};
 
-use crate::FileFacts;
+use crate::{FileFacts, ListedFacts};
 
 /// `st_blocks` counts 512-byte units on Linux and macOS, whatever the filesystem's block size.
 const STAT_BLOCK_BYTES: u64 = 512;
@@ -23,6 +23,14 @@ pub(crate) fn inspect(path: &Path) -> io::Result<FileFacts> {
         cloud_synced: false,
         offline: is_dataless(&metadata),
     })
+}
+
+pub(crate) fn listed_facts(metadata: &Metadata) -> ListedFacts {
+    ListedFacts {
+        on_disk: metadata.blocks() * STAT_BLOCK_BYTES,
+        links: Some(metadata.nlink()),
+        offline: is_dataless(metadata),
+    }
 }
 
 /// Whether the data lives in iCloud Drive or another File Provider and is downloaded on access.

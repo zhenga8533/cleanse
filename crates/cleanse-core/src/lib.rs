@@ -5,4 +5,5 @@
 
 pub mod git;
 pub mod rules;
+pub mod safety;
 pub mod scan;
