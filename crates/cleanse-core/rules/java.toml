@@ -18,3 +18,28 @@ matches = ["app/target"]
 [[rule.test]]
 tree = ["app/target/app.jar"]
 matches = []
+
+[[rule]]
+id = "java.gradle_build"
+name = "Gradle build output"
+category = "build_output"
+risk = "regenerable"
+explain = "Compiled output of a Gradle project, which the project's Git ignore rules exclude. Building again recreates it."
+regenerate = "gradle build (or ./gradlew build)"
+
+[rule.match]
+kind = "project_artifact"
+names = ["build"]
+markers = ["build.gradle", "build.gradle.kts"]
+require_git_ignored = true
+
+[[rule.test]]
+git = true
+tree = ["app/build.gradle.kts", "app/build/classes/App.class"]
+files = { "app/.gitignore" = "build/\n" }
+tracked = ["app/build.gradle.kts"]
+matches = ["app/build"]
+
+[[rule.test]]
+tree = ["app/build.gradle", "app/build/classes/App.class"]
+matches = []

@@ -1,3 +1,4 @@
+use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::fs;
 use std::io;
@@ -8,6 +9,7 @@ use cleanse_model::{EntryKind, Evidence};
 use cleanse_platform::KnownFolders;
 
 use super::{Base, Os, Rule, Target};
+use crate::git::{GitInfo, GitStatus};
 use crate::scan::{Descend, WalkReport, walk};
 
 const CACHEDIR_TAG: &str = "CACHEDIR.TAG";
@@ -18,6 +20,8 @@ pub struct Detection<'r> {
     pub rule: &'r Rule,
     pub path: PathBuf,
     pub evidence: Vec<Evidence>,
+    /// What Git says about the directory, which the safety checks use to rule out tracked files.
+    pub git: GitStatus,
 }
 
 /// Matches directories against a set of rules, with known locations resolved for one user and
@@ -26,6 +30,7 @@ pub struct Detection<'r> {
 pub struct Matcher<'r> {
     artifacts: Vec<&'r Rule>,
     locations: HashMap<PathBuf, &'r Rule>,
+    git: GitInfo,
 }
 
 impl<'r> Matcher<'r> {
@@ -48,6 +53,7 @@ impl<'r> Matcher<'r> {
         Self {
             artifacts,
             locations,
+            git: GitInfo::new(),
         }
     }
 
@@ -61,17 +67,21 @@ impl<'r> Matcher<'r> {
                 rule,
                 path: path.to_path_buf(),
                 evidence: Vec::new(),
+                git: self.git.status(path),
             });
         }
 
         // Rules are written in ASCII, so a name that isn't valid Unicode can't match one.
         let name = path.file_name()?.to_str()?;
         let parent = path.parent()?;
+        // Looked up only once a rule's name and evidence match, and at most once per directory.
+        let git = OnceCell::new();
         self.artifacts.iter().find_map(|rule| {
             let Target::ProjectArtifact {
                 names,
                 markers,
                 contains,
+                require_git_ignored,
             } = &rule.target
             else {
                 return None;
@@ -79,10 +89,20 @@ impl<'r> Matcher<'r> {
             if !names.iter().any(|pattern| wildcard_match(pattern, name)) {
                 return None;
             }
-            artifact_evidence(path, parent, markers, contains).map(|evidence| Detection {
+            let mut evidence = artifact_evidence(path, parent, markers, contains)?;
+            let git = git.get_or_init(|| self.git.status(path));
+            let ignored = matches!(git, GitStatus::Known(facts) if facts.ignored);
+            if *require_git_ignored && !ignored {
+                return None;
+            }
+            if ignored {
+                evidence.push(Evidence::IgnoredByGit);
+            }
+            Some(Detection {
                 rule,
                 path: path.to_path_buf(),
                 evidence,
+                git: git.clone(),
             })
         })
     }

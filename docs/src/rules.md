@@ -1,7 +1,7 @@
 # Rules
 
-> Status: project artifacts and known locations are implemented. Git checks, AI agent rules,
-> and insights come later in M1 and M2.
+> Status: project artifacts, known locations, and Git checks are implemented. AI agent rules
+> and insights come in M2.
 
 Rules describe what Cleanse can recognize. They're TOML files in
 [`crates/cleanse-core/rules/`](https://github.com/zhenga8533/cleanse/tree/main/crates/cleanse-core/rules),
@@ -45,6 +45,14 @@ A directory matches when its name is in `names` and its evidence holds:
 A rule needs at least one of the two, because a directory name alone isn't evidence. Markers
 and contained files must be regular files, not links. A `CACHEDIR.TAG` inside a match is always
 recorded as evidence, since it's the standard way tools mark regenerable caches.
+
+Some names are too common to trust even with a marker: plenty of projects keep hand-written
+files in `build/`, `dist/`, or `bin/`. For those, set `require_git_ignored = true`, and the rule
+matches only where the project's Git repository ignores the directory. Outside a repository it
+never matches. Whenever a match is inside a repository, Cleanse also records whether Git ignores
+it (as evidence) and whether Git tracks any files inside it (which the safety checks treat as a
+reason to keep it). Repositories are read without running `git`
+([ADR 0008](adr/0008-read-git-with-gix.md)).
 
 Once a directory matches, Cleanse doesn't look inside it for more matches: everything in it is
 part of that match.
@@ -96,6 +104,18 @@ fails otherwise. A test builds `tree` in an empty directory (a trailing `/` make
 anything else is an empty file), runs only that rule over it, and expects exactly `matches`.
 Known locations resolve under folders named after their base (`home/`, `cache/`, `config/`,
 `data_local/`, `temp/`), and a test can be limited to one OS with `os = "windows"`.
+
+For rules that depend on Git, `git = true` makes the test's root a repository, `files` creates
+files with contents (such as a `.gitignore`), and `tracked` lists files to add to the index:
+
+```toml
+[[rule.test]]
+git = true
+tree = ["web/package.json", "web/dist/app.js"]
+files = { "web/.gitignore" = "dist/\n" }
+tracked = ["web/package.json"]
+matches = ["web/dist"]
+```
 
 ```sh
 cargo nextest run -p cleanse-core rules

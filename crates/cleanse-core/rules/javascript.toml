@@ -54,3 +54,36 @@ matches = ["site/.svelte-kit", "web/.next"]
 [[rule.test]]
 tree = ["web/.next/cache/x"]
 matches = []
+
+[[rule]]
+id = "javascript.build_output"
+name = "JavaScript build output"
+category = "build_output"
+risk = "regenerable"
+explain = "A JavaScript project's build output, which the project's Git ignore rules exclude. Building again recreates it."
+regenerate = "Run the project's build command, such as npm run build."
+
+[rule.match]
+kind = "project_artifact"
+names = ["dist", "build", "out"]
+markers = ["package.json"]
+require_git_ignored = true
+
+[[rule.test]]
+git = true
+tree = ["web/package.json", "web/dist/app.js", "web/src/index.js"]
+files = { "web/.gitignore" = "dist/\n" }
+tracked = ["web/package.json", "web/src/index.js"]
+matches = ["web/dist"]
+
+[[rule.test]]
+# Git doesn't ignore it, so it may be hand-written content that just happens to be called dist.
+git = true
+tree = ["web/package.json", "web/dist/app.js"]
+tracked = ["web/package.json", "web/dist/app.js"]
+matches = []
+
+[[rule.test]]
+# Outside a repository there's no way to tell build output from anything else.
+tree = ["web/package.json", "web/dist/app.js"]
+matches = []

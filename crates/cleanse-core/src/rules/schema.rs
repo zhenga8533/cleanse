@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use cleanse_model::{Category, Risk, RuleId};
 use serde::Deserialize;
 
@@ -36,6 +38,10 @@ pub enum Target {
         /// Files inside the directory, all of which must exist.
         #[serde(default)]
         contains: Vec<String>,
+        /// Match only where the project's Git repository ignores the directory. For names too
+        /// common to trust on their own, like `build` or `dist`.
+        #[serde(default)]
+        require_git_ignored: bool,
     },
     /// A fixed location under one of the user's standard folders.
     KnownLocation { locations: Vec<Location> },
@@ -92,6 +98,15 @@ pub struct RuleTest {
     /// directory; anything else is an empty file. Known locations live under folders named
     /// after their base: `home/`, `cache/`, `config/`, `data_local/`, and `temp/`.
     pub tree: Vec<String>,
+    /// Files to create with the given contents, such as a `.gitignore`.
+    #[serde(default)]
+    pub files: BTreeMap<String, String>,
+    /// Make the test's root a Git repository.
+    #[serde(default)]
+    pub git: bool,
+    /// Files to add to the repository's index.
+    #[serde(default)]
+    pub tracked: Vec<String>,
     /// The paths the rule must match in the tree, and nothing else.
     pub matches: Vec<String>,
 }
@@ -110,6 +125,7 @@ impl Rule {
                 names,
                 markers,
                 contains,
+                require_git_ignored: _,
             } => {
                 if names.is_empty() {
                     return Err("`names` is empty".into());
@@ -144,8 +160,17 @@ impl Rule {
             }
         }
         for test in &self.tests {
-            for path in test.tree.iter().chain(&test.matches) {
+            let paths = test
+                .tree
+                .iter()
+                .chain(test.files.keys())
+                .chain(&test.tracked)
+                .chain(&test.matches);
+            for path in paths {
                 validate_relative(path.strip_suffix('/').unwrap_or(path))?;
+            }
+            if !test.git && !test.tracked.is_empty() {
+                return Err("a test with `tracked` files needs `git = true`".into());
             }
         }
         Ok(())

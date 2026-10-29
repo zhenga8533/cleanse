@@ -1,14 +1,18 @@
-#![allow(clippy::disallowed_methods, reason = "tests build fixture trees")]
+#![allow(
+    clippy::disallowed_methods,
+    reason = "tests build fixture trees and repositories, using the git command line"
+)]
 
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use cleanse_model::Evidence;
 use cleanse_platform::KnownFolders;
 
 use super::matcher::wildcard_match;
-use super::{BUILTIN, Matcher, Os, Rule, RuleSet};
+use super::{BUILTIN, Matcher, Os, Rule, RuleSet, RuleTest};
 
 /// Known folders for fixtures: each base is a folder named after it under the test's root.
 fn fixture_folders(root: &Path) -> KnownFolders {
@@ -40,11 +44,46 @@ fn relative(root: &Path, path: &str) -> PathBuf {
     joined
 }
 
-/// Runs one rule, alone, against a fixture tree, returning what it matched as `/`-separated
-/// paths relative to the tree's root.
-fn run_fixture(rule: &Rule, tree: &[String]) -> BTreeSet<String> {
+fn git(dir: &Path, args: &[&str]) {
+    let status = Command::new("git")
+        .args(["-c", "core.autocrlf=false"])
+        .args(args)
+        .current_dir(dir)
+        .status()
+        .unwrap();
+    assert!(status.success(), "git {args:?} failed");
+}
+
+/// A fixture with only a tree, for tests that aren't in a rule file.
+fn tree_only(tree: &[&str]) -> RuleTest {
+    RuleTest {
+        os: None,
+        tree: tree.iter().map(|path| (*path).to_owned()).collect(),
+        files: std::collections::BTreeMap::new(),
+        git: false,
+        tracked: Vec::new(),
+        matches: Vec::new(),
+    }
+}
+
+/// Runs one rule, alone, against a fixture, returning what it matched as `/`-separated paths
+/// relative to the fixture's root.
+fn run_fixture(rule: &Rule, test: &RuleTest) -> BTreeSet<String> {
     let root = tempfile::tempdir().unwrap();
-    build_tree(root.path(), tree);
+    build_tree(root.path(), &test.tree);
+    for (path, contents) in &test.files {
+        let path = relative(root.path(), path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, contents).unwrap();
+    }
+    if test.git {
+        git(root.path(), &["init", "-q"]);
+        if !test.tracked.is_empty() {
+            let mut add = vec!["add", "--"];
+            add.extend(test.tracked.iter().map(String::as_str));
+            git(root.path(), &add);
+        }
+    }
     let matcher = Matcher::new([rule], &fixture_folders(root.path()), Os::current());
 
     let (found, report) = matcher.find(root.path()).unwrap();
@@ -79,7 +118,7 @@ fn every_builtin_rule_passes_its_fixtures() {
             }
             let expected: BTreeSet<String> = test.matches.iter().cloned().collect();
             assert_eq!(
-                run_fixture(rule, &test.tree),
+                run_fixture(rule, test),
                 expected,
                 "rule `{}`, test #{}",
                 rule.id,
@@ -149,6 +188,34 @@ fn records_markers_contents_and_cachedir_tags_as_evidence() {
     );
 }
 
+#[test]
+fn records_what_git_says_for_the_safety_checks() {
+    let rules = builtin();
+    let root = tempfile::tempdir().unwrap();
+    build_tree(
+        root.path(),
+        &["web/package.json".into(), "web/dist/app.js".into()],
+    );
+    fs::write(root.path().join(".gitignore"), "dist/\n").unwrap();
+    git(root.path(), &["init", "-q"]);
+    // Ignored now, but committed before it was: removing it would delete a tracked file.
+    git(root.path(), &["add", "--force", "--", "web/dist/app.js"]);
+    let matcher = Matcher::new(rules.rules(), &fixture_folders(root.path()), Os::current());
+
+    let (found, _) = matcher.find(root.path()).unwrap();
+
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].rule.id.0, "javascript.build_output");
+    assert!(found[0].evidence.contains(&Evidence::IgnoredByGit));
+    assert_eq!(
+        found[0].git,
+        crate::git::GitStatus::Known(crate::git::GitFacts {
+            ignored: true,
+            has_tracked_files: true,
+        })
+    );
+}
+
 #[cfg(any(windows, target_os = "macos"))]
 #[test]
 fn known_locations_match_regardless_of_case() {
@@ -162,7 +229,7 @@ fn known_locations_match_regardless_of_case() {
         "cache/GO-BUILD/00/x"
     };
 
-    assert_eq!(run_fixture(rule, &[tree.into()]).len(), 1);
+    assert_eq!(run_fixture(rule, &tree_only(&[tree])).len(), 1);
 }
 
 #[test]
@@ -175,7 +242,7 @@ fn a_marker_must_be_a_real_file() {
     // A directory named like the marker isn't the marker.
     let found = run_fixture(
         rule,
-        &["app/package.json/".into(), "app/node_modules/x".into()],
+        &tree_only(&["app/package.json/", "app/node_modules/x"]),
     );
 
     assert!(found.is_empty(), "{found:?}");
