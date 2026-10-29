@@ -1,4 +1,4 @@
-use std::fs::{self, FileType, Metadata};
+use std::fs::{self, Metadata};
 use std::io;
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
@@ -14,19 +14,6 @@ pub struct Entry<'a> {
     pub kind: EntryKind,
     /// Logical size in bytes.
     pub len: u64,
-}
-
-fn entry_kind(file_type: FileType) -> EntryKind {
-    // `is_symlink` comes first: on Windows it also covers junctions and mount points.
-    if file_type.is_symlink() {
-        EntryKind::Link
-    } else if file_type.is_dir() {
-        EntryKind::Dir
-    } else if file_type.is_file() {
-        EntryKind::File
-    } else {
-        EntryKind::Other
-    }
 }
 
 #[derive(Debug, Default)]
@@ -146,7 +133,7 @@ where
                 continue;
             }
         };
-        let kind = entry_kind(metadata.file_type());
+        let kind = EntryKind::from(metadata.file_type());
         (state.visit)(&Entry {
             path: &path,
             kind,
