@@ -168,7 +168,7 @@ impl<'a> Executor<'a> {
         // parent folder to hold the tombstone.
         let Some(tombstone) = delete::tombstone_for(&item.path) else {
             return Ok(Outcome::Failed {
-                error: "it has no parent folder".into(),
+                error: "It has no parent folder".into(),
             });
         };
 
@@ -202,7 +202,7 @@ impl<'a> Executor<'a> {
             }
             Err(error) => {
                 return Err(Outcome::Failed {
-                    error: format!("couldn't check it: {error}"),
+                    error: format!("Couldn't check it: {error}"),
                 });
             }
         };

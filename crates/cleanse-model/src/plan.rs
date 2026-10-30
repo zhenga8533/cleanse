@@ -95,30 +95,30 @@ pub enum SkipReason {
 impl fmt::Display for SkipReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Gone => f.write_str("it's no longer there"),
-            Self::Replaced => f.write_str("something else is there now"),
-            Self::NoLongerMatches => f.write_str("no rule recognizes it anymore"),
+            Self::Gone => f.write_str("It's no longer there"),
+            Self::Replaced => f.write_str("Something else is there now"),
+            Self::NoLongerMatches => f.write_str("No rule recognizes it anymore"),
             Self::Blocked { concerns } => write!(f, "{}", joined(concerns)),
-            Self::Risen { from, to } => write!(f, "it's {to} now, not {from}"),
+            Self::Risen { from, to } => write!(f, "It's {to} now, not {from}"),
             Self::NewConcerns { concerns } => {
-                write!(f, "it changed after you approved it: {}", joined(concerns))
+                write!(f, "It changed after you approved it: {}", joined(concerns))
             }
             Self::UnrecordablePath => {
-                f.write_str("its path isn't valid Unicode, so the journal can't record it")
+                f.write_str("Its path isn't valid Unicode, so the journal can't record it")
             }
             Self::Unsupported {
                 disposal: Disposal::Delete,
-            } => f.write_str("deleting isn't available"),
+            } => f.write_str("Deleting isn't available"),
             Self::Unsupported {
                 disposal: Disposal::Quarantine,
-            } => f.write_str("quarantine isn't available yet"),
+            } => f.write_str("Quarantine isn't available yet"),
             Self::Unsupported {
                 disposal: Disposal::Trash,
-            } => f.write_str("moving to the trash isn't available yet"),
+            } => f.write_str("Moving to the trash isn't available yet"),
             Self::JournalUnavailable => {
-                f.write_str("the journal couldn't be written, so nothing more was removed")
+                f.write_str("The journal couldn't be written, so nothing more was removed")
             }
-            Self::Cancelled => f.write_str("cancelled before it was reached"),
+            Self::Cancelled => f.write_str("Cancelled before it was reached"),
         }
     }
 }
@@ -182,7 +182,7 @@ mod tests {
             from: Risk::Regenerable,
             to: Risk::Review,
         };
-        assert_eq!(risen.to_string(), "it's Review now, not Regenerable");
+        assert_eq!(risen.to_string(), "It's Review now, not Regenerable");
     }
 
     #[test]

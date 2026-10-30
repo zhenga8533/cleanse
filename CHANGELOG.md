@@ -6,6 +6,15 @@ All notable changes to Cleanse are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- `cleanse clean [PATHS]` deletes what you choose from a scan. It lists what can be deleted,
+  with items that have warnings unselected, and asks again before deleting anything. Each item
+  is checked again right before it's deleted and skipped if anything about it changed.
+  `--yes --max-risk TIER` deletes the preselected items without asking, and `--dry-run` lists
+  what that would delete. Every run is recorded in a journal in Cleanse's data folder, and
+  nothing is deleted while running as an administrator or root.
+
 ## [0.1.0] - 2026-10-30
 
 The read-only preview. Cleanse finds what could be removed and explains why, on Windows, macOS,

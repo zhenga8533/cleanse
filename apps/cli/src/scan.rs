@@ -31,19 +31,7 @@ pub struct Args {
 const LARGEST: usize = 10;
 
 pub fn run(engine: &Engine, args: &Args) -> crate::Result {
-    let roots = if args.paths.is_empty() {
-        engine.default_roots()
-    } else {
-        args.paths.clone()
-    };
-    let reporter = Reporter::new();
-    let scan = engine.scan(
-        &roots,
-        &|progress| reporter.update(progress),
-        &AtomicBool::new(false),
-    );
-    reporter.clear();
-    let scan = scan?;
+    let scan = scan(engine, &args.paths)?;
     if args.json {
         print_json(&scan)
     } else {
@@ -52,48 +40,73 @@ pub fn run(engine: &Engine, args: &Args) -> crate::Result {
     }
 }
 
+/// Scans `paths`, or the home folder if there are none, showing progress.
+pub(crate) fn scan(engine: &Engine, paths: &[PathBuf]) -> io::Result<Scan> {
+    let roots = if paths.is_empty() {
+        engine.default_roots()
+    } else {
+        paths.to_vec()
+    };
+    let reporter = Reporter::new();
+    let scan = engine.scan(
+        &roots,
+        &|progress| reporter.scanning(progress),
+        &AtomicBool::new(false),
+    );
+    reporter.clear();
+    scan
+}
+
 /// Shows progress on one line of stderr, at most a few times a second, and only when stderr is
 /// a terminal so piped output stays clean.
-struct Reporter {
+pub(crate) struct Reporter {
     last: Option<Mutex<Instant>>,
 }
 
 impl Reporter {
     const INTERVAL: Duration = Duration::from_millis(100);
 
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let interactive = io::stderr().is_terminal();
         Self {
             last: interactive.then(|| Mutex::new(Instant::now())),
         }
     }
 
-    fn update(&self, progress: Progress) {
+    fn scanning(&self, progress: Progress) {
+        self.show(|| match progress {
+            Progress::Walking { entries } => {
+                format!("Scanning: {} entries", format::count(entries))
+            }
+            Progress::Assessing { done, total } => format!("Checking {done} of {total} matches"),
+        });
+    }
+
+    pub(crate) fn removing(&self, done: usize, total: usize) {
+        self.show(|| format!("Removing {done} of {total}"));
+    }
+
+    fn show(&self, message: impl FnOnce() -> String) {
         let Some(last) = &self.last else { return };
         let mut last = last.lock().unwrap_or_else(PoisonError::into_inner);
         if last.elapsed() < Self::INTERVAL {
             return;
         }
         *last = Instant::now();
-        let message = match progress {
-            Progress::Walking { entries } => {
-                format!("Scanning: {} entries", format::count(entries))
-            }
-            Progress::Assessing { done, total } => format!("Checking {done} of {total} matches"),
-        };
-        eprint!("\r{message:<60}");
+        eprint!("\r{:<60}", message());
         // Progress is best-effort; a failed flush only delays the next update.
         let _ = io::stderr().flush();
     }
 
-    fn clear(&self) {
+    pub(crate) fn clear(&self) {
         if self.last.is_some() {
             eprint!("\r{:<60}\r", "");
         }
     }
 }
 
-fn print_human(engine: &Engine, scan: &Scan, args: &Args) {
+/// The first lines of a scan's report: what was scanned, how much, and how long it took.
+pub(crate) fn print_scanned(scan: &Scan) {
     let roots: Vec<String> = scan
         .roots
         .iter()
@@ -108,6 +121,10 @@ fn print_human(engine: &Engine, scan: &Scan, args: &Args) {
     if scan.cancelled {
         println!("The scan was cancelled, so these results are partial.");
     }
+}
+
+fn print_human(engine: &Engine, scan: &Scan, args: &Args) {
+    print_scanned(scan);
 
     let mut by_size: Vec<&Candidate> = scan.candidates.iter().collect();
     by_size.sort_by_key(|candidate| Reverse(candidate.found.size.on_disk));
@@ -144,7 +161,7 @@ fn print_human(engine: &Engine, scan: &Scan, args: &Args) {
             }
         );
     }
-    println!("\nNothing was removed. This version of Cleanse only scans.");
+    println!("\nNothing was removed. Run `cleanse clean` to choose what to remove.");
 }
 
 /// Prints a section's totals per rule, then its items largest first, up to `limit`.
@@ -204,7 +221,7 @@ fn print_section(engine: &Engine, title: &str, candidates: &[&Candidate], limit:
     }
 }
 
-fn items(count: usize) -> String {
+pub(crate) fn items(count: usize) -> String {
     match count {
         1 => "1 item".to_owned(),
         n => format!("{} items", format::count(n as u64)),

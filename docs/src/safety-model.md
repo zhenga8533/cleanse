@@ -1,8 +1,7 @@
 # Safety model
 
-> Status: the gates are implemented (see [what's not covered yet](#not-covered-yet)). The engine
-> can delete approved items. Quarantine, the trash, and the commands that remove things come
-> later in M2.
+> Status: the gates are implemented (see [what's not covered yet](#not-covered-yet)).
+> `cleanse clean` deletes approved items. Quarantine and the trash come later in M2.
 
 Cleanse's job is to remove files, so its first job is to not remove the wrong ones. The
 principles:

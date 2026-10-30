@@ -19,6 +19,7 @@ cleanse-platform = { path = "crates/cleanse-platform", version = "0.1.0" }
 clap = { version = "4.5", features = ["derive"] }
 dirs = "7.0"
 gix = { version = "0.90", default-features = false }
+inquire = { version = "0.9", default-features = false, features = ["crossterm"] }
 rayon = "1.12"
 rustix = "1.1"
 serde = { version = "1.0", features = ["derive"] }
