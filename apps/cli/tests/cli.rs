@@ -290,3 +290,76 @@ fn files_under(dir: &Path) -> Vec<std::path::PathBuf> {
     }
     files
 }
+
+#[test]
+fn restore_and_purge_need_to_be_told_what() {
+    let restore = cleanse(&["restore"]);
+    let purge = cleanse(&["quarantine", "purge"]);
+
+    assert_eq!(restore.status.code(), Some(2));
+    assert_eq!(purge.status.code(), Some(2));
+}
+
+/// Windows CI runs tests as an administrator, so that's where this gets checked.
+#[test]
+fn restore_and_purge_refuse_while_elevated() {
+    if !elevated() {
+        return;
+    }
+
+    let restore = cleanse(&["restore", "--all"]);
+    let purge = cleanse(&["quarantine", "purge", "--all", "--yes"]);
+
+    for output in [restore, purge] {
+        assert_eq!(output.status.code(), Some(1));
+        assert!(
+            stderr(&output).contains("administrator or root"),
+            "{}",
+            stderr(&output)
+        );
+    }
+}
+
+/// Unix only, where moving the home folder also moves Cleanse's data folder out of the real one.
+#[cfg(unix)]
+fn cleanse_at_home(home: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_cleanse"))
+        .args(args)
+        .env("HOME", home)
+        .env_remove("XDG_DATA_HOME")
+        .output()
+        .unwrap()
+}
+
+#[cfg(unix)]
+#[test]
+fn quarantine_says_when_its_empty() {
+    let home = tempfile::tempdir().unwrap();
+
+    let report = stdout(&cleanse_at_home(home.path(), &["quarantine"]));
+    let json = stdout(&cleanse_at_home(
+        home.path(),
+        &["quarantine", "list", "--json"],
+    ));
+
+    assert!(report.contains("Nothing is in quarantine"), "{report}");
+    assert_eq!(json.trim(), "[]");
+}
+
+#[cfg(unix)]
+#[test]
+fn restore_rejects_an_id_that_isnt_in_quarantine() {
+    if elevated() {
+        return;
+    }
+    let home = tempfile::tempdir().unwrap();
+
+    let output = cleanse_at_home(home.path(), &["restore", "123"]);
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        stderr(&output).contains("nothing in quarantine has the ID 123"),
+        "{}",
+        stderr(&output)
+    );
+}

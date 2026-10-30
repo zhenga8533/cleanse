@@ -20,11 +20,11 @@ use cleanse_core::rules::{Detection, Matcher};
 use cleanse_core::safety::{Assessor, ProtectedPolicy};
 use cleanse_core::scan::{Descend, walk};
 use cleanse_exec::Executor;
-use cleanse_model::{Candidate, CandidateId, EntryKind, Plan};
+use cleanse_model::{Candidate, CandidateId, EntryKind, Plan, QuarantineEntry};
 use rayon::prelude::*;
 
 pub use cleanse_core::rules::{Base, Location, Os, Rule, RuleError, RuleSet, RuleTest, Target};
-pub use cleanse_exec::{Applied, ApplyError};
+pub use cleanse_exec::{Applied, ApplyError, Handled, Listing};
 pub use cleanse_platform::{KnownFolders, Probe, System};
 
 /// Walk progress is reported every this many entries.
@@ -35,9 +35,9 @@ const PROGRESS_INTERVAL: u64 = 1024;
 pub struct Engine {
     rules: RuleSet,
     system: System,
-    /// Where each run that removes things writes its journal, if the system has a folder for
-    /// app data.
-    journal_dir: Option<PathBuf>,
+    /// Cleanse's data folder, which holds the journal and the quarantine, if the system has a
+    /// folder for app data.
+    data_dir: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -109,14 +109,11 @@ impl Engine {
     /// Loads the built-in rules and reads this system's folders and elevation.
     pub fn new() -> Result<Self, EngineError> {
         let system = System::new()?;
-        let journal_dir = system
-            .known_folders()
-            .cleanse_data()
-            .map(|data| data.join("journal"));
+        let data_dir = system.known_folders().cleanse_data();
         Ok(Self {
             rules: RuleSet::builtin()?,
             system,
-            journal_dir,
+            data_dir,
         })
     }
 
@@ -267,12 +264,35 @@ impl Engine {
         progress: &dyn Fn(usize),
         cancel: &AtomicBool,
     ) -> Result<Applied, ApplyError> {
-        let journal_dir = self.journal_dir.clone().ok_or_else(|| {
+        self.executor()?.apply(plan, progress, cancel)
+    }
+
+    /// What's in quarantine.
+    pub fn quarantined(&self) -> io::Result<Listing> {
+        match self.executor() {
+            Ok(executor) => executor.quarantined(),
+            // Without a data folder, nothing can have been quarantined.
+            Err(_) => Ok(Listing::default()),
+        }
+    }
+
+    /// Moves quarantined items back to where they were, unless something is there now.
+    pub fn restore(&self, entries: &[QuarantineEntry]) -> Result<Handled, ApplyError> {
+        self.executor()?.restore(entries)
+    }
+
+    /// Deletes quarantined items for good.
+    pub fn purge(&self, entries: &[QuarantineEntry]) -> Result<Handled, ApplyError> {
+        self.executor()?.purge(entries)
+    }
+
+    fn executor(&self) -> Result<Executor<'_>, ApplyError> {
+        let data_dir = self.data_dir.clone().ok_or_else(|| {
             ApplyError::Journal(io::Error::new(
                 io::ErrorKind::NotFound,
                 "this system has no folder for app data",
             ))
         })?;
-        Executor::new(&self.rules, &self.system, journal_dir).apply(plan, progress, cancel)
+        Ok(Executor::new(&self.rules, &self.system, data_dir))
     }
 }

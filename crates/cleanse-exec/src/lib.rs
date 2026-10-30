@@ -5,6 +5,7 @@
 
 mod delete;
 mod journal;
+mod quarantine;
 
 #[cfg(test)]
 mod tests;
@@ -20,17 +21,21 @@ use std::time::SystemTime;
 use cleanse_core::rules::{Matcher, Os, RuleSet};
 use cleanse_core::safety::{Assessor, ProtectedPolicy};
 use cleanse_model::{
-    Candidate, CandidateId, Concern, Disposal, EntryKind, Outcome, Plan, PlanItem, Risk, SkipReason,
+    Candidate, CandidateId, Concern, Disposal, EntryKind, EntryOutcome, Outcome, Plan, PlanItem,
+    QuarantineEntry, Risk, SkipReason,
 };
 use cleanse_platform::Probe;
 
-use journal::{Journal, Record};
+use journal::{Action, Journal, Record};
+use quarantine::Quarantine;
 
-/// Removes approved items, checking each one again first.
+pub use quarantine::Listing;
+
+/// Removes approved items, checking each one again first, and looks after the quarantine.
 pub struct Executor<'a> {
     rules: &'a RuleSet,
     probe: &'a dyn Probe,
-    journal_dir: PathBuf,
+    data_dir: PathBuf,
 }
 
 /// What applying a plan did.
@@ -42,7 +47,16 @@ pub struct Applied {
     pub outcomes: Vec<Outcome>,
 }
 
-/// Why a plan couldn't be applied at all. Nothing was removed.
+/// What restoring or purging quarantined items did.
+#[derive(Debug)]
+pub struct Handled {
+    /// The journal file recording this run.
+    pub journal: PathBuf,
+    /// One per entry, in the order given.
+    pub outcomes: Vec<EntryOutcome>,
+}
+
+/// Why a run couldn't start at all. Nothing was changed.
 #[derive(Debug)]
 pub enum ApplyError {
     /// Elevation would let Cleanse remove files the user's own account couldn't, such as other
@@ -58,19 +72,19 @@ impl fmt::Display for ApplyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Elevated => f.write_str(
-                "Cleanse doesn't remove anything while running as an administrator or root, \
+                "Cleanse doesn't change anything while running as an administrator or root, \
                  because that could remove files your own account can't. Run it again \
                  without elevation.",
             ),
             Self::Journal(error) => {
                 write!(
                     f,
-                    "couldn't start the journal, so nothing was removed: {error}"
+                    "couldn't start the journal, so nothing was changed: {error}"
                 )
             }
             Self::Io(error) => write!(
                 f,
-                "couldn't set up the safety checks, so nothing was removed: {error}"
+                "couldn't set up the safety checks, so nothing was changed: {error}"
             ),
         }
     }
@@ -79,13 +93,32 @@ impl fmt::Display for ApplyError {
 impl Error for ApplyError {}
 
 impl<'a> Executor<'a> {
-    /// Each run writes its journal to a new file in `journal_dir`.
-    pub fn new(rules: &'a RuleSet, probe: &'a dyn Probe, journal_dir: PathBuf) -> Self {
+    /// `data_dir` is Cleanse's data folder. Each run writes its journal to a new file in its
+    /// `journal` folder, and quarantined items go in its `quarantine` folder.
+    pub fn new(rules: &'a RuleSet, probe: &'a dyn Probe, data_dir: PathBuf) -> Self {
         Self {
             rules,
             probe,
-            journal_dir,
+            data_dir,
         }
+    }
+
+    /// Refuses while elevated, then starts the journal for a run.
+    fn start(
+        &self,
+        action: Action,
+        roots: &[PathBuf],
+        items: usize,
+    ) -> Result<Journal, ApplyError> {
+        if self.probe.is_elevated() {
+            return Err(ApplyError::Elevated);
+        }
+        Journal::start(&self.data_dir.join("journal"), action, roots, items)
+            .map_err(ApplyError::Journal)
+    }
+
+    fn quarantine(&self) -> Quarantine {
+        Quarantine::new(&self.data_dir)
     }
 
     /// Removes each item in `plan` that is still what was approved and still passes every
@@ -106,7 +139,7 @@ impl<'a> Executor<'a> {
         // Files modified after this count as modified moments ago, however long the run takes.
         let assessor = Assessor::new(self.probe, policy, &plan.roots, SystemTime::now())
             .map_err(ApplyError::Io)?;
-        let mut journal = Journal::start(&self.journal_dir, plan).map_err(ApplyError::Journal)?;
+        let mut journal = self.start(Action::Apply, &plan.roots, plan.items.len())?;
 
         let mut journal_ok = true;
         let mut outcomes = Vec::with_capacity(plan.items.len());
@@ -152,7 +185,7 @@ impl<'a> Executor<'a> {
         assessor: &Assessor<'_>,
         journal: &mut Journal,
     ) -> io::Result<Outcome> {
-        if item.disposal != Disposal::Delete {
+        if item.disposal == Disposal::Trash {
             return Ok(skipped(SkipReason::Unsupported {
                 disposal: item.disposal,
             }));
@@ -164,6 +197,24 @@ impl<'a> Executor<'a> {
             Ok(candidate) => candidate,
             Err(outcome) => return Ok(outcome),
         };
+
+        if item.disposal == Disposal::Quarantine {
+            let entry = QuarantineEntry {
+                id: Quarantine::new_id(),
+                original: item.path.clone(),
+                rule: item.rule.clone(),
+                size: candidate.found.size,
+                at: journal::now(),
+            };
+            journal.record(&Record::Quarantining {
+                path: path.to_owned(),
+                entry: entry.id.clone(),
+                rule: item.rule.clone(),
+                identity: item.identity,
+            })?;
+            return Ok(self.quarantine().admit(self.probe, &entry, item.identity));
+        }
+
         // The protected policy blocks drive roots, so anything that passed the check has a
         // parent folder to hold the tombstone.
         let Some(tombstone) = delete::tombstone_for(&item.path) else {
@@ -185,6 +236,67 @@ impl<'a> Executor<'a> {
             item.identity,
             candidate.found.size,
         ))
+    }
+
+    /// What's in quarantine.
+    pub fn quarantined(&self) -> io::Result<Listing> {
+        self.quarantine().list()
+    }
+
+    /// Moves each entry back to where it was, unless something is there now.
+    pub fn restore(&self, entries: &[QuarantineEntry]) -> Result<Handled, ApplyError> {
+        self.each_entry(Action::Restore, entries, Quarantine::restore)
+    }
+
+    /// Deletes each entry for good.
+    pub fn purge(&self, entries: &[QuarantineEntry]) -> Result<Handled, ApplyError> {
+        self.each_entry(Action::Purge, entries, Quarantine::purge)
+    }
+
+    fn each_entry(
+        &self,
+        action: Action,
+        entries: &[QuarantineEntry],
+        handle: fn(&Quarantine, &QuarantineEntry) -> EntryOutcome,
+    ) -> Result<Handled, ApplyError> {
+        let mut journal = self.start(action, &[], entries.len())?;
+        let quarantine = self.quarantine();
+        let mut journal_ok = true;
+        let mut outcomes = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let id = entry.id.clone();
+            let path = entry.original.to_string_lossy().into_owned();
+            let before = if matches!(action, Action::Restore) {
+                Record::Restoring { entry: id, path }
+            } else {
+                Record::Purging { entry: id, path }
+            };
+            journal_ok = journal_ok && journal.record(&before).is_ok();
+            let outcome = if journal_ok {
+                handle(&quarantine, entry)
+            } else {
+                EntryOutcome::Failed {
+                    error: "The journal couldn't be written, so it was left alone".into(),
+                }
+            };
+            if journal_ok {
+                let done = Record::EntryDone {
+                    entry: entry.id.clone(),
+                    outcome: outcome.clone(),
+                };
+                journal_ok = journal.record(&done).is_ok();
+            }
+            outcomes.push(outcome);
+        }
+        let journal_path = journal.path().to_owned();
+        if journal_ok {
+            // Every outcome is already on disk, so a missing end marker loses nothing.
+            let _ = journal.finish();
+        }
+        Ok(Handled {
+            journal: journal_path,
+            outcomes,
+        })
     }
 
     /// Checks that `item` is still the folder that was approved, that its rule still recognizes

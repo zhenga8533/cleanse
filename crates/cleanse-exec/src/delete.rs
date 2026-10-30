@@ -68,11 +68,13 @@ pub(crate) fn delete(
     }
 }
 
-fn put_back(path: &Path, tombstone: &Path) -> Outcome {
+/// Moves whatever is at `moved` back to `path`, where it was before something swapped it in
+/// for the approved folder.
+pub(crate) fn put_back(path: &Path, moved: &Path) -> Outcome {
     let result = if fs::symlink_metadata(path).is_ok() {
         Err(format!("{} was recreated", path.display()))
     } else {
-        fs::rename(tombstone, path).map_err(|error| error.to_string())
+        fs::rename(moved, path).map_err(|error| error.to_string())
     };
     match result {
         Ok(()) => Outcome::Skipped {
@@ -82,7 +84,7 @@ fn put_back(path: &Path, tombstone: &Path) -> Outcome {
             error: format!(
                 "Something replaced it while it was being removed, and that couldn't be put \
                  back ({error}). It's in {}",
-                tombstone.display()
+                moved.display()
             ),
         },
     }
