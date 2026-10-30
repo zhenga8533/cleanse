@@ -191,7 +191,11 @@ fn clean_yes_needs_the_highest_tier_to_delete() {
     let output = cleanse(&["clean", "--yes", arg(root.path())]);
 
     assert_eq!(output.status.code(), Some(2));
-    assert!(stderr(&output).contains("--max-risk"), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("--max-risk"),
+        "{}",
+        stderr(&output)
+    );
     assert!(node_modules_intact(root.path()));
 }
 

@@ -173,7 +173,10 @@ fn choose<'c>(removable: &[&'c Candidate]) -> Result<Option<Vec<&'c Candidate>>,
         items(removable.len()),
         format::size(&format::total(removable))
     );
-    let choices = removable.iter().map(|candidate| Choice(candidate)).collect();
+    let choices = removable
+        .iter()
+        .map(|candidate| Choice(candidate))
+        .collect();
     let chosen = MultiSelect::new("Which items should be deleted?", choices)
         .with_default(&defaults)
         .with_page_size(PAGE_SIZE)
@@ -227,7 +230,11 @@ fn report(plan: &Plan, applied: &Applied) -> ExitCode {
         }
     }
 
-    println!("Deleted {}, {}.", items(deleted), format::bytes(freed.on_disk));
+    println!(
+        "Deleted {}, {}.",
+        items(deleted),
+        format::bytes(freed.on_disk)
+    );
     for (title, list) in [("Skipped", &skipped), ("Couldn't delete", &failed)] {
         if list.is_empty() {
             continue;
@@ -287,7 +294,10 @@ mod tests {
                 .collect()
         };
 
-        assert_eq!(paths(preselected(&all, Risk::Safe)), [PathBuf::from("Safe")]);
+        assert_eq!(
+            paths(preselected(&all, Risk::Safe)),
+            [PathBuf::from("Safe")]
+        );
         assert_eq!(
             paths(preselected(&all, Risk::Regenerable)),
             [PathBuf::from("Safe"), PathBuf::from("Regenerable")]
