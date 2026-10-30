@@ -25,8 +25,6 @@ hosting = "github"
 install-updater = false
 # Publish SLSA build provenance for every artifact
 github-attestations = true
-# Temporary: build every artifact on this PR to prove the pipeline before tagging
-pr-run-mode = "upload"
 
 # Pin the generated workflow's actions by commit, like the other workflows.
 # Dependabot bumps to release.yml fail dist's up-to-date check until the
