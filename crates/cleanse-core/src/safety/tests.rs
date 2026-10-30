@@ -182,7 +182,7 @@ fn drive_roots_bundles_and_drive_system_folders_are_protected() {
 fn the_system_policy_protects_the_os_and_the_home_folder() {
     let system = System::new().unwrap();
     let folders = system.known_folders();
-    let policy = ProtectedPolicy::for_system(folders, &system);
+    let policy = ProtectedPolicy::for_system(folders, &system, &[]);
     let os_file = if cfg!(windows) {
         PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("Temp")
     } else if cfg!(target_os = "macos") {
@@ -203,7 +203,7 @@ fn the_system_policy_protects_the_os_and_the_home_folder() {
 fn cleanse_protects_its_own_journal() {
     let root = tempfile::tempdir().unwrap();
     let folders = fake_folders(root.path());
-    let policy = ProtectedPolicy::for_system(&folders, &FakeProbe::default());
+    let policy = ProtectedPolicy::for_system(&folders, &FakeProbe::default(), &[]);
     let journal = folders.cleanse_data().unwrap().join("journal");
 
     assert_eq!(
@@ -262,7 +262,7 @@ fn assess_at(root: &Path, probe: &dyn Probe, now: SystemTime) -> Vec<Candidate> 
     let folders = fake_folders(root);
     let matcher = Matcher::new(rules.rules(), &folders, Os::current());
     let (found, _) = matcher.find(root).unwrap();
-    let policy = ProtectedPolicy::for_system(&folders, probe);
+    let policy = ProtectedPolicy::for_system(&folders, probe, &[]);
     let assessor = Assessor::new(probe, policy, &[root.to_path_buf()], now).unwrap();
     (0u64..)
         .zip(&found)
@@ -379,7 +379,7 @@ fn matches_outside_the_scan_roots_are_blocked() {
     let elsewhere = root.path().join("elsewhere");
     let assessor = Assessor::new(
         &probe,
-        ProtectedPolicy::for_system(&folders, &probe),
+        ProtectedPolicy::for_system(&folders, &probe, &[]),
         &[elsewhere],
         SystemTime::now() + Duration::from_hours(1),
     )

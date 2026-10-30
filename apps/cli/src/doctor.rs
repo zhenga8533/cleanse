@@ -15,8 +15,28 @@ pub fn run(engine: &Engine) {
         "Running as administrator or root: {}",
         if system.is_elevated() { "yes" } else { "no" }
     );
-    println!("Rules: {} built in", engine.rules().rules().len());
+    let config = engine.config();
+    let disabled = config.disabled_rules.len();
+    if disabled == 0 {
+        println!("Rules: {} built in", engine.rules().rules().len());
+    } else {
+        println!(
+            "Rules: {} built in, {disabled} turned off in your settings",
+            engine.rules().rules().len() + disabled
+        );
+    }
     println!("Cloud sync detection: {}", cloud_detection());
+    match engine.config_path() {
+        Some(path) if path.exists() => println!("Settings: {}", path.display()),
+        Some(path) => println!("Settings: {} (not created)", path.display()),
+        None => println!("Settings: none; this system has no folder for app settings"),
+    }
+    for rule in &config.disabled_rules {
+        println!("  turned off   {rule}");
+    }
+    for folder in &config.exclude {
+        println!("  excluded     {}", folder.display());
+    }
     println!("Folders:");
     let folder = |name: &str, path: Option<&Path>| match path {
         Some(path) => println!("  {name:<12} {}", path.display()),

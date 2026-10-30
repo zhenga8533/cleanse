@@ -35,6 +35,7 @@ pub use quarantine::Listing;
 pub struct Executor<'a> {
     rules: &'a RuleSet,
     probe: &'a dyn Probe,
+    excluded: &'a [PathBuf],
     data_dir: PathBuf,
 }
 
@@ -93,12 +94,19 @@ impl fmt::Display for ApplyError {
 impl Error for ApplyError {}
 
 impl<'a> Executor<'a> {
-    /// `data_dir` is Cleanse's data folder. Each run writes its journal to a new file in its
-    /// `journal` folder, and quarantined items go in its `quarantine` folder.
-    pub fn new(rules: &'a RuleSet, probe: &'a dyn Probe, data_dir: PathBuf) -> Self {
+    /// `excluded` are the folders the user's settings exclude. `data_dir` is Cleanse's data
+    /// folder: each run writes its journal to a new file in its `journal` folder, and
+    /// quarantined items go in its `quarantine` folder.
+    pub fn new(
+        rules: &'a RuleSet,
+        probe: &'a dyn Probe,
+        excluded: &'a [PathBuf],
+        data_dir: PathBuf,
+    ) -> Self {
         Self {
             rules,
             probe,
+            excluded,
             data_dir,
         }
     }
@@ -135,7 +143,7 @@ impl<'a> Executor<'a> {
         }
         let folders = self.probe.known_folders();
         let matcher = Matcher::new(self.rules.rules(), folders, Os::current());
-        let policy = ProtectedPolicy::for_system(folders, self.probe);
+        let policy = ProtectedPolicy::for_system(folders, self.probe, self.excluded);
         // Files modified after this count as modified moments ago, however long the run takes.
         let assessor = Assessor::new(self.probe, policy, &plan.roots, SystemTime::now())
             .map_err(ApplyError::Io)?;

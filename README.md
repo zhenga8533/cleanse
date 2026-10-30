@@ -29,6 +29,19 @@ cleanse doctor                    # folders, rules, and capabilities on this sys
 
 Add `--json` to `scan` or `explain` for machine-readable output.
 
+### Settings
+
+To keep Cleanse away from some folders, or turn rules off, create `cleanse/config.toml` in your
+settings folder (`%APPDATA%` on Windows, `~/Library/Application Support` on macOS, `~/.config`
+on Linux). `cleanse doctor` shows where it is and what it says.
+
+```toml
+# Never touched: these folders, everything inside them, and anything containing them.
+exclude = ["~/work/vendor-snapshot", "D:/archive"]
+# Rule IDs from `cleanse rules`.
+disabled_rules = ["unity.library"]
+```
+
 ## What makes it different
 
 - **It explains itself.** Every item carries the rule that matched it, the evidence (for

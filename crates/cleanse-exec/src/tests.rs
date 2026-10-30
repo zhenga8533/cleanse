@@ -80,7 +80,7 @@ impl Fixture {
         let folders = self.system.known_folders();
         let matcher = Matcher::new(self.rules.rules(), folders, Os::current());
         let (found, _) = matcher.find(self.root.path()).unwrap();
-        let policy = ProtectedPolicy::for_system(folders, &self.system);
+        let policy = ProtectedPolicy::for_system(folders, &self.system, &[]);
         let roots = vec![self.root.path().to_path_buf()];
         let assessor = Assessor::new(&self.system, policy, &roots, SystemTime::now()).unwrap();
         let items: Vec<PlanItem> = found
@@ -93,7 +93,12 @@ impl Fixture {
     }
 
     fn executor(&self) -> Executor<'_> {
-        Executor::new(&self.rules, &self.system, self.data.path().to_path_buf())
+        Executor::new(
+            &self.rules,
+            &self.system,
+            &[],
+            self.data.path().to_path_buf(),
+        )
     }
 
     fn apply(&self, plan: &Plan) -> Vec<Outcome> {
@@ -343,7 +348,7 @@ fn refuses_to_run_elevated() {
     let plan = fixture.plan();
     let elevated = System::new().unwrap().elevated(true);
 
-    let result = Executor::new(&fixture.rules, &elevated, fixture.data.path().into()).apply(
+    let result = Executor::new(&fixture.rules, &elevated, &[], fixture.data.path().into()).apply(
         &plan,
         &|_| {},
         &AtomicBool::new(false),
@@ -360,7 +365,7 @@ fn removes_nothing_without_a_journal() {
     let not_a_folder = fixture.data.path().join("file");
     fs::write(&not_a_folder, "").unwrap();
 
-    let result = Executor::new(&fixture.rules, &fixture.system, not_a_folder).apply(
+    let result = Executor::new(&fixture.rules, &fixture.system, &[], not_a_folder).apply(
         &plan,
         &|_| {},
         &AtomicBool::new(false),
@@ -499,7 +504,7 @@ fn restoring_and_purging_refuse_to_run_elevated() {
     let fixture = Fixture::new();
     let entry = fixture.quarantine_one();
     let elevated = System::new().unwrap().elevated(true);
-    let executor = Executor::new(&fixture.rules, &elevated, fixture.data.path().into());
+    let executor = Executor::new(&fixture.rules, &elevated, &[], fixture.data.path().into());
 
     assert!(matches!(
         executor.restore(std::slice::from_ref(&entry)),
@@ -561,4 +566,31 @@ fn records_that_name_other_folders_arent_listed() {
 
     assert!(listing.entries.is_empty(), "{listing:?}");
     assert_eq!(listing.unreadable.len(), 2, "{listing:?}");
+}
+
+#[test]
+fn leaves_an_item_excluded_after_approval() {
+    let fixture = Fixture::new();
+    let plan = fixture.plan();
+    let excluded = [fixture.path("web")];
+
+    let outcomes = Executor::new(
+        &fixture.rules,
+        &fixture.system,
+        &excluded,
+        fixture.data.path().into(),
+    )
+    .apply(&plan, &|_| {}, &AtomicBool::new(false))
+    .unwrap()
+    .outcomes;
+
+    assert_eq!(
+        outcomes,
+        [skipped(SkipReason::Blocked {
+            concerns: vec![Concern::ProtectedLocation {
+                what: "a folder excluded in your settings".into()
+            }]
+        })]
+    );
+    fixture.assert_web_untouched();
 }

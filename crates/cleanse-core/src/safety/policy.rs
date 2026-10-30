@@ -67,9 +67,15 @@ pub struct ProtectedPolicy {
 }
 
 impl ProtectedPolicy {
-    /// The protected locations for this system and user.
-    pub fn for_system(folders: &KnownFolders, probe: &dyn Probe) -> Self {
-        Self::new(system_locations(folders), probe)
+    /// The protected locations for this system and user, plus the folders the user excluded.
+    pub fn for_system(folders: &KnownFolders, probe: &dyn Probe, excluded: &[PathBuf]) -> Self {
+        let mut locations = system_locations(folders);
+        locations.extend(excluded.iter().map(|path| Protected {
+            path: path.clone(),
+            reach: Reach::Subtree,
+            what: "a folder excluded in your settings".to_owned(),
+        }));
+        Self::new(locations, probe)
     }
 
     /// Reads the identities of the locations, and their ancestors, that exist.

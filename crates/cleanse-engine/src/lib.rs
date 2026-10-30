@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant, SystemTime};
 
+use cleanse_core::config::ConfigError;
 use cleanse_core::rules::{Detection, Matcher};
 use cleanse_core::safety::{Assessor, ProtectedPolicy};
 use cleanse_core::scan::{Descend, walk};
@@ -23,6 +24,7 @@ use cleanse_exec::Executor;
 use cleanse_model::{Candidate, CandidateId, EntryKind, Plan, QuarantineEntry};
 use rayon::prelude::*;
 
+pub use cleanse_core::config::Config;
 pub use cleanse_core::rules::{Base, Location, Os, Rule, RuleError, RuleSet, RuleTest, Target};
 pub use cleanse_exec::{Applied, ApplyError, Handled, Listing};
 pub use cleanse_platform::{KnownFolders, Probe, System};
@@ -33,8 +35,12 @@ const PROGRESS_INTERVAL: u64 = 1024;
 /// The rules and platform a session works with.
 #[derive(Debug)]
 pub struct Engine {
+    /// The built-in rules, minus those the settings turn off.
     rules: RuleSet,
     system: System,
+    config: Config,
+    /// Where the settings file is, if the system has a folder for app settings.
+    config_path: Option<PathBuf>,
     /// Cleanse's data folder, which holds the journal and the quarantine, if the system has a
     /// folder for app data.
     data_dir: Option<PathBuf>,
@@ -43,6 +49,7 @@ pub struct Engine {
 #[derive(Debug)]
 pub enum EngineError {
     Rules(RuleError),
+    Config(ConfigError),
     Io(io::Error),
 }
 
@@ -50,6 +57,7 @@ impl fmt::Display for EngineError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Rules(error) => write!(f, "a built-in rule is invalid: {error}"),
+            Self::Config(error) => write!(f, "your settings file has a problem: {error}"),
             Self::Io(error) => error.fmt(f),
         }
     }
@@ -60,6 +68,12 @@ impl Error for EngineError {}
 impl From<RuleError> for EngineError {
     fn from(error: RuleError) -> Self {
         Self::Rules(error)
+    }
+}
+
+impl From<ConfigError> for EngineError {
+    fn from(error: ConfigError) -> Self {
+        Self::Config(error)
     }
 }
 
@@ -106,13 +120,28 @@ pub enum Explanation<'e> {
 }
 
 impl Engine {
-    /// Loads the built-in rules and reads this system's folders and elevation.
+    /// Reads this system's folders and elevation and the user's settings, and loads the
+    /// built-in rules the settings don't turn off.
     pub fn new() -> Result<Self, EngineError> {
         let system = System::new()?;
-        let data_dir = system.known_folders().cleanse_data();
+        let folders = system.known_folders();
+        let config_path = Config::path(folders);
+        let config = match &config_path {
+            Some(path) => Config::load(path, folders.home.as_deref())?,
+            None => Config::default(),
+        };
+        let rules = RuleSet::builtin()?
+            .without(&config.disabled_rules)
+            .map_err(|message| ConfigError {
+                path: config_path.clone().unwrap_or_default(),
+                message,
+            })?;
+        let data_dir = folders.cleanse_data();
         Ok(Self {
-            rules: RuleSet::builtin()?,
+            rules,
             system,
+            config,
+            config_path,
             data_dir,
         })
     }
@@ -123,6 +152,14 @@ impl Engine {
 
     pub fn system(&self) -> &System {
         &self.system
+    }
+
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
+
+    pub fn config_path(&self) -> Option<&Path> {
+        self.config_path.as_deref()
     }
 
     /// What's scanned when no folders are given: the home folder, which holds the user's
@@ -191,7 +228,11 @@ impl Engine {
             .unwrap_or_else(PoisonError::into_inner)
             .into_values()
             .collect();
-        let policy = ProtectedPolicy::for_system(self.system.known_folders(), &self.system);
+        let policy = ProtectedPolicy::for_system(
+            self.system.known_folders(),
+            &self.system,
+            &self.config.exclude,
+        );
         let assessor = Assessor::new(&self.system, policy, &roots, SystemTime::now())?;
         let done = AtomicUsize::new(0);
         let total = detections.len();
@@ -227,7 +268,7 @@ impl Engine {
         fs::symlink_metadata(&path)?;
         let folders = self.system.known_folders();
         let matcher = Matcher::new(self.rules.rules(), folders, Os::current());
-        let policy = ProtectedPolicy::for_system(folders, &self.system);
+        let policy = ProtectedPolicy::for_system(folders, &self.system, &self.config.exclude);
 
         let is_dir = |path: &Path| fs::symlink_metadata(path).is_ok_and(|m| m.is_dir());
         let detection = path
@@ -293,6 +334,11 @@ impl Engine {
                 "this system has no folder for app data",
             ))
         })?;
-        Ok(Executor::new(&self.rules, &self.system, data_dir))
+        Ok(Executor::new(
+            &self.rules,
+            &self.system,
+            &self.config.exclude,
+            data_dir,
+        ))
     }
 }

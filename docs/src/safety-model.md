@@ -36,6 +36,8 @@ blocks, including any new kind of concern until it's deliberately classified.
    images, and the inside of macOS bundles. No candidate may be, or contain, a protected path.
    Paths are compared by file identity as well as case-folded text, which defeats 8.3 short
    names, case and Unicode differences, and firmlinks. Rules can't override this policy.
+   Folders excluded in the settings file are protected the same way, with everything inside
+   them.
 2. **Containment.** A candidate must be inside a root the user chose and inside the base its
    rule declares.
 3. **Links and mounts.** Links, junctions, and other reparse points are never followed;
