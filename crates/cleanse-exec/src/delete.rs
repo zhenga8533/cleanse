@@ -50,7 +50,7 @@ pub(crate) fn delete(
     // On Windows this fails while a program has a file inside open, before anything is removed.
     if let Err(error) = fs::rename(path, tombstone) {
         return Outcome::Failed {
-            error: format!("couldn't start removing it: {error}"),
+            error: format!("Couldn't start removing it: {error}"),
         };
     }
 
@@ -80,7 +80,7 @@ fn put_back(path: &Path, tombstone: &Path) -> Outcome {
         },
         Err(error) => Outcome::Failed {
             error: format!(
-                "something replaced it while it was being removed, and that couldn't be put \
+                "Something replaced it while it was being removed, and that couldn't be put \
                  back ({error}). It's in {}",
                 tombstone.display()
             ),

@@ -9,6 +9,8 @@ use std::path::Path;
 use std::process::{Command, Output};
 use std::time::{Duration, SystemTime};
 
+use cleanse_engine::{Probe, System};
+
 fn cleanse(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_cleanse"))
         .args(args)
@@ -51,6 +53,18 @@ fn fixture() -> tempfile::TempDir {
 
 fn arg(path: &Path) -> &str {
     path.to_str().unwrap()
+}
+
+fn stderr(output: &Output) -> String {
+    String::from_utf8(output.stderr.clone()).unwrap()
+}
+
+fn elevated() -> bool {
+    System::new().unwrap().is_elevated()
+}
+
+fn node_modules_intact(root: &Path) -> bool {
+    root.join("web/node_modules/left-pad/index.js").exists()
 }
 
 #[test]
@@ -157,4 +171,118 @@ fn doctor_reports_rules_and_folders() {
 
     assert!(report.contains("Rules: 29 built in"), "{report}");
     assert!(report.contains("Home"), "{report}");
+}
+
+#[test]
+fn clean_without_a_terminal_asks_for_yes_and_removes_nothing() {
+    let root = fixture();
+
+    let output = cleanse(&["clean", arg(root.path())]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("--yes"), "{}", stderr(&output));
+    assert!(node_modules_intact(root.path()));
+}
+
+#[test]
+fn clean_yes_needs_the_highest_tier_to_delete() {
+    let root = fixture();
+
+    let output = cleanse(&["clean", "--yes", arg(root.path())]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("--max-risk"), "{}", stderr(&output));
+    assert!(node_modules_intact(root.path()));
+}
+
+#[test]
+fn clean_dry_run_lists_what_would_be_deleted_and_removes_nothing() {
+    let root = fixture();
+
+    let report = stdout(&cleanse(&["clean", "--dry-run", arg(root.path())]));
+
+    assert!(report.contains("node_modules"), "{report}");
+    assert!(report.contains("--yes would delete 1 item"), "{report}");
+    assert!(node_modules_intact(root.path()));
+}
+
+#[test]
+fn clean_dry_run_stays_within_the_highest_tier() {
+    let root = fixture();
+
+    let report = stdout(&cleanse(&[
+        "clean",
+        "--dry-run",
+        "--max-risk",
+        "safe",
+        arg(root.path()),
+    ]));
+
+    assert!(report.contains("Nothing was selected"), "{report}");
+}
+
+/// Windows CI runs tests as an administrator, so that's where this gets checked.
+#[test]
+fn clean_refuses_to_delete_while_elevated() {
+    if !elevated() {
+        return;
+    }
+    let root = fixture();
+
+    let output = cleanse(&[
+        "clean",
+        "--yes",
+        "--max-risk",
+        "regenerable",
+        arg(root.path()),
+    ]);
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        stderr(&output).contains("administrator or root"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(node_modules_intact(root.path()));
+}
+
+/// Unix only, where moving the home folder also moves Cleanse's journal out of the real one.
+#[cfg(unix)]
+#[test]
+fn clean_yes_deletes_the_preselected_items_and_journals_them() {
+    if elevated() {
+        return;
+    }
+    let root = fixture();
+    let home = tempfile::tempdir().unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cleanse"))
+        .args(["clean", "--yes", "--max-risk", "regenerable"])
+        .arg(root.path())
+        .env("HOME", home.path())
+        .env_remove("XDG_DATA_HOME")
+        .output()
+        .unwrap();
+
+    let report = stdout(&output);
+    assert!(report.contains("Deleted 1 item"), "{report}");
+    assert!(!root.path().join("web/node_modules").exists());
+    assert!(root.path().join("web/package.json").exists());
+    let journals = files_under(home.path());
+    assert_eq!(journals.len(), 1, "{journals:?}");
+    assert!(report.contains(arg(&journals[0])), "{report}");
+}
+
+#[cfg(unix)]
+fn files_under(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut files = Vec::new();
+    for entry in fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            files.extend(files_under(&path));
+        } else {
+            files.push(path);
+        }
+    }
+    files
 }

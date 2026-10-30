@@ -7,9 +7,10 @@ mind. It looks for regenerable build output, package-manager caches, AI coding a
 and everyday junk; tells you why each item is safe to remove and how it comes back; and never
 removes anything you haven't approved.
 
-> **Status: pre-alpha.** The read-only preview works: `cleanse scan` and `cleanse explain`
-> find and assess what could be removed, and nothing is ever removed. Cleanup comes in v0.2.
-> There are no release binaries yet; build from source.
+> **Status: pre-alpha.** `cleanse scan` and `cleanse explain` find and assess what could be
+> removed. On the main branch, `cleanse clean` deletes what you approve; quarantine and restore
+> follow in v0.2. [v0.1.0](https://github.com/zhenga8533/cleanse/releases/tag/v0.1.0), the
+> read-only preview, has prebuilt binaries and installers.
 
 ## Try it
 
@@ -17,6 +18,8 @@ removes anything you haven't approved.
 cleanse scan ~/code               # what could be removed, grouped by rule, largest first
 cleanse scan --show-protected     # also what's kept and why (defaults to your home folder)
 cleanse explain ~/code/app/node_modules
+cleanse clean ~/code              # choose what to delete, then confirm; each item is re-checked first
+cleanse clean --dry-run ~/code    # what `clean --yes --max-risk regenerable` would delete
 cleanse rules                     # every rule; `cleanse rules show <id>` for one
 cleanse doctor                    # folders, rules, and capabilities on this system
 ```
