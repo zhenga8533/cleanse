@@ -20,6 +20,8 @@ pub struct Protected {
     pub reach: Reach,
     /// What it is, for explanations: "SSH keys", "installed programs".
     pub what: String,
+    /// Folders inside a subtree that aren't protected by it, with everything inside them.
+    pub except: Vec<PathBuf>,
 }
 
 /// Folders under the home folder whose contents are never cleaned. AI agents' folders hold
@@ -42,6 +44,31 @@ const HOME_SUBTREES: &[(&str, &str)] = &[
     (".gemini", "Gemini CLI's data"),
 ];
 
+/// Folders inside the [`HOME_SUBTREES`] that the owner's own documentation says can be deleted.
+/// Built-in rules match exactly these, and everything else inside stays protected. They're kept
+/// here, with the safety checks, so a rule can never unprotect anything on its own.
+const DISPOSABLE: &[(&str, &[&str])] = &[(
+    // https://code.claude.com/docs/en/claude-directory, under "Clear local data"
+    ".claude",
+    &[
+        "backups",
+        "cache",
+        "debug",
+        "file-history",
+        "image-cache",
+        "logs",
+        "paste-cache",
+        "plans",
+        "plugins/.trash",
+        "session-env",
+        "shell-snapshots",
+        "skills/.trash",
+        "statsig",
+        "todos",
+        "usage-data",
+    ],
+)];
+
 /// Never cleaned inside: a bundle is one unit, and its contents aren't build output.
 const BUNDLE_EXTENSIONS: &[&str] = &["app", "photoslibrary", "xcarchive"];
 
@@ -58,9 +85,11 @@ const ELECTRON_APP: [&str; 2] = ["resources", "app"];
 #[derive(Debug)]
 pub struct ProtectedPolicy {
     entries: Vec<(Vec<String>, Protected)>,
+    /// Each entry's `except` folders, compared the same way.
+    except_keys: Vec<Vec<Vec<String>>>,
     /// Identities of subtree-protected locations, so a path inside one is recognized however
     /// it's spelled, such as through an 8.3 short name.
-    subtree_ids: HashMap<FileIdentity, usize>,
+    subtree_ids: HashMap<FileIdentity, Vec<usize>>,
     /// Identities of every protected location and all of its ancestors, so a path that is or
     /// contains one is recognized however it's spelled.
     containing_ids: HashMap<FileIdentity, usize>,
@@ -74,6 +103,7 @@ impl ProtectedPolicy {
             path: path.clone(),
             reach: Reach::Subtree,
             what: "a folder excluded in your settings".to_owned(),
+            except: Vec::new(),
         }));
         Self::new(locations, probe)
     }
@@ -92,7 +122,7 @@ impl ProtectedPolicy {
             if location.reach == Reach::Subtree
                 && let Some(id) = identity_of(&location.path)
             {
-                subtree_ids.entry(id).or_insert(index);
+                subtree_ids.entry(id).or_insert_with(Vec::new).push(index);
             }
             for ancestor in location.path.ancestors() {
                 if let Some(id) = identity_of(ancestor) {
@@ -101,6 +131,10 @@ impl ProtectedPolicy {
             }
         }
         Self {
+            except_keys: locations
+                .iter()
+                .map(|location| location.except.iter().map(|path| key(path)).collect())
+                .collect(),
             entries: locations
                 .into_iter()
                 .map(|location| (key(&location.path), location))
@@ -141,17 +175,35 @@ impl ProtectedPolicy {
         if path_key.iter().any(|part| part == ".git") {
             return Some("a Git repository's internal data");
         }
-        for (location_key, location) in &self.entries {
+        for (index, (location_key, location)) in self.entries.iter().enumerate() {
             let contains = location_key.starts_with(&path_key);
-            let inside = location.reach == Reach::Subtree && path_key.starts_with(location_key);
+            let inside = location.reach == Reach::Subtree
+                && path_key.starts_with(location_key)
+                && !self.excepted(index, &path_key);
             if contains || inside {
                 return Some(&location.what);
             }
         }
         let by_identity = own
-            .and_then(|id| self.containing_ids.get(&id))
-            .or_else(|| ancestors.iter().find_map(|id| self.subtree_ids.get(id)));
-        by_identity.map(|&index| self.entries[index].1.what.as_str())
+            .and_then(|id| self.containing_ids.get(&id).copied())
+            .or_else(|| {
+                ancestors.iter().find_map(|id| {
+                    self.subtree_ids
+                        .get(id)?
+                        .iter()
+                        .copied()
+                        .find(|&index| !self.excepted(index, &path_key))
+                })
+            });
+        by_identity.map(|index| self.entries[index].1.what.as_str())
+    }
+
+    /// Whether the path is inside one of entry `index`'s exceptions, spelled the usual way. A
+    /// path reaching it another way, such as through a short name, stays protected.
+    fn excepted(&self, index: usize, path_key: &[String]) -> bool {
+        self.except_keys[index]
+            .iter()
+            .any(|except| path_key.starts_with(except))
     }
 }
 
@@ -211,6 +263,7 @@ impl Locations {
                 path,
                 reach,
                 what: what.to_owned(),
+                except: Vec::new(),
             });
         }
     }
@@ -238,10 +291,24 @@ fn user_locations(locations: &mut Locations, folders: &KnownFolders) {
         "Cleanse's journal of what it removed",
     );
     if let Some(home) = &folders.home {
-        for (relative, what) in HOME_SUBTREES {
-            let mut path = home.clone();
+        let under = |folder: &Path, relative: &str| {
+            let mut path = folder.to_path_buf();
             path.extend(relative.split('/'));
-            locations.add(Some(path), Reach::Subtree, what);
+            path
+        };
+        for (relative, what) in HOME_SUBTREES {
+            let path = under(home, relative);
+            let except = DISPOSABLE
+                .iter()
+                .filter(|(folder, _)| folder == relative)
+                .flat_map(|(_, inside)| inside.iter().map(|inner| under(&path, inner)))
+                .collect();
+            locations.0.push(Protected {
+                path,
+                reach: Reach::Subtree,
+                what: (*what).to_owned(),
+                except,
+            });
         }
     }
 }

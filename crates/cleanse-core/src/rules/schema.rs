@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use cleanse_model::{Category, Risk, RuleId};
+use cleanse_platform::process_name;
 use serde::Deserialize;
 
 /// One cleanup rule, as written in a rule file.
@@ -19,9 +20,22 @@ pub struct Rule {
     pub regenerate: Option<String>,
     #[serde(rename = "match")]
     pub target: Target,
+    /// The app that writes what this rule matches. While it's running, matches are kept.
+    #[serde(default)]
+    pub owner: Option<Owner>,
     /// Small directory trees, and exactly what this rule must match in each.
     #[serde(default, rename = "test")]
     pub tests: Vec<RuleTest>,
+}
+
+/// An app, and how to tell that it's running.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Owner {
+    /// Its name, like "Claude Code".
+    pub app: String,
+    /// The names of its programs, lowercase and without `.exe`, like `claude`.
+    pub processes: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -156,6 +170,22 @@ impl Rule {
                 }
                 for location in locations {
                     validate_relative(&location.path)?;
+                }
+            }
+        }
+        if let Some(owner) = &self.owner {
+            if owner.app.trim().is_empty() {
+                return Err("`owner.app` is empty".into());
+            }
+            if owner.processes.is_empty() {
+                return Err("`owner.processes` is empty".into());
+            }
+            for process in &owner.processes {
+                if process.is_empty() || process_name(process) != *process {
+                    return Err(format!(
+                        "`{process}` in `owner.processes` must be a lowercase program name \
+                         without `.exe`"
+                    ));
                 }
             }
         }

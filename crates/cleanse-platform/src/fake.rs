@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::{FileFacts, KnownFolders, Probe};
+use crate::{FileFacts, KnownFolders, Probe, process_name};
 
 /// A [`Probe`] that answers only what a test has told it.
 #[derive(Debug, Default)]
@@ -10,6 +10,7 @@ pub struct FakeProbe {
     files: HashMap<PathBuf, FileFacts>,
     known_folders: KnownFolders,
     elevated: bool,
+    running: HashSet<String>,
 }
 
 impl FakeProbe {
@@ -31,6 +32,13 @@ impl FakeProbe {
         self.elevated = elevated;
         self
     }
+
+    /// Reports a process with this name as running.
+    #[must_use]
+    pub fn with_running(mut self, name: &str) -> Self {
+        self.running.insert(process_name(name));
+        self
+    }
 }
 
 impl Probe for FakeProbe {
@@ -50,5 +58,9 @@ impl Probe for FakeProbe {
 
     fn is_elevated(&self) -> bool {
         self.elevated
+    }
+
+    fn running_processes(&self) -> io::Result<HashSet<String>> {
+        Ok(self.running.clone())
     }
 }

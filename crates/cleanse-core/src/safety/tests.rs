@@ -3,7 +3,9 @@
     reason = "tests build fixture trees and repositories, using the git command line"
 )]
 
+use std::collections::HashSet;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime};
@@ -13,7 +15,7 @@ use cleanse_platform::{FakeProbe, FileFacts, KnownFolders, Probe, System};
 use proptest::prelude::*;
 
 use super::{Assessor, Protected, ProtectedPolicy, Reach};
-use crate::rules::{Matcher, Os, RuleSet};
+use crate::rules::{Matcher, Os, RuleSet, Target};
 
 fn write(path: &Path, contents: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -53,6 +55,7 @@ fn location(path: PathBuf, reach: Reach, what: &str) -> Protected {
         path,
         reach,
         what: what.into(),
+        except: Vec::new(),
     }
 }
 
@@ -581,4 +584,159 @@ fn canaries_are_never_removable() {
         }
     }
     assert_eq!(candidates.len(), 7, "{candidates:#?}");
+}
+
+/// The real filesystem, with the running programs a test chooses: `None` when they can't be
+/// listed. On a developer's machine Claude Code may well be running.
+struct Running {
+    system: System,
+    running: Option<HashSet<String>>,
+}
+
+impl Running {
+    fn programs(names: &[&str]) -> Self {
+        Self {
+            system: system(),
+            running: Some(names.iter().map(|name| (*name).to_owned()).collect()),
+        }
+    }
+}
+
+impl Probe for Running {
+    fn inspect(&self, path: &Path) -> io::Result<FileFacts> {
+        self.system.inspect(path)
+    }
+
+    fn known_folders(&self) -> &KnownFolders {
+        self.system.known_folders()
+    }
+
+    fn is_elevated(&self) -> bool {
+        false
+    }
+
+    fn running_processes(&self) -> io::Result<HashSet<String>> {
+        self.running
+            .clone()
+            .ok_or_else(|| io::Error::other("can't list processes"))
+    }
+}
+
+/// A fake home whose `.claude` holds every folder a Claude Code rule matches, plus data that
+/// must stay: a transcript, and a plugin that looks like a JavaScript project.
+fn claude_home(root: &Path) -> Vec<PathBuf> {
+    let rules = RuleSet::builtin().unwrap();
+    let home = root.join("home");
+    let mut folders = Vec::new();
+    for rule in rules
+        .rules()
+        .iter()
+        .filter(|rule| rule.id.0.starts_with("claude-code."))
+    {
+        let Target::KnownLocation { locations } = &rule.target else {
+            panic!("{} isn't a known location", rule.id);
+        };
+        for location in locations
+            .iter()
+            .filter(|location| location.os == Os::current())
+        {
+            let folder = home.join(&location.path);
+            write(&folder.join("x"), "x");
+            folders.push(folder);
+        }
+    }
+    write(&home.join(".claude/projects/p/session.jsonl"), "{}");
+    write(&home.join(".claude/plugins/p/package.json"), "{}");
+    write(&home.join(".claude/plugins/p/node_modules/a/index.js"), "x");
+    folders
+}
+
+#[test]
+fn claude_codes_documented_folders_are_removable_and_the_rest_stays_protected() {
+    let root = tempfile::tempdir().unwrap();
+    let removable = claude_home(root.path());
+
+    let candidates = assess_all(root.path(), &Running::programs(&[]));
+
+    for folder in &removable {
+        let candidate = candidates
+            .iter()
+            .find(|candidate| &candidate.found.path == folder)
+            .unwrap_or_else(|| panic!("{} wasn't matched", folder.display()));
+        assert_eq!(
+            candidate.risk(),
+            candidate.found.declared_risk,
+            "{candidate:#?}"
+        );
+    }
+    let plugin = candidates
+        .iter()
+        .find(|candidate| candidate.found.path.ends_with("p/node_modules"))
+        .unwrap();
+    assert_eq!(plugin.risk(), Risk::Protected);
+    assert_eq!(
+        plugin.concerns()[0],
+        Concern::ProtectedLocation {
+            what: "Claude Code's data".into()
+        }
+    );
+    assert_eq!(candidates.len(), removable.len() + 1, "{candidates:#?}");
+}
+
+#[test]
+fn an_apps_folders_are_kept_while_it_runs() {
+    let root = tempfile::tempdir().unwrap();
+    claude_home(root.path());
+
+    let running = assess_all(root.path(), &Running::programs(&["claude"]));
+    let unknown = assess_all(
+        root.path(),
+        &Running {
+            system: system(),
+            running: None,
+        },
+    );
+
+    let debug = |candidates: &[Candidate]| {
+        candidates
+            .iter()
+            .find(|candidate| candidate.found.path.ends_with(".claude/debug"))
+            .unwrap()
+            .clone()
+    };
+    for (candidate, concern) in [
+        (
+            debug(&running),
+            Concern::OwnerRunning {
+                app: "Claude Code".into(),
+            },
+        ),
+        (
+            debug(&unknown),
+            Concern::OwnerUnchecked {
+                app: "Claude Code".into(),
+            },
+        ),
+    ] {
+        assert_eq!(candidate.risk(), Risk::Protected);
+        assert!(candidate.concerns().contains(&concern), "{candidate:#?}");
+    }
+}
+
+#[test]
+fn an_exception_doesnt_lift_another_protection_of_the_same_folder() {
+    let claude = fake_path(&["home", ".claude"]);
+    let debug = claude.join("debug");
+    let mut documented = location(claude.clone(), Reach::Subtree, "Claude Code's data");
+    documented.except.push(debug.clone());
+    let excluded = location(claude, Reach::Subtree, "a folder excluded in your settings");
+
+    let alone = policy(vec![documented.clone()]);
+    let both = policy(vec![documented, excluded]);
+
+    assert_eq!(alone.check(&debug, None, &[]), None);
+    assert_eq!(
+        both.check(&debug, None, &[]),
+        Some("a folder excluded in your settings")
+    );
 }

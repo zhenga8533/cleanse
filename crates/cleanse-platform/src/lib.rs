@@ -19,6 +19,7 @@ mod tests;
 #[cfg(not(any(unix, windows)))]
 compile_error!("Cleanse supports Windows, macOS, and Linux");
 
+use std::collections::HashSet;
 use std::env;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -47,6 +48,19 @@ pub trait Probe: Send + Sync {
 
     /// Whether the process runs as an administrator (Windows) or root (Unix).
     fn is_elevated(&self) -> bool;
+
+    /// The names of the programs running now, for every user, as [`process_name`] gives them.
+    fn running_processes(&self) -> io::Result<HashSet<String>>;
+}
+
+/// A program's process name for comparing: lowercase, without a trailing `.exe`, so `Claude.exe`
+/// on Windows, `Claude` on macOS, and `claude` on Linux all read `claude`.
+pub fn process_name(name: &str) -> String {
+    let name = name.to_lowercase();
+    match name.strip_suffix(".exe") {
+        Some(stem) => stem.to_owned(),
+        None => name,
+    }
 }
 
 /// What the platform reports about one file or directory, read without following links.
@@ -173,5 +187,19 @@ impl Probe for System {
 
     fn is_elevated(&self) -> bool {
         self.elevated
+    }
+
+    fn running_processes(&self) -> io::Result<HashSet<String>> {
+        let mut system = sysinfo::System::new().map_err(io::Error::other)?;
+        system.refresh_processes_specifics(
+            sysinfo::ProcessesToUpdate::All,
+            true,
+            sysinfo::ProcessRefreshKind::nothing(),
+        );
+        Ok(system
+            .processes()
+            .values()
+            .map(|process| process_name(&process.name().to_string_lossy()))
+            .collect())
     }
 }

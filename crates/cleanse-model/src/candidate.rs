@@ -146,6 +146,8 @@ pub enum Concern {
     RecentlyModified { minutes_ago: u64 },
     /// The app that owns the item is running.
     OwnerRunning { app: String },
+    /// The running programs couldn't be listed, so the app that owns the item may be running.
+    OwnerUnchecked { app: String },
     /// The item is in a cloud-synced folder, so removing it would remove it on every device.
     CloudSynced { provider: String },
     /// The item belongs to another user.
@@ -194,6 +196,7 @@ impl fmt::Display for Concern {
                 write!(f, "Modified {minutes_ago} minutes ago")
             }
             Self::OwnerRunning { app } => write!(f, "{app} is running"),
+            Self::OwnerUnchecked { app } => write!(f, "Couldn't check whether {app} is running"),
             Self::CloudSynced { provider } => write!(
                 f,
                 "Synced by {provider}, so removing it would remove it on every device"
@@ -339,6 +342,9 @@ mod tests {
             },
             Concern::CloudSynced {
                 provider: "OneDrive".into(),
+            },
+            Concern::OwnerUnchecked {
+                app: "Claude Code".into(),
             },
             Concern::OwnedByAnotherUser,
             Concern::Unverifiable,

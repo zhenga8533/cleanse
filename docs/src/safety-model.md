@@ -37,7 +37,9 @@ blocks, including any new kind of concern until it's deliberately classified.
    Paths are compared by file identity as well as case-folded text, which defeats 8.3 short
    names, case and Unicode differences, and firmlinks. Rules can't override this policy.
    Folders excluded in the settings file are protected the same way, with everything inside
-   them.
+   them. Inside an AI agent's folder, the only exceptions are the folders the agent's own
+   documentation says can be deleted, listed with the safety checks rather than in rules. An
+   exception lifts only that one protection, so a folder the user excluded stays excluded.
 2. **Containment.** A candidate must be inside a root the user chose and inside the base its
    rule declares.
 3. **Links and mounts.** Links, junctions, and other reparse points are never followed;
@@ -47,7 +49,8 @@ blocks, including any new kind of concern until it's deliberately classified.
    contain files that look like secrets. Anything Cleanse couldn't fully read is blocked rather
    than assumed empty.
 5. **Activity.** Recently modified items, and items whose owning app, agent, or browser is
-   running, are blocked as in use.
+   running, are blocked as in use. A rule names its owner's programs; if the running programs
+   can't be listed, its matches are blocked too.
 6. **Cloud sync.** OneDrive, iCloud Drive, Dropbox, and Google Drive folders are protected by
    default because deletions sync to the cloud and other devices. Placeholder file contents are
    never read, since that would download them.
@@ -60,8 +63,12 @@ a secret, or is a virtual machine disk. A file modified in the last ten minutes 
 
 ### Not covered yet
 
-- **Owning app running** and **other users' files**: need process and ownership checks, which
-  come with the AI agent rules in M2.
+- **Other users' files**: need an ownership check.
+- **Owners started another way**: programs are recognized by name, so Claude Code installed
+  with npm, which runs as `node`, isn't recognized as running. Recent modification still
+  blocks folders it's writing to.
+- **Relocated agent folders**: if `CLAUDE_CONFIG_DIR` moves Claude Code's data out of
+  `~/.claude`, that folder isn't protected or cleaned.
 - **Browser profiles**: no rule matches inside them yet; they'll be protected before browser
   cache rules arrive.
 - **Uncommitted changes** and **recent project activity** warnings: need a working-tree scan.

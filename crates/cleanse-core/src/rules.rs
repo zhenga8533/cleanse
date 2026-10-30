@@ -22,6 +22,7 @@ pub use schema::{Base, Location, Os, Rule, RuleTest, Target};
 /// The rule files that ship with Cleanse, embedded at build time. A test checks that this list
 /// matches the files in `rules/`.
 const BUILTIN: &[(&str, &str)] = &[
+    ("ai-agents.toml", include_str!("../rules/ai-agents.toml")),
     ("dotnet.toml", include_str!("../rules/dotnet.toml")),
     (
         "game-engines.toml",
