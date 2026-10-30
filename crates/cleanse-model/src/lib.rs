@@ -8,6 +8,7 @@ mod category;
 mod entry;
 mod identity;
 mod plan;
+mod quarantine;
 mod risk;
 mod size;
 
@@ -16,5 +17,6 @@ pub use category::Category;
 pub use entry::EntryKind;
 pub use identity::FileIdentity;
 pub use plan::{Outcome, Plan, PlanItem, SkipReason};
+pub use quarantine::{EntryOutcome, QuarantineEntry};
 pub use risk::{Disposal, Risk};
 pub use size::Size;

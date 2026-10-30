@@ -7,11 +7,15 @@ use std::time::{Duration, SystemTime};
 
 use cleanse_core::rules::{Matcher, Os, RuleSet};
 use cleanse_core::safety::{Assessor, ProtectedPolicy};
-use cleanse_model::{CandidateId, Concern, Disposal, Outcome, Plan, PlanItem, Size, SkipReason};
+use cleanse_model::{
+    CandidateId, Concern, Disposal, EntryOutcome, Outcome, Plan, PlanItem, QuarantineEntry, RuleId,
+    Size, SkipReason,
+};
 use cleanse_platform::{Probe, System};
 use serde_json::Value;
 use tempfile::TempDir;
 
+use super::quarantine::Quarantine;
 use super::{ApplyError, Executor, delete};
 
 /// Writes a file dated a day ago, so it doesn't count as recent activity.
@@ -37,10 +41,10 @@ fn link_dir(target: &Path, link: &Path) {
     junction::create(target, link).unwrap();
 }
 
-/// A JavaScript project under a temporary folder, with its own journal folder beside it.
+/// A JavaScript project under a temporary folder, with its own Cleanse data folder beside it.
 struct Fixture {
     root: TempDir,
-    journal: TempDir,
+    data: TempDir,
     rules: RuleSet,
     system: System,
 }
@@ -56,7 +60,7 @@ impl Fixture {
         );
         Self {
             root,
-            journal: tempfile::tempdir().unwrap(),
+            data: tempfile::tempdir().unwrap(),
             rules: RuleSet::builtin().unwrap(),
             system: System::new().unwrap().elevated(false),
         }
@@ -89,7 +93,7 @@ impl Fixture {
     }
 
     fn executor(&self) -> Executor<'_> {
-        Executor::new(&self.rules, &self.system, self.journal.path().to_path_buf())
+        Executor::new(&self.rules, &self.system, self.data.path().to_path_buf())
     }
 
     fn apply(&self, plan: &Plan) -> Vec<Outcome> {
@@ -99,18 +103,49 @@ impl Fixture {
             .outcomes
     }
 
-    /// The events of the only journal written, in order.
-    fn journal_events(&self) -> Vec<Value> {
-        let files: Vec<_> = fs::read_dir(self.journal.path())
+    /// The events of each journal written, oldest first.
+    fn journals(&self) -> Vec<Vec<Value>> {
+        let mut files: Vec<_> = fs::read_dir(self.data.path().join("journal"))
             .unwrap()
             .map(|entry| entry.unwrap().path())
             .collect();
-        assert_eq!(files.len(), 1, "{files:?}");
-        fs::read_to_string(&files[0])
-            .unwrap()
-            .lines()
-            .map(|line| serde_json::from_str(line).unwrap())
+        files.sort();
+        files
+            .iter()
+            .map(|file| {
+                fs::read_to_string(file)
+                    .unwrap()
+                    .lines()
+                    .map(|line| serde_json::from_str(line).unwrap())
+                    .collect()
+            })
             .collect()
+    }
+
+    /// The events of the only journal written, in order.
+    fn journal_events(&self) -> Vec<Value> {
+        let mut journals = self.journals();
+        assert_eq!(journals.len(), 1, "{journals:?}");
+        journals.remove(0)
+    }
+
+    /// Quarantines the project's `node_modules` and returns its entry.
+    fn quarantine_one(&self) -> QuarantineEntry {
+        let mut plan = self.plan();
+        plan.items[0].disposal = Disposal::Quarantine;
+        let outcomes = self.apply(&plan);
+        assert!(
+            matches!(&outcomes[..], [Outcome::Quarantined { .. }]),
+            "{outcomes:?}"
+        );
+        let listing = self.executor().quarantined().unwrap();
+        assert_eq!(listing.entries.len(), 1, "{listing:?}");
+        listing.entries[0].clone()
+    }
+
+    fn quarantine_is_empty(&self) -> bool {
+        let listing = self.executor().quarantined().unwrap();
+        listing.entries.is_empty() && listing.unreadable.is_empty()
     }
 
     fn assert_web_untouched(&self) {
@@ -277,12 +312,12 @@ fn leaves_an_item_with_new_kinds_of_warnings() {
 fn leaves_items_for_disposals_that_arent_available_yet() {
     let fixture = Fixture::new();
     let mut plan = fixture.plan();
-    plan.items[0].disposal = Disposal::Quarantine;
+    plan.items[0].disposal = Disposal::Trash;
 
     assert_eq!(
         fixture.apply(&plan),
         [skipped(SkipReason::Unsupported {
-            disposal: Disposal::Quarantine
+            disposal: Disposal::Trash
         })]
     );
     fixture.assert_web_untouched();
@@ -308,7 +343,7 @@ fn refuses_to_run_elevated() {
     let plan = fixture.plan();
     let elevated = System::new().unwrap().elevated(true);
 
-    let result = Executor::new(&fixture.rules, &elevated, fixture.journal.path().into()).apply(
+    let result = Executor::new(&fixture.rules, &elevated, fixture.data.path().into()).apply(
         &plan,
         &|_| {},
         &AtomicBool::new(false),
@@ -322,7 +357,7 @@ fn refuses_to_run_elevated() {
 fn removes_nothing_without_a_journal() {
     let fixture = Fixture::new();
     let plan = fixture.plan();
-    let not_a_folder = fixture.journal.path().join("file");
+    let not_a_folder = fixture.data.path().join("file");
     fs::write(&not_a_folder, "").unwrap();
 
     let result = Executor::new(&fixture.rules, &fixture.system, not_a_folder).apply(
@@ -384,4 +419,146 @@ fn leaves_a_folder_whole_while_a_file_inside_is_open() {
         "{outcomes:?}"
     );
     fixture.assert_web_untouched();
+}
+
+#[test]
+fn quarantines_an_item_and_restores_it() {
+    let fixture = Fixture::new();
+    let original = fixture.plan().items[0].path.clone();
+
+    let entry = fixture.quarantine_one();
+
+    assert!(!fixture.node_modules().exists());
+    assert_eq!(entry.original, original);
+    assert_eq!(entry.rule.0, "javascript.node_modules");
+    assert_eq!(entry.size.logical, 4);
+    let events = fixture.journal_events();
+    let kinds: Vec<&str> = events
+        .iter()
+        .map(|event| event["event"].as_str().unwrap())
+        .collect();
+    assert_eq!(kinds, ["started", "quarantining", "done", "finished"]);
+    assert_eq!(events[1]["entry"].as_str(), Some(entry.id.as_str()));
+    assert_eq!(events[2]["outcome"]["kind"], "quarantined");
+
+    let handled = fixture.executor().restore(&[entry]).unwrap();
+
+    assert_eq!(handled.outcomes, [EntryOutcome::Restored]);
+    fixture.assert_web_untouched();
+    assert!(fixture.quarantine_is_empty());
+    let restore = &fixture.journals()[1];
+    assert_eq!(restore[0]["action"], "restore");
+    assert_eq!(restore[1]["event"], "restoring");
+    assert_eq!(restore[2]["outcome"]["kind"], "restored");
+}
+
+#[test]
+fn purging_deletes_a_quarantined_item_for_good() {
+    let fixture = Fixture::new();
+    let entry = fixture.quarantine_one();
+
+    let handled = fixture
+        .executor()
+        .purge(std::slice::from_ref(&entry))
+        .unwrap();
+
+    assert_eq!(
+        handled.outcomes,
+        [EntryOutcome::Purged { size: entry.size }]
+    );
+    assert!(fixture.quarantine_is_empty());
+    assert!(!fixture.node_modules().exists());
+    assert!(
+        !fixture
+            .data
+            .path()
+            .join("quarantine")
+            .join(&entry.id)
+            .exists()
+    );
+}
+
+#[test]
+fn restoring_leaves_an_item_in_quarantine_when_its_place_is_taken() {
+    let fixture = Fixture::new();
+    let entry = fixture.quarantine_one();
+    write_old(&fixture.path("web/node_modules/other/index.js"), "y");
+
+    let handled = fixture.executor().restore(&[entry]).unwrap();
+
+    assert!(
+        matches!(&handled.outcomes[..], [EntryOutcome::Failed { error }] if error.starts_with("Something is at")),
+        "{handled:?}"
+    );
+    assert_eq!(fixture.executor().quarantined().unwrap().entries.len(), 1);
+    assert!(fixture.path("web/node_modules/other/index.js").exists());
+}
+
+#[test]
+fn restoring_and_purging_refuse_to_run_elevated() {
+    let fixture = Fixture::new();
+    let entry = fixture.quarantine_one();
+    let elevated = System::new().unwrap().elevated(true);
+    let executor = Executor::new(&fixture.rules, &elevated, fixture.data.path().into());
+
+    assert!(matches!(
+        executor.restore(std::slice::from_ref(&entry)),
+        Err(ApplyError::Elevated)
+    ));
+    assert!(matches!(
+        executor.purge(std::slice::from_ref(&entry)),
+        Err(ApplyError::Elevated)
+    ));
+    assert_eq!(fixture.executor().quarantined().unwrap().entries, [entry]);
+}
+
+#[test]
+fn quarantine_puts_back_whatever_replaced_the_folder_before_it_moved() {
+    let fixture = Fixture::new();
+    let mut other = fixture
+        .system
+        .inspect(&fixture.node_modules())
+        .unwrap()
+        .identity;
+    other.file += 1;
+    let entry = QuarantineEntry {
+        id: Quarantine::new_id(),
+        original: fixture.node_modules(),
+        rule: RuleId("javascript.node_modules".into()),
+        size: Size::default(),
+        at: 0,
+    };
+
+    let outcome = Quarantine::new(fixture.data.path()).admit(&fixture.system, &entry, other);
+
+    assert_eq!(outcome, skipped(SkipReason::Replaced));
+    fixture.assert_web_untouched();
+    assert!(fixture.quarantine_is_empty());
+}
+
+/// Restoring or purging acts on the folder a record's ID names, so a record that names anything
+/// but its own folder inside the quarantine is never listed.
+#[test]
+fn records_that_name_other_folders_arent_listed() {
+    let fixture = Fixture::new();
+    let quarantine = fixture.data.path().join("quarantine");
+    let record = |id: &str| {
+        serde_json::to_vec(&QuarantineEntry {
+            id: id.into(),
+            original: fixture.node_modules(),
+            rule: RuleId("javascript.node_modules".into()),
+            size: Size::default(),
+            at: 0,
+        })
+        .unwrap()
+    };
+    fs::create_dir_all(&quarantine).unwrap();
+    fs::write(quarantine.join("...json"), record("..")).unwrap();
+    fs::create_dir_all(quarantine.join("1-2-3")).unwrap();
+    fs::write(quarantine.join("1-2-3.json"), record("4-5-6")).unwrap();
+
+    let listing = fixture.executor().quarantined().unwrap();
+
+    assert!(listing.entries.is_empty(), "{listing:?}");
+    assert_eq!(listing.unreadable.len(), 2, "{listing:?}");
 }

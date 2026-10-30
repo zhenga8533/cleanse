@@ -13,12 +13,21 @@ use std::process;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use cleanse_model::{FileIdentity, Outcome, Plan, RuleId};
+use cleanse_model::{EntryOutcome, FileIdentity, Outcome, RuleId};
 use serde::Serialize;
 
 pub(crate) struct Journal {
     file: File,
     path: PathBuf,
+}
+
+/// What a run does.
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum Action {
+    Apply,
+    Restore,
+    Purge,
 }
 
 /// One line of the journal. Times are seconds since the Unix epoch.
@@ -28,6 +37,7 @@ pub(crate) enum Record {
     Started {
         at: u64,
         version: &'static str,
+        action: Action,
         roots: Vec<String>,
         items: usize,
     },
@@ -38,9 +48,30 @@ pub(crate) enum Record {
         rule: RuleId,
         identity: FileIdentity,
     },
+    /// Written before the item is moved into quarantine as `entry`.
+    Quarantining {
+        path: String,
+        entry: String,
+        rule: RuleId,
+        identity: FileIdentity,
+    },
     Done {
         path: String,
         outcome: Outcome,
+    },
+    /// Written before a quarantined item is moved back to `path`.
+    Restoring {
+        entry: String,
+        path: String,
+    },
+    /// Written before a quarantined item, which was at `path`, is deleted.
+    Purging {
+        entry: String,
+        path: String,
+    },
+    EntryDone {
+        entry: String,
+        outcome: EntryOutcome,
     },
     Finished {
         at: u64,
@@ -48,8 +79,14 @@ pub(crate) enum Record {
 }
 
 impl Journal {
-    /// Creates a new journal file in `dir` and records the start of the run.
-    pub(crate) fn start(dir: &Path, plan: &Plan) -> io::Result<Self> {
+    /// Creates a new journal file in `dir` and records the start of a run that does `action`
+    /// to `items` items found under `roots`.
+    pub(crate) fn start(
+        dir: &Path,
+        action: Action,
+        roots: &[PathBuf],
+        items: usize,
+    ) -> io::Result<Self> {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         fs::create_dir_all(dir)?;
         let millis = since_epoch().as_millis();
@@ -66,12 +103,12 @@ impl Journal {
         journal.record(&Record::Started {
             at: since_epoch().as_secs(),
             version: env!("CARGO_PKG_VERSION"),
-            roots: plan
-                .roots
+            action,
+            roots: roots
                 .iter()
                 .map(|root| root.to_string_lossy().into_owned())
                 .collect(),
-            items: plan.items.len(),
+            items,
         })?;
         Ok(journal)
     }
@@ -93,6 +130,11 @@ impl Journal {
             at: since_epoch().as_secs(),
         })
     }
+}
+
+/// Seconds since the Unix epoch.
+pub(crate) fn now() -> u64 {
+    since_epoch().as_secs()
 }
 
 fn since_epoch() -> std::time::Duration {

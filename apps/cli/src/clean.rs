@@ -1,24 +1,17 @@
 use std::cmp::Reverse;
 use std::error::Error;
 use std::fmt;
-use std::io::{self, IsTerminal};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::atomic::AtomicBool;
 
 use cleanse_engine::{Applied, ApplyError, Engine, Probe, Scan};
-use cleanse_model::{Candidate, Outcome, Plan, PlanItem, Risk, Size};
+use cleanse_model::{Candidate, Disposal, Outcome, Plan, PlanItem, Risk, Size};
 use inquire::{Confirm, InquireError, MultiSelect};
 
-use crate::format;
+use crate::exit::{ABORTED, PARTIAL, USAGE};
 use crate::scan::{self, Reporter, items};
-
-/// The command line was fine, but it can't work this way, such as asking without a terminal.
-const USAGE: u8 = 2;
-/// Some approved items couldn't be removed.
-const PARTIAL: u8 = 3;
-/// The person declined, so nothing was removed.
-const ABORTED: u8 = 4;
+use crate::{can_ask, format};
 
 /// How many items the selection list shows at once.
 const PAGE_SIZE: usize = 15;
@@ -57,7 +50,7 @@ impl From<MaxRisk> for Risk {
 pub fn run(engine: &Engine, args: &Args) -> Result<ExitCode, Box<dyn Error>> {
     let asking = !args.yes && !args.dry_run;
     // Checked before scanning, so nobody waits through a scan only to be turned away.
-    if asking && !(io::stdin().is_terminal() && io::stderr().is_terminal()) {
+    if asking && !can_ask() {
         eprintln!(
             "cleanse: clean asks which items to delete, which needs a terminal. To delete the \
              preselected items without asking, add --yes and --max-risk."
@@ -99,7 +92,7 @@ pub fn run(engine: &Engine, args: &Args) -> Result<ExitCode, Box<dyn Error>> {
         );
         return Ok(ExitCode::SUCCESS);
     }
-    if asking && !confirm(selected.len(), &total)? {
+    if asking && !confirm(&selected)? {
         return Ok(aborted());
     }
 
@@ -121,19 +114,18 @@ pub fn run(engine: &Engine, args: &Args) -> Result<ExitCode, Box<dyn Error>> {
     Ok(report(&plan, &applied?))
 }
 
-/// What can be deleted, largest first. Review items are left out because they go to quarantine,
-/// which isn't available yet.
+/// What can be removed, largest first: everything but what's protected.
 fn removable(scan: &Scan) -> Vec<&Candidate> {
     let mut removable: Vec<&Candidate> = scan
         .candidates
         .iter()
-        .filter(|candidate| candidate.risk() <= Risk::Regenerable)
+        .filter(|candidate| candidate.risk() < Risk::Protected)
         .collect();
     removable.sort_by_key(|candidate| Reverse(candidate.found.size.on_disk));
     removable
 }
 
-/// The items selected by default, up to `max`: those without warnings.
+/// The items selected by default, up to `max`: those without warnings, and never Review items.
 fn preselected<'c>(candidates: &[&'c Candidate], max: Risk) -> Vec<&'c Candidate> {
     candidates
         .iter()
@@ -169,7 +161,8 @@ fn choose<'c>(removable: &[&'c Candidate]) -> Result<Option<Vec<&'c Candidate>>,
         .filter(|&index| removable[index].preselected())
         .collect();
     println!(
-        "{} can be deleted ({}). Items with warnings aren't selected.",
+        "{} can be removed ({}). Items with warnings, and Review items, which go to quarantine, \
+         aren't selected.",
         items(removable.len()),
         format::size(&format::total(removable))
     );
@@ -177,7 +170,7 @@ fn choose<'c>(removable: &[&'c Candidate]) -> Result<Option<Vec<&'c Candidate>>,
         .iter()
         .map(|candidate| Choice(candidate))
         .collect();
-    let chosen = MultiSelect::new("Which items should be deleted?", choices)
+    let chosen = MultiSelect::new("Which items should be removed?", choices)
         .with_default(&defaults)
         .with_page_size(PAGE_SIZE)
         .prompt();
@@ -188,11 +181,31 @@ fn choose<'c>(removable: &[&'c Candidate]) -> Result<Option<Vec<&'c Candidate>>,
     }
 }
 
-fn confirm(count: usize, total: &str) -> Result<bool, InquireError> {
-    let answer = Confirm::new(&format!("Delete {} ({total})?", items(count)))
+fn confirm(selected: &[&Candidate]) -> Result<bool, InquireError> {
+    let (quarantined, deleted): (Vec<&Candidate>, Vec<&Candidate>) = selected
+        .iter()
+        .partition(|candidate| candidate.default_disposal() == Some(Disposal::Quarantine));
+    let amount = |candidates: &[&Candidate]| {
+        format!(
+            "{} ({})",
+            items(candidates.len()),
+            format::size(&format::total(candidates))
+        )
+    };
+    let question = match (deleted.is_empty(), quarantined.is_empty()) {
+        (false, true) => format!("Delete {}?", amount(&deleted)),
+        (true, false) => format!("Quarantine {}?", amount(&quarantined)),
+        _ => format!(
+            "Delete {} and quarantine {}?",
+            amount(&deleted),
+            amount(&quarantined)
+        ),
+    };
+    let answer = Confirm::new(&question)
         .with_default(false)
         .with_help_message(
-            "Deleted items can't be restored, but they can be rebuilt, such as with npm install",
+            "Deleted items can't be restored, but they can be rebuilt, such as with npm \
+             install. Quarantined items can be restored until they're purged.",
         )
         .prompt();
     match answer {
@@ -217,6 +230,8 @@ fn list(candidates: &[&Candidate]) {
 fn report(plan: &Plan, applied: &Applied) -> ExitCode {
     let mut deleted = 0;
     let mut freed = Size::default();
+    let mut quarantined = 0;
+    let mut held = Size::default();
     let mut skipped = Vec::new();
     let mut failed = Vec::new();
     for (item, outcome) in plan.items.iter().zip(&applied.outcomes) {
@@ -224,6 +239,10 @@ fn report(plan: &Plan, applied: &Applied) -> ExitCode {
             Outcome::Deleted { size } => {
                 deleted += 1;
                 freed += *size;
+            }
+            Outcome::Quarantined { size, .. } => {
+                quarantined += 1;
+                held += *size;
             }
             Outcome::Skipped { reason } => skipped.push((&item.path, reason.to_string())),
             Outcome::Failed { error } => failed.push((&item.path, error.clone())),
@@ -235,7 +254,15 @@ fn report(plan: &Plan, applied: &Applied) -> ExitCode {
         items(deleted),
         format::bytes(freed.on_disk)
     );
-    for (title, list) in [("Skipped", &skipped), ("Couldn't delete", &failed)] {
+    if quarantined > 0 {
+        println!(
+            "Quarantined {}, {}. Run `cleanse quarantine` to see or restore them; they take \
+             space until you purge them.",
+            items(quarantined),
+            format::bytes(held.on_disk)
+        );
+    }
+    for (title, list) in [("Skipped", &skipped), ("Couldn't remove", &failed)] {
         if list.is_empty() {
             continue;
         }
@@ -285,7 +312,8 @@ mod tests {
         let safe = candidate(Risk::Safe, vec![]);
         let regenerable = candidate(Risk::Regenerable, vec![]);
         let warned = candidate(Risk::Regenerable, vec![Concern::UncommittedChanges]);
-        let all = [&safe, &regenerable, &warned];
+        let review = candidate(Risk::Review, vec![]);
+        let all = [&safe, &regenerable, &warned, &review];
 
         let paths = |selected: Vec<&Candidate>| -> Vec<PathBuf> {
             selected

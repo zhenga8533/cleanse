@@ -34,6 +34,15 @@ pub fn count(count: u64) -> String {
     grouped
 }
 
+/// How long ago something happened, in whole days.
+pub fn ago(days: u64) -> String {
+    match days {
+        0 => "today".to_owned(),
+        1 => "yesterday".to_owned(),
+        days => format!("{days} days ago"),
+    }
+}
+
 pub fn seconds(duration: Duration) -> String {
     format!("{:.1} s", duration.as_secs_f64())
 }
@@ -68,6 +77,13 @@ mod tests {
         assert_eq!(bytes(1023), "1023 B");
         assert_eq!(bytes(1536), "1.5 KiB");
         assert_eq!(bytes(3_650_722_201), "3.4 GiB");
+    }
+
+    #[test]
+    fn days_read_as_how_long_ago() {
+        assert_eq!(ago(0), "today");
+        assert_eq!(ago(1), "yesterday");
+        assert_eq!(ago(12), "12 days ago");
     }
 
     #[test]

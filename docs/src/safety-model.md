@@ -1,7 +1,7 @@
 # Safety model
 
 > Status: the gates are implemented (see [what's not covered yet](#not-covered-yet)).
-> `cleanse clean` deletes approved items. Quarantine and the trash come later in M2.
+> `cleanse clean` deletes or quarantines approved items. The trash isn't built yet.
 
 Cleanse's job is to remove files, so its first job is to not remove the wrong ones. The
 principles:
@@ -81,9 +81,13 @@ a secret, or is a virtual machine disk. A file modified in the last ten minutes 
   something replaced it after the re-check, it's put back untouched. Otherwise the tombstone is
   removed, along with any links inside, never what they point to. On Windows the rename fails
   while a program has a file inside open, so the folder stays whole.
-- **Quarantine** moves the item into a Cleanse-managed area on the same drive with a manifest,
-  so it can be restored until it's purged. Quarantined space isn't freed until the purge, and
-  the UI says so.
+- **Quarantine** moves the item into the `quarantine` folder in Cleanse's data folder, with a
+  record of where it came from written first. It's a rename, so it only works on the same drive;
+  items elsewhere are skipped rather than copied. If what moved isn't the approved folder, it's
+  put back. `cleanse restore` moves an item back only if nothing has taken its place, and
+  `cleanse quarantine purge` deletes it for good. Quarantined space isn't freed until the purge,
+  and the commands say so. Restoring and purging act only on folders named by records Cleanse
+  wrote, inside the quarantine.
 - **Trash** uses the operating system's trash, after checking that the item will really land
   there.
 - Every run writes an append-only journal in Cleanse's data folder, which is itself protected.
@@ -91,7 +95,9 @@ a secret, or is a virtual machine disk. A file modified in the last ten minutes 
 
 ### Not built yet
 
-- **Quarantine** and **Trash**: items approved for them are skipped for now.
+- **Trash**: items approved for it are skipped.
+- **Quarantine on other drives**: items on a different drive from Cleanse's data folder are
+  skipped rather than quarantined.
 - **Leftover tombstones**: if a removal fails partway, what's left stays in its tombstone, and
   the journal records where. Finishing them on a later run comes with the history command.
 - **Free space**: the size reported for a deleted item is its measured size, not the measured

@@ -154,12 +154,12 @@ fn explains_when_an_unrecognized_path_is_also_protected() {
     );
 }
 
-/// An engine that journals into `journal` and acts as if it isn't elevated, since CI runs tests
-/// as an administrator on Windows.
-fn engine_for_apply(journal: &Path) -> Engine {
+/// An engine whose data folder is `data`, acting as if it isn't elevated, since CI runs tests as
+/// an administrator on Windows.
+fn engine_for_apply(data: &Path) -> Engine {
     Engine {
         system: System::new().unwrap().elevated(false),
-        journal_dir: Some(journal.to_path_buf()),
+        data_dir: Some(data.to_path_buf()),
         ..Engine::new().unwrap()
     }
 }

@@ -14,6 +14,10 @@ All notable changes to Cleanse are documented here. The format is based on
   `--yes --max-risk TIER` deletes the preselected items without asking, and `--dry-run` lists
   what that would delete. Every run is recorded in a journal in Cleanse's data folder, and
   nothing is deleted while running as an administrator or root.
+- Quarantine. Review items that `clean` removes are moved into Cleanse's data folder instead of
+  deleted, if they're on the same drive. `cleanse quarantine` lists what's there, `cleanse restore
+  ID` puts an item back if nothing has taken its place, and `cleanse quarantine purge` deletes
+  items for good, by ID, `--all`, or `--older-than DAYS`. Review items are never preselected.
 
 ## [0.1.0] - 2026-10-30
 

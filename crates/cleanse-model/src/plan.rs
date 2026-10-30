@@ -49,6 +49,8 @@ impl PlanItem {
 pub enum Outcome {
     /// Removed for good. `size` was measured just before.
     Deleted { size: Size },
+    /// Moved into quarantine as `entry`, where it still takes `size` until it's purged.
+    Quarantined { size: Size, entry: String },
     /// Left alone because something about it changed since it was approved, or because the run
     /// stopped first.
     Skipped { reason: SkipReason },
@@ -60,6 +62,7 @@ impl fmt::Display for Outcome {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Deleted { .. } => f.write_str("Deleted"),
+            Self::Quarantined { entry, .. } => write!(f, "Quarantined as {entry}"),
             Self::Skipped { reason } => write!(f, "Skipped: {reason}"),
             Self::Failed { error } => write!(f, "Failed: {error}"),
         }
@@ -86,6 +89,9 @@ pub enum SkipReason {
     UnrecordablePath,
     /// This way of removing items isn't available yet.
     Unsupported { disposal: Disposal },
+    /// It's on a different drive from Cleanse's quarantine, and moving it there would mean
+    /// copying it.
+    OtherDrive,
     /// The journal couldn't be written, so nothing more was removed.
     JournalUnavailable,
     /// The run was cancelled before reaching it.
@@ -111,10 +117,13 @@ impl fmt::Display for SkipReason {
             } => f.write_str("Deleting isn't available"),
             Self::Unsupported {
                 disposal: Disposal::Quarantine,
-            } => f.write_str("Quarantine isn't available yet"),
+            } => f.write_str("Quarantine isn't available"),
             Self::Unsupported {
                 disposal: Disposal::Trash,
             } => f.write_str("Moving to the trash isn't available yet"),
+            Self::OtherDrive => f.write_str(
+                "It's on a different drive from the quarantine, which can't hold it yet",
+            ),
             Self::JournalUnavailable => {
                 f.write_str("The journal couldn't be written, so nothing more was removed")
             }
@@ -189,7 +198,7 @@ mod tests {
     fn outcomes_serialize_with_stable_snake_case_names() {
         let outcome = Outcome::Skipped {
             reason: SkipReason::Unsupported {
-                disposal: Disposal::Quarantine,
+                disposal: Disposal::Trash,
             },
         };
 
@@ -199,7 +208,7 @@ mod tests {
             json,
             serde_json::json!({
                 "kind": "skipped",
-                "reason": { "kind": "unsupported", "disposal": "quarantine" },
+                "reason": { "kind": "unsupported", "disposal": "trash" },
             })
         );
         assert_eq!(serde_json::from_value::<Outcome>(json).unwrap(), outcome);
