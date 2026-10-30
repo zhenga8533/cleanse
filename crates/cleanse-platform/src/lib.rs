@@ -125,6 +125,13 @@ impl KnownFolders {
             temp: env::temp_dir(),
         }
     }
+
+    /// Where Cleanse keeps its own data, such as the journal of what it removed.
+    pub fn cleanse_data(&self) -> Option<PathBuf> {
+        self.data_local
+            .as_ref()
+            .map(|folder| folder.join("cleanse"))
+    }
 }
 
 /// The real platform.
@@ -141,6 +148,17 @@ impl System {
             known_folders: KnownFolders::current(),
             elevated: os::is_elevated()?,
         })
+    }
+}
+
+#[cfg(any(test, feature = "fake"))]
+impl System {
+    /// Overrides the elevation read at startup, for tests on CI runners, which run as an
+    /// administrator on Windows.
+    #[must_use]
+    pub fn elevated(mut self, elevated: bool) -> Self {
+        self.elevated = elevated;
+        self
     }
 }
 

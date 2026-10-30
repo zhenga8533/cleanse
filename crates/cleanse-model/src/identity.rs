@@ -1,6 +1,8 @@
+use serde::{Deserialize, Serialize};
+
 /// Identifies a file or directory independently of its path, so Cleanse can tell whether the
 /// item it scanned is still the one at that path when it comes to remove it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct FileIdentity {
     /// The device (Unix) or volume serial number (Windows).
     pub volume: u64,

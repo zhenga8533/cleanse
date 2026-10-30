@@ -226,6 +226,11 @@ fn user_locations(locations: &mut Locations, folders: &KnownFolders) {
         locations.add(folder.clone(), Reach::Exact, what);
     }
     locations.add(Some(folders.temp.clone()), Reach::Exact, "your temp folder");
+    locations.add(
+        folders.cleanse_data(),
+        Reach::Subtree,
+        "Cleanse's journal of what it removed",
+    );
     if let Some(home) = &folders.home {
         for (relative, what) in HOME_SUBTREES {
             let mut path = home.clone();

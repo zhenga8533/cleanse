@@ -19,10 +19,12 @@ use std::time::{Duration, Instant, SystemTime};
 use cleanse_core::rules::{Detection, Matcher};
 use cleanse_core::safety::{Assessor, ProtectedPolicy};
 use cleanse_core::scan::{Descend, walk};
-use cleanse_model::{Candidate, CandidateId, EntryKind};
+use cleanse_exec::Executor;
+use cleanse_model::{Candidate, CandidateId, EntryKind, Plan};
 use rayon::prelude::*;
 
 pub use cleanse_core::rules::{Base, Location, Os, Rule, RuleError, RuleSet, RuleTest, Target};
+pub use cleanse_exec::{Applied, ApplyError};
 pub use cleanse_platform::{KnownFolders, Probe, System};
 
 /// Walk progress is reported every this many entries.
@@ -33,6 +35,9 @@ const PROGRESS_INTERVAL: u64 = 1024;
 pub struct Engine {
     rules: RuleSet,
     system: System,
+    /// Where each run that removes things writes its journal, if the system has a folder for
+    /// app data.
+    journal_dir: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -103,9 +108,15 @@ pub enum Explanation<'e> {
 impl Engine {
     /// Loads the built-in rules and reads this system's folders and elevation.
     pub fn new() -> Result<Self, EngineError> {
+        let system = System::new()?;
+        let journal_dir = system
+            .known_folders()
+            .cleanse_data()
+            .map(|data| data.join("journal"));
         Ok(Self {
             rules: RuleSet::builtin()?,
-            system: System::new()?,
+            system,
+            journal_dir,
         })
     }
 
@@ -245,5 +256,23 @@ impl Engine {
             candidate: Box::new(assessor.assess(CandidateId(0), &detection)),
             rule: detection.rule,
         })
+    }
+
+    /// Removes the items in `plan` that are still what was approved and still pass every
+    /// safety check, recording each one in the journal. `progress` gets the number of items
+    /// done so far. Setting `cancel` skips the items not yet reached.
+    pub fn apply(
+        &self,
+        plan: &Plan,
+        progress: &dyn Fn(usize),
+        cancel: &AtomicBool,
+    ) -> Result<Applied, ApplyError> {
+        let journal_dir = self.journal_dir.clone().ok_or_else(|| {
+            ApplyError::Journal(io::Error::new(
+                io::ErrorKind::NotFound,
+                "this system has no folder for app data",
+            ))
+        })?;
+        Executor::new(&self.rules, &self.system, journal_dir).apply(plan, progress, cancel)
     }
 }

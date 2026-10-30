@@ -10,6 +10,15 @@ license.workspace = true
 cleanse-core.workspace = true
 cleanse-model.workspace = true
 cleanse-platform.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+cleanse-platform = { workspace = true, features = ["fake"] }
+tempfile.workspace = true
+
+[target.'cfg(windows)'.dev-dependencies]
+junction.workspace = true
 
 [lints]
 workspace = true

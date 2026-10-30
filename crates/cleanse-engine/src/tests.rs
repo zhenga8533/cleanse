@@ -6,9 +6,9 @@ use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, SystemTime};
 
-use cleanse_model::Risk;
+use cleanse_model::{Outcome, Plan, PlanItem, Risk};
 
-use super::{Engine, Explanation, Probe, Progress};
+use super::{Engine, Explanation, Probe, Progress, System};
 
 /// Writes a file dated a day ago, so it doesn't count as recent activity.
 fn write_old(path: &Path, contents: &str) {
@@ -152,4 +152,55 @@ fn explains_when_an_unrecognized_path_is_also_protected() {
         matches!(&explanation, Explanation::Unmatched { protected: Some(what) } if what == "your home folder"),
         "{explanation:?}"
     );
+}
+
+/// An engine that journals into `journal` and acts as if it isn't elevated, since CI runs tests
+/// as an administrator on Windows.
+fn engine_for_apply(journal: &Path) -> Engine {
+    Engine {
+        system: System::new().unwrap().elevated(false),
+        journal_dir: Some(journal.to_path_buf()),
+        ..Engine::new().unwrap()
+    }
+}
+
+#[test]
+fn applies_what_was_approved_from_a_scan() {
+    let root = tempfile::tempdir().unwrap();
+    project(root.path());
+    let journal = tempfile::tempdir().unwrap();
+    let engine = engine_for_apply(journal.path());
+    let scan = engine
+        .scan(
+            &[root.path().to_path_buf()],
+            &|_| {},
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+    let plan = Plan {
+        roots: scan.roots.clone(),
+        items: scan
+            .candidates
+            .iter()
+            .filter_map(PlanItem::approve)
+            .collect(),
+    };
+    let progress = Mutex::new(Vec::new());
+
+    let applied = engine
+        .apply(
+            &plan,
+            &|done| progress.lock().unwrap().push(done),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+
+    assert!(
+        matches!(&applied.outcomes[..], [Outcome::Deleted { .. }]),
+        "{applied:?}"
+    );
+    assert!(!root.path().join("web/node_modules").exists());
+    assert!(root.path().join("web/package.json").exists());
+    assert!(applied.journal.starts_with(journal.path()));
+    assert_eq!(*progress.lock().unwrap(), [1]);
 }

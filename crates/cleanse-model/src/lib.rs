@@ -7,6 +7,7 @@ mod candidate;
 mod category;
 mod entry;
 mod identity;
+mod plan;
 mod risk;
 mod size;
 
@@ -14,5 +15,6 @@ pub use candidate::{Candidate, CandidateId, Concern, Evidence, Match, RuleId};
 pub use category::Category;
 pub use entry::EntryKind;
 pub use identity::FileIdentity;
+pub use plan::{Outcome, Plan, PlanItem, SkipReason};
 pub use risk::{Disposal, Risk};
 pub use size::Size;
