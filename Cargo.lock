@@ -260,6 +260,10 @@ dependencies = [
  "cleanse-core",
  "cleanse-model",
  "cleanse-platform",
+ "junction",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

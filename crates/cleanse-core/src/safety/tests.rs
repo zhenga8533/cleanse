@@ -199,6 +199,19 @@ fn the_system_policy_protects_the_os_and_the_home_folder() {
     );
 }
 
+#[test]
+fn cleanse_protects_its_own_journal() {
+    let root = tempfile::tempdir().unwrap();
+    let folders = fake_folders(root.path());
+    let policy = ProtectedPolicy::for_system(&folders, &FakeProbe::default());
+    let journal = folders.cleanse_data().unwrap().join("journal");
+
+    assert_eq!(
+        policy.check(&journal.join("run.jsonl"), None, &[]),
+        Some("Cleanse's journal of what it removed")
+    );
+}
+
 proptest! {
     #[test]
     fn nothing_that_is_or_contains_a_protected_location_is_allowed(

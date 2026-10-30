@@ -14,6 +14,7 @@ cleanse-platform.workspace = true
 rayon.workspace = true
 
 [dev-dependencies]
+cleanse-platform = { workspace = true, features = ["fake"] }
 tempfile.workspace = true
 
 [lints]

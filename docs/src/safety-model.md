@@ -1,7 +1,8 @@
 # Safety model
 
-> Status: the gates are implemented (see [what's not covered yet](#not-covered-yet)).
-> Execution comes in M2.
+> Status: the gates are implemented (see [what's not covered yet](#not-covered-yet)). The engine
+> can delete approved items. Quarantine, the trash, and the commands that remove things come
+> later in M2.
 
 Cleanse's job is to remove files, so its first job is to not remove the wrong ones. The
 principles:
@@ -60,7 +61,6 @@ a secret, or is a virtual machine disk. A file modified in the last ten minutes 
 
 - **Owning app running** and **other users' files**: need process and ownership checks, which
   come with the AI agent rules in M2.
-- **Refusing to apply while elevated**: applies when plans can be applied, in M2.
 - **Browser profiles**: no rule matches inside them yet; they'll be protected before browser
   cache rules arrive.
 - **Uncommitted changes** and **recent project activity** warnings: need a working-tree scan.
@@ -70,14 +70,30 @@ a secret, or is a virtual machine disk. A file modified in the last ten minutes 
 
 ## Execution and recovery
 
-- Before acting, each item is re-checked: it still exists, it's still the same file or folder
-  (by identity, not just path), it's still not a link, and it still passes every gate.
+- Nothing is removed while Cleanse runs as an administrator or root, or if it can't start a
+  journal.
+- Before acting, each item is re-checked: it still exists, it's still the same folder (by
+  identity, not just path), it's still not a link, its rule still recognizes it, and it still
+  passes every gate. It's also skipped if its tier has risen, or a new kind of warning has
+  appeared, since it was approved. Anything modified after the run starts counts as modified
+  moments ago.
 - **Delete** first renames the item to a sibling tombstone, so a project never sees a
-  half-deleted `node_modules`, then removes it.
+  half-deleted `node_modules`. If what landed there isn't the approved folder, because
+  something replaced it after the re-check, it's put back untouched. Otherwise the tombstone is
+  removed, along with any links inside, never what they point to. On Windows the rename fails
+  while a program has a file inside open, so the folder stays whole.
 - **Quarantine** moves the item into a Cleanse-managed area on the same drive with a manifest,
   so it can be restored until it's purged. Quarantined space isn't freed until the purge, and
   the UI says so.
 - **Trash** uses the operating system's trash, after checking that the item will really land
   there.
-- Every action is written to an append-only journal, and the measured change in free space is
-  reported afterwards.
+- Every run writes an append-only journal in Cleanse's data folder, which is itself protected.
+  Each removal is flushed to disk before it starts and after it ends.
+
+### Not built yet
+
+- **Quarantine** and **Trash**: items approved for them are skipped for now.
+- **Leftover tombstones**: if a removal fails partway, what's left stays in its tombstone, and
+  the journal records where. Finishing them on a later run comes with the history command.
+- **Free space**: the size reported for a deleted item is its measured size, not the measured
+  change in free space.
