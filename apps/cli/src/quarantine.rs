@@ -1,7 +1,6 @@
 use std::error::Error;
 use std::io;
 use std::process::ExitCode;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::Subcommand;
 use cleanse_engine::{ApplyError, Engine, Handled, Listing, Probe};
@@ -10,9 +9,7 @@ use inquire::{Confirm, InquireError};
 
 use crate::exit::{ABORTED, PARTIAL, USAGE};
 use crate::scan::items;
-use crate::{can_ask, format};
-
-const SECONDS_PER_DAY: u64 = 24 * 60 * 60;
+use crate::{SECONDS_PER_DAY, can_ask, format, now};
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
@@ -253,10 +250,4 @@ fn report_unreadable(listing: &Listing) {
             record.display()
         );
     }
-}
-
-fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |since| since.as_secs())
 }

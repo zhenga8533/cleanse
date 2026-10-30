@@ -23,6 +23,7 @@ cleanse clean ~/code              # choose what to delete, then confirm; each it
 cleanse clean --dry-run ~/code    # what `clean --yes --max-risk regenerable` would delete
 cleanse quarantine                # what's in quarantine; `quarantine purge` deletes it for good
 cleanse restore ID                # put a quarantined item back
+cleanse history                   # what Cleanse has removed, restored, and purged
 cleanse rules                     # every rule; `cleanse rules show <id>` for one
 cleanse doctor                    # folders, rules, and capabilities on this system
 ```

@@ -26,7 +26,7 @@ use rayon::prelude::*;
 
 pub use cleanse_core::config::Config;
 pub use cleanse_core::rules::{Base, Location, Os, Rule, RuleError, RuleSet, RuleTest, Target};
-pub use cleanse_exec::{Applied, ApplyError, Handled, Listing};
+pub use cleanse_exec::{Action, Applied, ApplyError, Handled, History, Leftover, Listing, Run};
 pub use cleanse_platform::{KnownFolders, Probe, System};
 
 /// Walk progress is reported every this many entries.
@@ -306,6 +306,20 @@ impl Engine {
         cancel: &AtomicBool,
     ) -> Result<Applied, ApplyError> {
         self.executor()?.apply(plan, progress, cancel)
+    }
+
+    /// What Cleanse has done before, and what's left of removals that didn't finish.
+    pub fn history(&self) -> io::Result<History> {
+        match self.executor() {
+            Ok(executor) => executor.history(),
+            // Without a data folder, there's no journal.
+            Err(_) => Ok(History::default()),
+        }
+    }
+
+    /// Removes what's left of removals that didn't finish, if it's still what was approved.
+    pub fn finish(&self, leftovers: &[Leftover]) -> Result<Applied, ApplyError> {
+        self.executor()?.finish(leftovers)
     }
 
     /// What's in quarantine.

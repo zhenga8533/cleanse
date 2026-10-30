@@ -24,6 +24,9 @@ All notable changes to Cleanse are documented here. The format is based on
   plugins are Review, so they go to quarantine. Transcripts, memory, prompt history, tasks,
   settings, plugins, and credentials stay protected. Nothing is removed while Claude Code or
   Claude Desktop is running.
+- `cleanse history` lists what each run removed, quarantined, restored, or purged. If a
+  removal stopped partway, it shows what's left, and `cleanse history --finish` removes it once
+  it's confirmed to be the folder that was approved.
 - A settings file, `cleanse/config.toml` in your settings folder. `exclude` lists folders Cleanse
   never touches, and `disabled_rules` turns rules off. A mistake in it, such as a relative path or
   an unknown rule, stops Cleanse with a message naming the file. `cleanse doctor` shows where it

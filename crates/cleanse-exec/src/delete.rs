@@ -16,7 +16,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use cleanse_model::{EntryKind, FileIdentity, Outcome, Size, SkipReason};
 use cleanse_platform::Probe;
 
-const TOMBSTONE_PREFIX: &str = ".cleanse-tombstone-";
+pub(crate) const TOMBSTONE_PREFIX: &str = ".cleanse-tombstone-";
 
 /// A sibling of `path` with a name no other removal uses, or `None` for a drive's root.
 pub(crate) fn tombstone_for(path: &Path) -> Option<PathBuf> {
@@ -60,6 +60,13 @@ pub(crate) fn delete(
     if !moved.is_ok_and(|facts| facts.kind == EntryKind::Dir && facts.identity == identity) {
         return put_back(path, tombstone);
     }
+    finish(tombstone, size)
+}
+
+/// Removes the approved folder at `tombstone`, or what's left of it after a removal that didn't
+/// finish. The caller has checked that it's the approved folder. `size` is what it's reported to
+/// free.
+pub(crate) fn finish(tombstone: &Path, size: Size) -> Outcome {
     match fs::remove_dir_all(tombstone) {
         Ok(()) => Outcome::Deleted { size },
         Err(error) => Outcome::Failed {

@@ -4,6 +4,7 @@
 //! immediately before acting, and records every outcome in an append-only journal.
 
 mod delete;
+mod history;
 mod journal;
 mod quarantine;
 
@@ -20,15 +21,18 @@ use std::time::SystemTime;
 
 use cleanse_core::rules::{Matcher, Os, RuleSet};
 use cleanse_core::safety::{Assessor, ProtectedPolicy};
+use cleanse_core::scan::measure;
 use cleanse_model::{
     Candidate, CandidateId, Concern, Disposal, EntryKind, EntryOutcome, Outcome, Plan, PlanItem,
     QuarantineEntry, Risk, SkipReason,
 };
 use cleanse_platform::Probe;
 
-use journal::{Action, Journal, Record};
+use journal::{Journal, Record};
 use quarantine::Quarantine;
 
+pub use history::{History, Leftover, Run};
+pub use journal::Action;
 pub use quarantine::Listing;
 
 /// Removes approved items, checking each one again first, and looks after the quarantine.
@@ -244,6 +248,57 @@ impl<'a> Executor<'a> {
             item.identity,
             candidate.found.size,
         ))
+    }
+
+    /// What the journal says Cleanse has done, and what's left of removals that didn't finish.
+    pub fn history(&self) -> io::Result<History> {
+        history::read(&self.data_dir.join("journal"), self.probe)
+    }
+
+    /// Removes what's left of removals that didn't finish, each only if its tombstone still
+    /// holds the folder that was approved.
+    pub fn finish(&self, leftovers: &[Leftover]) -> Result<Applied, ApplyError> {
+        let mut journal = self.start(Action::Finish, &[], leftovers.len())?;
+        let mut journal_ok = true;
+        let mut outcomes = Vec::with_capacity(leftovers.len());
+        for leftover in leftovers {
+            let removing = Record::Removing {
+                path: leftover.original.to_string_lossy().into_owned(),
+                tombstone: leftover.tombstone.to_string_lossy().into_owned(),
+                rule: leftover.rule.clone(),
+                identity: leftover.identity,
+            };
+            let outcome = if !journal_ok {
+                skipped(SkipReason::JournalUnavailable)
+            } else if !history::still_there(self.probe, leftover) {
+                skipped(SkipReason::Gone)
+            } else if journal.record(&removing).is_err() {
+                journal_ok = false;
+                skipped(SkipReason::JournalUnavailable)
+            } else {
+                let size = measure(&leftover.tombstone)
+                    .map(|measurement| measurement.size)
+                    .unwrap_or_default();
+                delete::finish(&leftover.tombstone, size)
+            };
+            if journal_ok {
+                let done = Record::Done {
+                    path: leftover.original.to_string_lossy().into_owned(),
+                    outcome: outcome.clone(),
+                };
+                journal_ok = journal.record(&done).is_ok();
+            }
+            outcomes.push(outcome);
+        }
+        let journal_path = journal.path().to_owned();
+        if journal_ok {
+            // Every outcome is already on disk, so a missing end marker loses nothing.
+            let _ = journal.finish();
+        }
+        Ok(Applied {
+            journal: journal_path,
+            outcomes,
+        })
     }
 
     /// What's in quarantine.

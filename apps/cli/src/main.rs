@@ -4,6 +4,7 @@ mod clean;
 mod doctor;
 mod explain;
 mod format;
+mod history;
 mod quarantine;
 mod rules;
 mod scan;
@@ -11,6 +12,7 @@ mod scan;
 use std::error::Error;
 use std::io::{self, IsTerminal};
 use std::process::ExitCode;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::{Parser, Subcommand};
 use cleanse_engine::Engine;
@@ -30,6 +32,15 @@ mod exit {
 /// Whether there's a terminal to ask questions in.
 fn can_ask() -> bool {
     io::stdin().is_terminal() && io::stderr().is_terminal()
+}
+
+const SECONDS_PER_DAY: u64 = 24 * 60 * 60;
+
+/// Seconds since the Unix epoch, the unit the journal and quarantine record times in.
+fn now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs())
 }
 
 /// Find files you can safely remove, with an explanation for every item.
@@ -53,6 +64,8 @@ enum Command {
     Quarantine(quarantine::Args),
     /// Put quarantined items back where they were
     Restore(quarantine::RestoreArgs),
+    /// Show what Cleanse has removed, restored, and purged
+    History(history::Args),
     /// Explain whether a file or folder could be removed, and why
     Explain(explain::Args),
     /// List the cleanup rules, or show one in detail
@@ -70,6 +83,7 @@ fn main() -> ExitCode {
             Command::Clean(args) => clean::run(&engine, args),
             Command::Quarantine(args) => quarantine::run(&engine, args),
             Command::Restore(args) => quarantine::restore(&engine, args),
+            Command::History(args) => history::run(&engine, args),
             Command::Explain(args) => explain::run(&engine, args).map(|()| ExitCode::SUCCESS),
             Command::Rules(args) => rules::run(&engine, args).map(|()| ExitCode::SUCCESS),
             Command::Doctor => {
