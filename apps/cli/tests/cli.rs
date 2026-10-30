@@ -320,15 +320,31 @@ fn restore_and_purge_refuse_while_elevated() {
     }
 }
 
-/// Unix only, where moving the home folder also moves Cleanse's data folder out of the real one.
+/// Unix only, where moving the home folder also moves Cleanse's data and settings folders out
+/// of the real ones.
 #[cfg(unix)]
 fn cleanse_at_home(home: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_cleanse"))
         .args(args)
         .env("HOME", home)
         .env_remove("XDG_DATA_HOME")
+        .env_remove("XDG_CONFIG_HOME")
         .output()
         .unwrap()
+}
+
+/// Writes Cleanse's settings file for a home folder at `home`.
+#[cfg(unix)]
+fn write_settings(home: &Path, contents: &str) -> std::path::PathBuf {
+    let settings = if cfg!(target_os = "macos") {
+        "Library/Application Support"
+    } else {
+        ".config"
+    };
+    let path = home.join(settings).join("cleanse/config.toml");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(&path, contents).unwrap();
+    path
 }
 
 #[cfg(unix)]
@@ -362,4 +378,55 @@ fn restore_rejects_an_id_that_isnt_in_quarantine() {
         "{}",
         stderr(&output)
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn settings_exclude_folders_and_turn_off_rules() {
+    let root = fixture();
+    let excluding = tempfile::tempdir().unwrap();
+    let disabling = tempfile::tempdir().unwrap();
+    write_settings(
+        excluding.path(),
+        &format!("exclude = [\"{}\"]\n", root.path().join("web").display()),
+    );
+    write_settings(
+        disabling.path(),
+        "disabled_rules = [\"javascript.node_modules\"]\n",
+    );
+
+    let excluded = stdout(&cleanse_at_home(
+        excluding.path(),
+        &["scan", "--show-protected", arg(root.path())],
+    ));
+    let unmatched = stdout(&cleanse_at_home(
+        disabling.path(),
+        &["scan", arg(root.path())],
+    ));
+    let doctor = stdout(&cleanse_at_home(disabling.path(), &["doctor"]));
+
+    assert!(!excluded.contains("Can be removed"), "{excluded}");
+    assert!(
+        excluded.contains("a folder excluded in your settings"),
+        "{excluded}"
+    );
+    assert!(!unmatched.contains("node_modules"), "{unmatched}");
+    assert!(
+        doctor.contains("turned off   javascript.node_modules"),
+        "{doctor}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_broken_settings_file_stops_cleanse_and_says_where_it_is() {
+    let home = tempfile::tempdir().unwrap();
+    let path = write_settings(home.path(), "exclude = [\"relative/path\"]\n");
+
+    let output = cleanse_at_home(home.path(), &["scan"]);
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = stderr(&output);
+    assert!(stderr.contains(arg(&path)), "{stderr}");
+    assert!(stderr.contains("isn't a full path"), "{stderr}");
 }

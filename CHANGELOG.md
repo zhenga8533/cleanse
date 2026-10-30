@@ -18,6 +18,10 @@ All notable changes to Cleanse are documented here. The format is based on
   deleted, if they're on the same drive. `cleanse quarantine` lists what's there, `cleanse restore
   ID` puts an item back if nothing has taken its place, and `cleanse quarantine purge` deletes
   items for good, by ID, `--all`, or `--older-than DAYS`. Review items are never preselected.
+- A settings file, `cleanse/config.toml` in your settings folder. `exclude` lists folders Cleanse
+  never touches, and `disabled_rules` turns rules off. A mistake in it, such as a relative path or
+  an unknown rule, stops Cleanse with a message naming the file. `cleanse doctor` shows where it
+  is and what it says.
 
 ## [0.1.0] - 2026-10-30
 

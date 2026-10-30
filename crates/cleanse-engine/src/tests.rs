@@ -8,7 +8,9 @@ use std::time::{Duration, SystemTime};
 
 use cleanse_model::{Outcome, Plan, PlanItem, Risk};
 
-use super::{Engine, Explanation, Probe, Progress, System};
+use cleanse_model::{Concern, RuleId};
+
+use super::{Config, Engine, Explanation, Probe, Progress, RuleSet, System};
 
 /// Writes a file dated a day ago, so it doesn't count as recent activity.
 fn write_old(path: &Path, contents: &str) {
@@ -203,4 +205,47 @@ fn applies_what_was_approved_from_a_scan() {
     assert!(root.path().join("web/package.json").exists());
     assert!(applied.journal.starts_with(journal.path()));
     assert_eq!(*progress.lock().unwrap(), [1]);
+}
+
+#[test]
+fn excluded_folders_are_kept_and_turned_off_rules_match_nothing() {
+    let root = tempfile::tempdir().unwrap();
+    project(root.path());
+    let roots = [root.path().to_path_buf()];
+    let excluding = Engine {
+        config: Config {
+            exclude: vec![root.path().join("web")],
+            ..Config::default()
+        },
+        ..Engine::new().unwrap()
+    };
+    let without_rule = Engine {
+        rules: RuleSet::builtin()
+            .unwrap()
+            .without(&[RuleId("javascript.node_modules".into())])
+            .unwrap(),
+        ..Engine::new().unwrap()
+    };
+
+    let excluded = excluding
+        .scan(&roots, &|_| {}, &AtomicBool::new(false))
+        .unwrap();
+    let unmatched = without_rule
+        .scan(&roots, &|_| {}, &AtomicBool::new(false))
+        .unwrap();
+
+    assert_eq!(excluded.candidates.len(), 1);
+    let candidate = &excluded.candidates[0];
+    assert_eq!(candidate.risk(), Risk::Protected);
+    assert!(
+        candidate.concerns().contains(&Concern::ProtectedLocation {
+            what: "a folder excluded in your settings".into()
+        }),
+        "{candidate:#?}"
+    );
+    assert!(
+        unmatched.candidates.is_empty(),
+        "{:#?}",
+        unmatched.candidates
+    );
 }

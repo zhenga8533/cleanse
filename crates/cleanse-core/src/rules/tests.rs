@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use cleanse_model::Evidence;
+use cleanse_model::{Evidence, RuleId};
 use cleanse_platform::KnownFolders;
 
 use super::matcher::wildcard_match;
@@ -351,4 +351,24 @@ fn wildcards_match_any_run_of_characters() {
     assert!(!wildcard_match("*.csproj", "App.csproj.bak"));
     assert!(!wildcard_match("a*a", "a"));
     assert!(!wildcard_match("exact", "exactly"));
+}
+
+#[test]
+fn rules_can_be_turned_off_by_id_but_not_by_typo() {
+    let node_modules = RuleId("javascript.node_modules".into());
+
+    let without = RuleSet::builtin()
+        .unwrap()
+        .without(std::slice::from_ref(&node_modules));
+    let typo = RuleSet::builtin()
+        .unwrap()
+        .without(&[RuleId("javascript.node_module".into())]);
+
+    let without = without.unwrap();
+    assert!(without.get(&node_modules).is_none());
+    assert_eq!(
+        without.rules().len(),
+        RuleSet::builtin().unwrap().rules().len() - 1
+    );
+    assert!(typo.unwrap_err().contains("javascript.node_module"));
 }

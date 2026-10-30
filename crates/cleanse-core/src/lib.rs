@@ -3,6 +3,7 @@
 //! This crate decides what could be removed and why; it never removes anything. Only
 //! `cleanse-exec` may change the filesystem (ADR 0002).
 
+pub mod config;
 pub mod git;
 pub mod rules;
 pub mod safety;

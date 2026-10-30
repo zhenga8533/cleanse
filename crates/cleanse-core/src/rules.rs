@@ -110,6 +110,18 @@ impl RuleSet {
     pub fn get(&self, id: &RuleId) -> Option<&Rule> {
         self.rules.iter().find(|rule| &rule.id == id)
     }
+
+    /// The rules except those in `disabled`. Naming a rule that doesn't exist is an error, so a
+    /// typo doesn't leave a rule on unnoticed.
+    pub fn without(mut self, disabled: &[RuleId]) -> Result<Self, String> {
+        if let Some(unknown) = disabled.iter().find(|id| self.get(id).is_none()) {
+            return Err(format!(
+                "`{unknown}` in `disabled_rules` isn't a rule. Run `cleanse rules` to list them."
+            ));
+        }
+        self.rules.retain(|rule| !disabled.contains(&rule.id));
+        Ok(self)
+    }
 }
 
 /// A rule file that couldn't be loaded, and why.
