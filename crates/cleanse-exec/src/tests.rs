@@ -15,8 +15,9 @@ use cleanse_platform::{Probe, System};
 use serde_json::Value;
 use tempfile::TempDir;
 
+use super::journal::{Journal, Record};
 use super::quarantine::Quarantine;
-use super::{ApplyError, Executor, delete};
+use super::{Action, ApplyError, Executor, Leftover, delete};
 
 /// Writes a file dated a day ago, so it doesn't count as recent activity.
 fn write_old(path: &Path, contents: &str) {
@@ -593,4 +594,149 @@ fn leaves_an_item_excluded_after_approval() {
         })]
     );
     fixture.assert_web_untouched();
+}
+
+#[test]
+fn history_reads_back_each_run() {
+    let fixture = Fixture::new();
+    fixture.apply(&fixture.plan());
+
+    let history = fixture.executor().history().unwrap();
+
+    assert_eq!(history.runs.len(), 1, "{history:?}");
+    let run = &history.runs[0];
+    assert_eq!(run.action, Action::Apply);
+    assert_eq!(run.items, 1);
+    assert!(
+        matches!(&run.outcomes[..], [Outcome::Deleted { .. }]),
+        "{run:?}"
+    );
+    assert!(run.finished);
+    assert!(history.leftovers.is_empty(), "{history:?}");
+    assert!(history.unreadable.is_empty(), "{history:?}");
+}
+
+/// Starts removing `node_modules` the way a run does, then stops as if the process died after
+/// renaming it to its tombstone. `identity` is what the journal records as approved.
+fn interrupt_removal(fixture: &Fixture, identity: cleanse_model::FileIdentity) -> Leftover {
+    let plan = fixture.plan();
+    let item = &plan.items[0];
+    let tombstone = delete::tombstone_for(&item.path).unwrap();
+    let mut journal = Journal::start(
+        &fixture.data.path().join("journal"),
+        Action::Apply,
+        &plan.roots,
+        1,
+    )
+    .unwrap();
+    journal
+        .record(&Record::Removing {
+            path: item.path.to_str().unwrap().to_owned(),
+            tombstone: tombstone.to_str().unwrap().to_owned(),
+            rule: item.rule.clone(),
+            identity,
+        })
+        .unwrap();
+    fs::rename(&item.path, &tombstone).unwrap();
+    Leftover {
+        original: item.path.clone(),
+        tombstone,
+        rule: item.rule.clone(),
+        identity,
+    }
+}
+
+#[test]
+fn finds_and_finishes_a_removal_that_was_cut_short() {
+    let fixture = Fixture::new();
+    let identity = fixture
+        .system
+        .inspect(&fixture.node_modules())
+        .unwrap()
+        .identity;
+    let leftover = interrupt_removal(&fixture, identity);
+
+    let history = fixture.executor().history().unwrap();
+
+    assert!(!history.runs[0].finished);
+    assert_eq!(history.leftovers, std::slice::from_ref(&leftover));
+
+    let applied = fixture.executor().finish(&history.leftovers).unwrap();
+
+    assert!(
+        matches!(&applied.outcomes[..], [Outcome::Deleted { size }] if size.logical == 4),
+        "{applied:?}"
+    );
+    assert!(!leftover.tombstone.exists());
+    assert!(fixture.path("web/package.json").exists());
+    let history = fixture.executor().history().unwrap();
+    assert!(history.leftovers.is_empty(), "{history:?}");
+    assert_eq!(history.runs.len(), 2);
+    assert_eq!(history.runs[1].action, Action::Finish);
+}
+
+#[test]
+fn whatever_else_is_at_a_tombstone_is_left_alone() {
+    let fixture = Fixture::new();
+    let mut other = fixture
+        .system
+        .inspect(&fixture.node_modules())
+        .unwrap()
+        .identity;
+    other.file += 1;
+    let leftover = interrupt_removal(&fixture, other);
+
+    let history = fixture.executor().history().unwrap();
+    let applied = fixture
+        .executor()
+        .finish(std::slice::from_ref(&leftover))
+        .unwrap();
+
+    assert!(history.leftovers.is_empty(), "{history:?}");
+    assert_eq!(applied.outcomes, [skipped(SkipReason::Gone)]);
+    assert!(leftover.tombstone.join("left-pad/index.js").exists());
+}
+
+#[test]
+fn finishing_refuses_to_run_elevated() {
+    let fixture = Fixture::new();
+    let identity = fixture
+        .system
+        .inspect(&fixture.node_modules())
+        .unwrap()
+        .identity;
+    let leftover = interrupt_removal(&fixture, identity);
+    let elevated = System::new().unwrap().elevated(true);
+
+    let result = Executor::new(&fixture.rules, &elevated, &[], fixture.data.path().into())
+        .finish(std::slice::from_ref(&leftover));
+
+    assert!(matches!(result, Err(ApplyError::Elevated)), "{result:?}");
+    assert!(leftover.tombstone.exists());
+}
+
+#[test]
+fn a_journal_cut_short_ends_its_run_there() {
+    let fixture = Fixture::new();
+    fixture.apply(&fixture.plan());
+    let journal_dir = fixture.data.path().join("journal");
+    let journal = fs::read_dir(&journal_dir)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let complete = fs::read_to_string(&journal).unwrap();
+    let mut lines: Vec<&str> = complete.lines().collect();
+    lines.truncate(2);
+    let cut = format!("{}\n{{\"event\":\"do", lines.join("\n"));
+    fs::write(&journal, cut).unwrap();
+    fs::write(journal_dir.join("0-1-0.jsonl"), "not a journal").unwrap();
+
+    let history = fixture.executor().history().unwrap();
+
+    assert_eq!(history.runs.len(), 1, "{history:?}");
+    assert!(!history.runs[0].finished);
+    assert!(history.runs[0].outcomes.is_empty(), "{history:?}");
+    assert_eq!(history.unreadable, [journal_dir.join("0-1-0.jsonl")]);
 }

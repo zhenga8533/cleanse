@@ -430,3 +430,33 @@ fn a_broken_settings_file_stops_cleanse_and_says_where_it_is() {
     assert!(stderr.contains(arg(&path)), "{stderr}");
     assert!(stderr.contains("isn't a full path"), "{stderr}");
 }
+
+#[cfg(unix)]
+#[test]
+fn history_says_when_nothing_has_been_changed() {
+    let home = tempfile::tempdir().unwrap();
+
+    let report = stdout(&cleanse_at_home(home.path(), &["history"]));
+
+    assert!(
+        report.contains("Cleanse hasn't changed anything yet"),
+        "{report}"
+    );
+}
+
+/// Windows CI runs tests as an administrator, so that's where this gets checked.
+#[test]
+fn finishing_refuses_while_elevated() {
+    if !elevated() {
+        return;
+    }
+
+    let output = cleanse(&["history", "--finish"]);
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        stderr(&output).contains("administrator or root"),
+        "{}",
+        stderr(&output)
+    );
+}

@@ -100,14 +100,17 @@ a secret, or is a virtual machine disk. A file modified in the last ten minutes 
 - **Trash** uses the operating system's trash, after checking that the item will really land
   there.
 - Every run writes an append-only journal in Cleanse's data folder, which is itself protected.
-  Each removal is flushed to disk before it starts and after it ends.
+  Each removal is flushed to disk before it starts and after it ends. `cleanse history` reads
+  it back.
+- If a removal stops partway, such as when the computer shuts down, what's left stays in its
+  tombstone. `cleanse history` lists it, and `cleanse history --finish` removes it, but only if
+  the tombstone still holds the folder that was approved, by identity, under the name Cleanse
+  gave it, beside where it was.
 
 ### Not built yet
 
 - **Trash**: items approved for it are skipped.
 - **Quarantine on other drives**: items on a different drive from Cleanse's data folder are
   skipped rather than quarantined.
-- **Leftover tombstones**: if a removal fails partway, what's left stays in its tombstone, and
-  the journal records where. Finishing them on a later run comes with the history command.
 - **Free space**: the size reported for a deleted item is its measured size, not the measured
   change in free space.
