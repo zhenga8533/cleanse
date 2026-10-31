@@ -1,5 +1,6 @@
 use std::cell::OnceCell;
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::fs;
 use std::io;
 use std::path::{self, Path, PathBuf};
@@ -30,7 +31,16 @@ pub struct Detection<'r> {
 pub struct Matcher<'r> {
     artifacts: Vec<&'r Rule>,
     locations: HashMap<PathBuf, &'r Rule>,
+    patterns: Vec<Pattern<'r>>,
     git: GitInfo,
+}
+
+/// A known location with a `*` in its path, so it's compared name by name below its base.
+#[derive(Debug)]
+struct Pattern<'r> {
+    base: PathBuf,
+    names: Vec<String>,
+    rule: &'r Rule,
 }
 
 impl<'r> Matcher<'r> {
@@ -38,12 +48,22 @@ impl<'r> Matcher<'r> {
     pub fn new(rules: impl IntoIterator<Item = &'r Rule>, folders: &KnownFolders, os: Os) -> Self {
         let mut artifacts = Vec::new();
         let mut locations = HashMap::new();
+        let mut patterns = Vec::new();
         for rule in rules {
             match &rule.target {
                 Target::ProjectArtifact { .. } => artifacts.push(rule),
                 Target::KnownLocation { locations: specs } => {
                     for spec in specs.iter().filter(|spec| spec.os == os) {
-                        if let Some(base) = base_folder(folders, spec.base) {
+                        let Some(base) = base_folder(folders, spec.base) else {
+                            continue;
+                        };
+                        if spec.path.contains('*') {
+                            patterns.push(Pattern {
+                                base: location_key(base),
+                                names: spec.path.split('/').map(fold_name).collect(),
+                                rule,
+                            });
+                        } else {
                             locations.insert(location_key(&join_relative(base, &spec.path)), rule);
                         }
                     }
@@ -53,6 +73,7 @@ impl<'r> Matcher<'r> {
         Self {
             artifacts,
             locations,
+            patterns,
             git: GitInfo::new(),
         }
     }
@@ -62,7 +83,13 @@ impl<'r> Matcher<'r> {
     /// Evidence that can't be read counts as missing, so a project that can't be inspected isn't
     /// matched. The walk reports the unreadable directories itself.
     pub fn match_dir(&self, path: &Path) -> Option<Detection<'r>> {
-        if let Some(rule) = self.locations.get(&location_key(path)) {
+        let key = location_key(path);
+        if let Some(rule) = self
+            .locations
+            .get(&key)
+            .copied()
+            .or_else(|| self.match_pattern(&key))
+        {
             return Some(Detection {
                 rule,
                 path: path.to_path_buf(),
@@ -107,6 +134,20 @@ impl<'r> Matcher<'r> {
         })
     }
 
+    /// The rule whose location, written with a `*`, is the path with this key.
+    fn match_pattern(&self, key: &Path) -> Option<&'r Rule> {
+        self.patterns.iter().find_map(|pattern| {
+            let mut names = key.strip_prefix(&pattern.base).ok()?.iter();
+            let all_match = pattern.names.iter().all(|wanted| {
+                names
+                    .next()
+                    .and_then(OsStr::to_str)
+                    .is_some_and(|name| wildcard_match(wanted, name))
+            });
+            (all_match && names.next().is_none()).then_some(pattern.rule)
+        })
+    }
+
     /// Walks everything below `root`, sorted by path, without entering the directories it
     /// matches: anything inside one is part of that match.
     pub fn find(&self, root: &Path) -> io::Result<(Vec<Detection<'r>>, WalkReport)> {
@@ -133,7 +174,7 @@ impl<'r> Matcher<'r> {
     }
 }
 
-fn base_folder(folders: &KnownFolders, base: Base) -> Option<&Path> {
+pub(crate) fn base_folder(folders: &KnownFolders, base: Base) -> Option<&Path> {
     match base {
         Base::Home => folders.home.as_deref(),
         Base::Cache => folders.cache.as_deref(),
@@ -150,6 +191,15 @@ fn location_key(path: &Path) -> PathBuf {
         PathBuf::from(path.to_string_lossy().to_lowercase())
     } else {
         path.to_path_buf()
+    }
+}
+
+/// One name of a location, compared the way [`location_key`] compares paths.
+fn fold_name(name: &str) -> String {
+    if cfg!(any(windows, target_os = "macos")) {
+        name.to_lowercase()
+    } else {
+        name.to_owned()
     }
 }
 
@@ -208,7 +258,7 @@ fn is_file(path: &Path) -> bool {
 }
 
 /// Matches `name` against `pattern`, where `*` stands for any run of characters.
-pub(super) fn wildcard_match(pattern: &str, name: &str) -> bool {
+pub(crate) fn wildcard_match(pattern: &str, name: &str) -> bool {
     let mut parts = pattern.split('*');
     let first = parts.next().unwrap_or_default();
     let Some(mut rest) = name.strip_prefix(first) else {

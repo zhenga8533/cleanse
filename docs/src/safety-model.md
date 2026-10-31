@@ -32,14 +32,17 @@ blocks, including any new kind of concern until it's deliberately classified.
 
 1. **Protected policy.** System directories, volume roots, the home folder and its top-level
    folders, SSH and GPG keys, credential stores, `.git` internals, browser profiles (only their
-   cache subfolders are eligible), AI agent history, settings and credentials, VM and WSL disk
-   images, and the inside of macOS bundles. No candidate may be, or contain, a protected path.
-   Paths are compared by file identity as well as case-folded text, which defeats 8.3 short
-   names, case and Unicode differences, and firmlinks. Rules can't override this policy.
-   Folders excluded in the settings file are protected the same way, with everything inside
-   them. Inside an AI agent's folder, the only exceptions are the folders the agent's own
-   documentation says can be deleted, listed with the safety checks rather than in rules. An
-   exception lifts only that one protection, so a folder the user excluded stays excluded.
+   caches are eligible), AI agent history, settings and credentials, VM and WSL disk images, and
+   the inside of macOS bundles. No candidate may be, or contain, a protected path. Paths are
+   compared by file identity as well as case-folded text, which defeats 8.3 short names, case
+   and Unicode differences, and firmlinks. Rules can't override this policy. Folders excluded in
+   the settings file are protected the same way, with everything inside them. Inside an AI
+   agent's folder, the only exceptions are the folders the agent's own documentation says can be
+   deleted. Inside a browser's, they're each profile's HTTP cache and compiled-script cache in
+   Chrome and Edge, and `cache2` in Firefox, as Chromium's and Firefox's source code name them;
+   sites' stored data, such as `Service Worker/CacheStorage`, stays protected. Exceptions are
+   listed with the safety checks rather than in rules. An exception lifts only that one
+   protection, so a folder the user excluded stays excluded.
 2. **Containment.** A candidate must be inside a root the user chose and inside the base its
    rule declares.
 3. **Links and mounts.** Links, junctions, and other reparse points are never followed;
@@ -69,8 +72,10 @@ a secret, or is a virtual machine disk. A file modified in the last ten minutes 
   blocks folders it's writing to.
 - **Relocated agent folders**: if `CLAUDE_CONFIG_DIR` moves Claude Code's data out of
   `~/.claude`, that folder isn't protected or cleaned.
-- **Browser profiles**: no rule matches inside them yet; they'll be protected before browser
-  cache rules arrive.
+- **Other browsers**: Chrome's, Chromium's, and Firefox's profiles are protected, and Edge's on
+  Windows. Other browsers' profiles, such as Brave's and Safari's, and Edge's on macOS and Linux,
+  aren't recognized yet, and no browser rule matches inside them. Neither are profiles kept
+  somewhere else, such as Chrome started with `--user-data-dir`.
 - **Uncommitted changes** and **recent project activity** warnings: need a working-tree scan.
 - **Sizes on Windows** come from the directory listing, which has no allocation data. They count
   each file's length, or nothing for cloud files that aren't downloaded. Compression and hard

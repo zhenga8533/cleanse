@@ -79,13 +79,18 @@ The location must be exactly this path under one of the user's standard folders:
 | `data_local` | `%LOCALAPPDATA%` | `~/Library/Application Support` | `~/.local/share` |
 | `temp` | `%TEMP%` | `$TMPDIR` | `/tmp` |
 
+In names after the first, `*` matches any run of characters, for folders whose names vary, like
+a browser's profiles: `Google/Chrome/User Data/Profile */Cache` matches `Profile 1/Cache` but not
+`Profile 1/Extensions/Cache`. The first name can't contain `*`, so a location stays inside one
+app's folder.
+
 Locations match case-insensitively on Windows and macOS. Two rules can't claim the same
 location.
 
-A location inside a protected folder, such as an AI agent's, matches nothing removable unless
-the protected policy in `cleanse-core/src/safety/policy.rs` lists it as an exception. Exceptions
-are added only for folders the app's own documentation says can be deleted, and the rule file
-says which page that is.
+A location inside a protected folder, such as an AI agent's or a browser's, matches nothing
+removable unless the protected policy in `cleanse-core/src/safety/policy.rs` lists it as an
+exception. Exceptions are added only for folders the app's own documentation or source code
+shows are disposable, and the rule file or the policy says where that is.
 
 ## An owner
 

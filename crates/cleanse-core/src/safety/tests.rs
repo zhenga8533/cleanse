@@ -10,12 +10,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime};
 
-use cleanse_model::{Candidate, CandidateId, Concern, EntryKind, FileIdentity, Risk};
+use cleanse_model::{Candidate, CandidateId, Category, Concern, EntryKind, FileIdentity, Risk};
 use cleanse_platform::{FakeProbe, FileFacts, KnownFolders, Probe, System};
 use proptest::prelude::*;
 
 use super::{Assessor, Protected, ProtectedPolicy, Reach};
-use crate::rules::{Matcher, Os, RuleSet, Target};
+use crate::rules::{Base, Matcher, Os, RuleSet, Target};
 
 fn write(path: &Path, contents: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -98,6 +98,34 @@ fn subtree_protection_covers_everything_inside() {
         policy.check(&fake_path(&["home", ".sshx"]), None, &[]),
         None
     );
+}
+
+#[test]
+fn exceptions_can_name_folders_by_pattern() {
+    let browser = fake_path(&["home", "browser"]);
+    let mut profiles = location(browser.clone(), Reach::Subtree, "a browser's profiles");
+    profiles.except.push("Profile */Cache".to_owned());
+    let policy = policy(vec![profiles]);
+    let check = |relative: &[&str]| {
+        let mut path = browser.clone();
+        path.extend(relative);
+        policy.check(&path, None, &[])
+    };
+
+    assert_eq!(check(&["Profile 2", "Cache"]), None);
+    assert_eq!(check(&["Profile 2", "Cache", "data_0"]), None);
+    for protected in [
+        &["Profile 2"][..],
+        &["Profile 2", "History"],
+        &["Profiles", "Cache"],
+        &["Default", "Cache"],
+    ] {
+        assert_eq!(
+            check(protected),
+            Some("a browser's profiles"),
+            "{protected:?}"
+        );
+    }
 }
 
 #[cfg(any(windows, target_os = "macos"))]
@@ -723,12 +751,85 @@ fn an_apps_folders_are_kept_while_it_runs() {
     }
 }
 
+/// A fake home with a folder at every location a browser cache rule matches on this OS, with
+/// `*` read as `1`, and beside each, in its profile, an extension that looks like a JavaScript
+/// project.
+fn browser_home(root: &Path) -> Vec<PathBuf> {
+    let rules = RuleSet::builtin().unwrap();
+    let folders = fake_folders(root);
+    let mut caches = Vec::new();
+    for rule in rules
+        .rules()
+        .iter()
+        .filter(|rule| rule.category == Category::BrowserCaches)
+    {
+        let Target::KnownLocation { locations } = &rule.target else {
+            panic!("{} isn't a known location", rule.id);
+        };
+        for location in locations
+            .iter()
+            .filter(|location| location.os == Os::current())
+        {
+            let base = match location.base {
+                Base::Home => &folders.home,
+                Base::Cache => &folders.cache,
+                Base::Config => &folders.config,
+                Base::DataLocal => &folders.data_local,
+                Base::Temp => panic!("{} keeps a cache in the temp folder", rule.id),
+            };
+            let cache = base.as_ref().unwrap().join(location.path.replace('*', "1"));
+            write(&cache.join("x"), "x");
+            let profile = cache.parent().unwrap();
+            write(&profile.join("Extensions/e/package.json"), "{}");
+            write(&profile.join("Extensions/e/node_modules/a/index.js"), "x");
+            caches.push(cache);
+        }
+    }
+    caches
+}
+
+#[test]
+fn browser_caches_are_removable_and_the_rest_of_each_profile_stays_protected() {
+    let root = tempfile::tempdir().unwrap();
+    let caches = browser_home(root.path());
+
+    let candidates = assess_all(root.path(), &Running::programs(&[]));
+
+    for cache in &caches {
+        let candidate = candidates
+            .iter()
+            .find(|candidate| &candidate.found.path == cache)
+            .unwrap_or_else(|| panic!("{} wasn't matched", cache.display()));
+        assert_eq!(
+            candidate.risk(),
+            candidate.found.declared_risk,
+            "{candidate:#?}"
+        );
+    }
+    let extensions: Vec<&Candidate> = candidates
+        .iter()
+        .filter(|candidate| !caches.contains(&candidate.found.path))
+        .collect();
+    assert!(!extensions.is_empty());
+    for extension in extensions {
+        assert!(
+            extension.found.path.ends_with("e/node_modules"),
+            "{extension:#?}"
+        );
+        assert_eq!(extension.risk(), Risk::Protected);
+        let Concern::ProtectedLocation { what } = &extension.concerns()[0] else {
+            panic!("{extension:#?}");
+        };
+        assert!(what.ends_with("'s profiles"), "{what}");
+    }
+}
+
 #[test]
 fn an_exception_doesnt_lift_another_protection_of_the_same_folder() {
     let claude = fake_path(&["home", ".claude"]);
     let debug = claude.join("debug");
     let mut documented = location(claude.clone(), Reach::Subtree, "Claude Code's data");
-    documented.except.push(debug.clone());
+    documented.except.push("debug".to_owned());
     let excluded = location(claude, Reach::Subtree, "a folder excluded in your settings");
 
     let alone = policy(vec![documented.clone()]);

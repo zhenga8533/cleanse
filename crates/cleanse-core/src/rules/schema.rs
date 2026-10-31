@@ -66,7 +66,8 @@ pub enum Target {
 pub struct Location {
     pub os: Os,
     pub base: Base,
-    /// A `/`-separated path relative to `base`.
+    /// A `/`-separated path relative to `base`. In names after the first, `*` matches any run
+    /// of characters, for folders whose names vary, like a browser's profiles.
     pub path: String,
 }
 
@@ -169,7 +170,7 @@ impl Rule {
                     return Err("`locations` is empty".into());
                 }
                 for location in locations {
-                    validate_relative(&location.path)?;
+                    validate_location(&location.path)?;
                 }
             }
         }
@@ -241,6 +242,20 @@ fn validate_relative(path: &str) -> Result<(), String> {
     if path.is_empty() || !path.split('/').all(is_plain_segment) {
         return Err(format!(
             "`{path}` must be a relative path made of `/`-separated names, without `.` or `..`"
+        ));
+    }
+    Ok(())
+}
+
+/// Like [`validate_relative`], but names after the first may contain `*`. The first is literal,
+/// so a location always stays inside one app's folder.
+fn validate_location(path: &str) -> Result<(), String> {
+    let mut names = path.split('/');
+    let first_is_literal = names.next().is_some_and(is_plain_segment);
+    if !first_is_literal || !names.all(|name| is_plain_segment(&name.replace('*', "x"))) {
+        return Err(format!(
+            "`{path}` must be a relative path made of `/`-separated names, without `.` or `..`, \
+             and with `*` only after the first name"
         ));
     }
     Ok(())

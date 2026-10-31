@@ -24,6 +24,12 @@ All notable changes to Cleanse are documented here. The format is based on
   plugins are Review, so they go to quarantine. Transcripts, memory, prompt history, tasks,
   settings, plugins, and credentials stay protected. Nothing is removed while Claude Code or
   Claude Desktop is running.
+- Rules for browser caches: Chrome's and Firefox's on every OS, and Edge's on Windows. They match
+  only the caches in each profile, which the browser fills again as you browse, and nothing is
+  removed while the browser is running, even in the background. The rest of Chrome's,
+  Chromium's, Edge's, and Firefox's profiles is protected: history, cookies, saved passwords,
+  extensions, and sites' stored data. Known locations in rules can now use `*` in folder names
+  after the first.
 - `cleanse history` lists what each run removed, quarantined, restored, or purged. If a
   removal stopped partway, it shows what's left, and `cleanse history --finish` removes it once
   it's confirmed to be the folder that was approved.

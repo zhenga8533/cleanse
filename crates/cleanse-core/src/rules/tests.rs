@@ -232,6 +232,85 @@ fn known_locations_match_regardless_of_case() {
     assert_eq!(run_fixture(rule, &tree_only(&[tree])).len(), 1);
 }
 
+#[cfg(any(windows, target_os = "macos"))]
+#[test]
+fn locations_with_wildcards_match_regardless_of_case() {
+    let rules = builtin();
+    let rule = rules
+        .get(&cleanse_model::RuleId("chrome.cache".into()))
+        .unwrap();
+    let tree = if cfg!(windows) {
+        "data_local/GOOGLE/CHROME/USER DATA/PROFILE 3/CODE CACHE/x"
+    } else {
+        "cache/GOOGLE/CHROME/PROFILE 3/CODE CACHE/x"
+    };
+
+    assert_eq!(run_fixture(rule, &tree_only(&[tree])).len(), 1);
+}
+
+#[test]
+fn a_wildcard_location_matches_whole_names_at_its_own_depth() {
+    let rules = load(
+        r#"
+[[rule]]
+id = "test.cache"
+name = "Cache"
+category = "browser_caches"
+risk = "safe"
+explain = "Because."
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "windows", base = "cache", path = "app/Profile */Cache" },
+    { os = "macos", base = "cache", path = "app/Profile */Cache" },
+    { os = "linux", base = "cache", path = "app/Profile */Cache" },
+]
+"#,
+    )
+    .unwrap();
+    let tree = tree_only(&[
+        "cache/app/Profile 1/Cache/x",
+        "cache/app/Profile 1/Nested/Cache/x",
+        "cache/app/Profiles/Cache/x",
+        "cache/app/Cache/x",
+        "cache/other/Profile 1/Cache/x",
+    ]);
+
+    let found = run_fixture(&rules.rules()[0], &tree);
+
+    assert_eq!(
+        found,
+        BTreeSet::from(["cache/app/Profile 1/Cache".to_owned()])
+    );
+}
+
+#[test]
+fn a_locations_first_name_cant_be_a_wildcard() {
+    let rule = |path: &str| {
+        format!(
+            r#"
+[[rule]]
+id = "test.cache"
+name = "Cache"
+category = "browser_caches"
+risk = "safe"
+explain = "Because."
+
+[rule.match]
+kind = "known_location"
+locations = [{{ os = "linux", base = "cache", path = "{path}" }}]
+"#
+        )
+    };
+
+    assert!(load(&rule("app/*/cache")).is_ok());
+    for path in ["*/cache", "app*/cache", "app/../*"] {
+        let error = load(&rule(path)).unwrap_err();
+        assert!(error.contains("only after the first name"), "{error}");
+    }
+}
+
 #[test]
 fn a_marker_must_be_a_real_file() {
     let rules = builtin();
