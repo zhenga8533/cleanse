@@ -1,7 +1,8 @@
 # Safety model
 
 > Status: the gates are implemented (see [what's not covered yet](#not-covered-yet)).
-> `cleanse clean` deletes or quarantines approved items. The trash isn't built yet.
+> `cleanse clean` and `cleanse apply` delete or quarantine approved items. The trash isn't built
+> yet.
 
 Cleanse's job is to remove files, so its first job is to not remove the wrong ones. The
 principles:
@@ -85,6 +86,14 @@ a secret, or is a virtual machine disk. A file modified in the last ten minutes 
   passes every gate. It's also skipped if its tier has risen, or a new kind of warning has
   appeared, since it was approved. Anything modified after the run starts counts as modified
   moments ago.
+- **Saved plans.** `cleanse scan --save` writes what can be removed to a plan file, selecting
+  only what `clean` would preselect, so Review items and items with warnings start unselected.
+  `cleanse apply` removes the selected items with the same re-checks. The file can be edited,
+  so nothing in it is trusted: an item is removed only if a rule still recognizes it at that
+  path, with that identity, inside the plan's roots, and every gate passes. Lowering an item's
+  tier in the file makes it skipped as risen, and a Review item the plan says to delete is
+  skipped, since Review items are only quarantined. Paths must be full paths. Saving replaces an
+  existing file only if it's a plan Cleanse saved.
 - **Delete** first renames the item to a sibling tombstone, so a project never sees a
   half-deleted `node_modules`. If what landed there isn't the approved folder, because
   something replaced it after the re-check, it's put back untouched. Otherwise the tombstone is

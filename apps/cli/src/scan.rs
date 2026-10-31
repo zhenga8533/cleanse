@@ -1,16 +1,16 @@
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::io::{self, IsTerminal, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use cleanse_engine::{Engine, Progress, Scan};
-use cleanse_model::{Candidate, Risk, RuleId};
+use cleanse_engine::{Engine, Progress, Scan, save_plan};
+use cleanse_model::{Candidate, PlanItem, Risk, RuleId, SavedPlan};
 use serde::Serialize;
 
-use crate::format;
+use crate::{format, now};
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
@@ -25,6 +25,9 @@ pub struct Args {
     /// Also list everything that's kept, and why.
     #[arg(long)]
     show_protected: bool,
+    /// Save what can be removed to a plan file, to review and then remove with `cleanse apply`.
+    #[arg(long, value_name = "FILE")]
+    save: Option<PathBuf>,
 }
 
 /// How many of the largest removable items the summary lists.
@@ -33,11 +36,54 @@ const LARGEST: usize = 10;
 pub fn run(engine: &Engine, args: &Args) -> crate::Result {
     let scan = scan(engine, &args.paths)?;
     if args.json {
-        print_json(&scan)
+        print_json(&scan)?;
     } else {
         print_human(engine, &scan, args);
-        Ok(())
     }
+    if let Some(path) = &args.save {
+        save(&scan, path, args.json)?;
+    }
+    Ok(())
+}
+
+/// Saves the scan as a plan, and says how to apply it: on stderr when stdout holds JSON.
+fn save(scan: &Scan, path: &Path, json: bool) -> crate::Result {
+    let plan = SavedPlan::new(&scan.roots, &scan.candidates, now());
+    save_plan(path, &plan)
+        .map_err(|error| format!("couldn't save the plan to {}: {error}", path.display()))?;
+
+    let selected = plan.items.iter().filter(|saved| saved.selected).count();
+    let approvable = scan
+        .candidates
+        .iter()
+        .filter(|candidate| PlanItem::approve(candidate).is_some())
+        .count();
+    let say = |line: String| {
+        if json {
+            eprintln!("{line}");
+        } else {
+            println!("{line}");
+        }
+    };
+    if !json {
+        println!();
+    }
+    say(format!(
+        "Saved a plan of {}, {selected} selected, to {}. Review it, then run `cleanse apply {}` \
+         to remove the selected items.",
+        items(plan.items.len()),
+        path.display(),
+        path.display()
+    ));
+    let left_out = approvable - plan.items.len();
+    if left_out > 0 {
+        say(format!(
+            "{} left out, because their paths aren't valid Unicode and the plan can't hold them \
+             exactly.",
+            items(left_out)
+        ));
+    }
+    Ok(())
 }
 
 /// Scans `paths`, or the home folder if there are none, showing progress.
@@ -161,7 +207,11 @@ fn print_human(engine: &Engine, scan: &Scan, args: &Args) {
             }
         );
     }
-    println!("\nNothing was removed. Run `cleanse clean` to choose what to remove.");
+    if args.save.is_some() {
+        println!("\nNothing was removed.");
+    } else {
+        println!("\nNothing was removed. Run `cleanse clean` to choose what to remove.");
+    }
 }
 
 /// Prints a section's totals per rule, then its items largest first, up to `limit`.

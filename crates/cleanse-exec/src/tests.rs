@@ -9,7 +9,7 @@ use cleanse_core::rules::{Matcher, Os, RuleSet};
 use cleanse_core::safety::{Assessor, ProtectedPolicy};
 use cleanse_model::{
     CandidateId, Concern, Disposal, EntryOutcome, Outcome, Plan, PlanItem, QuarantineEntry, RuleId,
-    Size, SkipReason,
+    SavedItem, SavedPlan, Size, SkipReason,
 };
 use cleanse_platform::{Probe, System};
 use serde_json::Value;
@@ -17,7 +17,7 @@ use tempfile::TempDir;
 
 use super::journal::{Journal, Record};
 use super::quarantine::Quarantine;
-use super::{Action, ApplyError, Executor, Leftover, delete};
+use super::{Action, ApplyError, Executor, Leftover, PlanFileError, delete, load_plan, save_plan};
 
 /// Writes a file dated a day ago, so it doesn't count as recent activity.
 fn write_old(path: &Path, contents: &str) {
@@ -739,4 +739,121 @@ fn a_journal_cut_short_ends_its_run_there() {
     assert!(!history.runs[0].finished);
     assert!(history.runs[0].outcomes.is_empty(), "{history:?}");
     assert_eq!(history.unreadable, [journal_dir.join("0-1-0.jsonl")]);
+}
+
+/// The built-in rule for `node_modules`, but in the Review tier.
+const REVIEW_NODE_MODULES: &str = r#"
+[[rule]]
+id = "test.node_modules"
+name = "Dependencies to review"
+category = "dependencies"
+risk = "review"
+explain = "For tests."
+
+[rule.match]
+kind = "project_artifact"
+names = ["node_modules"]
+markers = ["package.json"]
+"#;
+
+#[test]
+fn a_plan_cant_delete_review_items() {
+    let mut fixture = Fixture::new();
+    fixture.rules = RuleSet::from_sources([("review.toml", REVIEW_NODE_MODULES)]).unwrap();
+    let mut plan = fixture.plan();
+    assert_eq!(plan.items[0].disposal, Disposal::Quarantine);
+    plan.items[0].disposal = Disposal::Delete;
+
+    let outcomes = fixture.apply(&plan);
+
+    assert_eq!(outcomes, [skipped(SkipReason::NeedsQuarantine)]);
+    assert!(fixture.node_modules().join("left-pad/index.js").exists());
+}
+
+/// `plan`, saved with every item selected.
+fn saved(plan: &Plan) -> SavedPlan {
+    SavedPlan {
+        cleanse_plan: SavedPlan::FORMAT,
+        saved_by: "test".into(),
+        saved_at: 1,
+        roots: plan.roots.clone(),
+        items: plan
+            .items
+            .iter()
+            .map(|item| SavedItem {
+                selected: true,
+                item: item.clone(),
+            })
+            .collect(),
+    }
+}
+
+#[test]
+fn saves_a_plan_and_reads_it_back() {
+    let fixture = Fixture::new();
+    let saved = saved(&fixture.plan());
+    let file = fixture.data.path().join("plan.json");
+
+    save_plan(&file, &saved).unwrap();
+    // Saving again replaces the earlier plan.
+    save_plan(&file, &saved).unwrap();
+
+    assert_eq!(load_plan(&file).unwrap(), saved);
+}
+
+#[test]
+fn saving_never_replaces_a_file_that_isnt_a_plan() {
+    let fixture = Fixture::new();
+    let file = fixture.data.path().join("notes.json");
+    fs::write(&file, r#"{"notes": true}"#).unwrap();
+
+    let result = save_plan(&file, &saved(&fixture.plan()));
+
+    assert!(
+        matches!(result, Err(PlanFileError::WouldReplace)),
+        "{result:?}"
+    );
+    assert_eq!(fs::read_to_string(&file).unwrap(), r#"{"notes": true}"#);
+}
+
+#[test]
+fn reads_only_plans_it_understands() {
+    let fixture = Fixture::new();
+    let saved = saved(&fixture.plan());
+    let file = fixture.data.path().join("plan.json");
+    let load = |contents: &str| {
+        fs::write(&file, contents).unwrap();
+        load_plan(&file)
+    };
+    let mut json = serde_json::to_value(&saved).unwrap();
+
+    json["cleanse_plan"] = 2.into();
+    let newer = load(&json.to_string());
+    json["cleanse_plan"] = SavedPlan::FORMAT.into();
+    json["items"][0]["path"] = "web/node_modules".into();
+    let relative = load(&json.to_string());
+    let not_json = load("not json");
+    let other_json = load(r#"{"notes": true}"#);
+    let with_bom = load(&format!(
+        "\u{feff}{}",
+        serde_json::to_string(&saved).unwrap()
+    ));
+
+    assert!(
+        matches!(newer, Err(PlanFileError::UnknownFormat(2))),
+        "{newer:?}"
+    );
+    assert!(
+        matches!(relative, Err(PlanFileError::RelativePath(_))),
+        "{relative:?}"
+    );
+    assert!(
+        matches!(not_json, Err(PlanFileError::NotAPlan(_))),
+        "{not_json:?}"
+    );
+    assert!(
+        matches!(other_json, Err(PlanFileError::NotAPlan(_))),
+        "{other_json:?}"
+    );
+    assert_eq!(with_bom.unwrap(), saved);
 }

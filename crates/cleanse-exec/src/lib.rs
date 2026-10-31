@@ -6,6 +6,7 @@
 mod delete;
 mod history;
 mod journal;
+mod plan_file;
 mod quarantine;
 
 #[cfg(test)]
@@ -33,6 +34,7 @@ use quarantine::Quarantine;
 
 pub use history::{History, Leftover, Run};
 pub use journal::Action;
+pub use plan_file::{PlanFileError, load_plan, save_plan};
 pub use quarantine::Listing;
 
 /// Removes approved items, checking each one again first, and looks after the quarantine.
@@ -209,6 +211,11 @@ impl<'a> Executor<'a> {
             Ok(candidate) => candidate,
             Err(outcome) => return Ok(outcome),
         };
+        if item.disposal == Disposal::Delete
+            && candidate.default_disposal() != Some(Disposal::Delete)
+        {
+            return Ok(skipped(SkipReason::NeedsQuarantine));
+        }
 
         if item.disposal == Disposal::Quarantine {
             let entry = QuarantineEntry {

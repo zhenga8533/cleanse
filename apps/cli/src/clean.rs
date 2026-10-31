@@ -92,10 +92,6 @@ pub fn run(engine: &Engine, args: &Args) -> Result<ExitCode, Box<dyn Error>> {
         );
         return Ok(ExitCode::SUCCESS);
     }
-    if asking && !confirm(&selected)? {
-        return Ok(aborted());
-    }
-
     let plan = Plan {
         roots: scan.roots.clone(),
         items: selected
@@ -103,15 +99,23 @@ pub fn run(engine: &Engine, args: &Args) -> Result<ExitCode, Box<dyn Error>> {
             .filter_map(|candidate| PlanItem::approve(candidate))
             .collect(),
     };
+    if asking && !confirm(&plan.items)? {
+        return Ok(aborted());
+    }
+    remove(engine, &plan)
+}
+
+/// Removes the plan's items, showing progress, and reports what happened to each.
+pub(crate) fn remove(engine: &Engine, plan: &Plan) -> Result<ExitCode, Box<dyn Error>> {
     let reporter = Reporter::new();
     let count = plan.items.len();
     let applied = engine.apply(
-        &plan,
+        plan,
         &|done| reporter.removing(done, count),
         &AtomicBool::new(false),
     );
     reporter.clear();
-    Ok(report(&plan, &applied?))
+    Ok(report(plan, &applied?))
 }
 
 /// What can be removed, largest first: everything but what's protected.
@@ -181,16 +185,13 @@ fn choose<'c>(removable: &[&'c Candidate]) -> Result<Option<Vec<&'c Candidate>>,
     }
 }
 
-fn confirm(selected: &[&Candidate]) -> Result<bool, InquireError> {
-    let (quarantined, deleted): (Vec<&Candidate>, Vec<&Candidate>) = selected
+pub(crate) fn confirm(selected: &[PlanItem]) -> Result<bool, InquireError> {
+    let (quarantined, deleted): (Vec<&PlanItem>, Vec<&PlanItem>) = selected
         .iter()
-        .partition(|candidate| candidate.default_disposal() == Some(Disposal::Quarantine));
-    let amount = |candidates: &[&Candidate]| {
-        format!(
-            "{} ({})",
-            items(candidates.len()),
-            format::size(&format::total(candidates))
-        )
+        .partition(|item| item.disposal == Disposal::Quarantine);
+    let amount = |group: &[&PlanItem]| {
+        let total: Size = group.iter().map(|item| item.size).sum();
+        format!("{} ({})", items(group.len()), format::size(&total))
     };
     let question = match (deleted.is_empty(), quarantined.is_empty()) {
         (false, true) => format!("Delete {}?", amount(&deleted)),
@@ -215,7 +216,7 @@ fn confirm(selected: &[&Candidate]) -> Result<bool, InquireError> {
     }
 }
 
-fn aborted() -> ExitCode {
+pub(crate) fn aborted() -> ExitCode {
     println!("Nothing was removed.");
     ExitCode::from(ABORTED)
 }
