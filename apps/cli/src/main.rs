@@ -1,5 +1,6 @@
 //! The `cleanse` command-line interface.
 
+mod apply;
 mod clean;
 mod doctor;
 mod explain;
@@ -60,6 +61,8 @@ enum Command {
     Scan(scan::Args),
     /// Choose what to remove, then remove it after checking each item again
     Clean(clean::Args),
+    /// Remove the selected items in a plan saved by `scan --save`, after checking each again
+    Apply(apply::Args),
     /// List what's in quarantine, or purge it for good
     Quarantine(quarantine::Args),
     /// Put quarantined items back where they were
@@ -81,6 +84,7 @@ fn main() -> ExitCode {
         .and_then(|engine| match &cli.command {
             Command::Scan(args) => scan::run(&engine, args).map(|()| ExitCode::SUCCESS),
             Command::Clean(args) => clean::run(&engine, args),
+            Command::Apply(args) => apply::run(&engine, args),
             Command::Quarantine(args) => quarantine::run(&engine, args),
             Command::Restore(args) => quarantine::restore(&engine, args),
             Command::History(args) => history::run(&engine, args),
