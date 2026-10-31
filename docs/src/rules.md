@@ -82,6 +82,24 @@ The location must be exactly this path under one of the user's standard folders:
 Locations match case-insensitively on Windows and macOS. Two rules can't claim the same
 location.
 
+A location inside a protected folder, such as an AI agent's, matches nothing removable unless
+the protected policy in `cleanse-core/src/safety/policy.rs` lists it as an exception. Exceptions
+are added only for folders the app's own documentation says can be deleted, and the rule file
+says which page that is.
+
+## An owner
+
+```toml
+[rule.owner]
+app = "Claude Code"
+processes = ["claude"]
+```
+
+While any of these programs is running, the rule's matches are kept. Program names are
+lowercase and without `.exe`, and they're compared ignoring case, so `claude` matches
+`claude.exe` on Windows and `Claude` on macOS. If the running programs can't be listed, the
+matches are kept too.
+
 ## Fields
 
 | Field | |
@@ -92,6 +110,7 @@ location.
 | `risk` | `safe` (the app recreates it on its own), `regenerable` (it takes a command, a download, or time), `review`, or `protected`. See the [safety model](safety-model.md) |
 | `explain` | Why it's safe to remove, in a sentence or two |
 | `regenerate` | Optional: how to get it back, when that takes a deliberate step |
+| `owner` | Optional: the app that writes what the rule matches; see [an owner](#an-owner) |
 
 Paths in rules are `/`-separated and relative. Cleanse rejects a rule file with `.` or `..`
 segments, absolute paths, backslashes, colons (drive letters and NTFS alternate data streams),

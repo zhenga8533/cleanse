@@ -88,5 +88,8 @@ fn show(rule: &Rule) {
             }
         }
     }
+    if let Some(owner) = &rule.owner {
+        println!("  Kept while:  {} is running", owner.app);
+    }
     println!("  Tests:       {}", rule.tests.len());
 }

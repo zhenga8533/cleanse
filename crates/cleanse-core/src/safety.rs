@@ -9,10 +9,10 @@ mod policy;
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{self, Path, PathBuf};
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::{Duration, SystemTime};
 
 use cleanse_model::{Candidate, CandidateId, Concern, EntryKind, FileIdentity, Match};
@@ -36,6 +36,8 @@ pub struct Assessor<'p> {
     home: Option<PathBuf>,
     now: SystemTime,
     identities: Mutex<HashMap<PathBuf, Option<FileIdentity>>>,
+    /// Listed the first time a match's rule has an owner. `None` if they couldn't be listed.
+    running: OnceLock<Option<HashSet<String>>>,
 }
 
 impl<'p> Assessor<'p> {
@@ -57,6 +59,7 @@ impl<'p> Assessor<'p> {
             home: probe.known_folders().home.clone(),
             now,
             identities: Mutex::default(),
+            running: OnceLock::new(),
         })
     }
 
@@ -116,8 +119,18 @@ impl<'p> Assessor<'p> {
         if measurement.shared {
             concerns.push(Concern::SharedData);
         }
-
         let rule = detection.rule;
+        if let Some(owner) = &rule.owner {
+            let app = owner.app.clone();
+            match self.running() {
+                Some(running) if owner.processes.iter().any(|name| running.contains(name)) => {
+                    concerns.push(Concern::OwnerRunning { app });
+                }
+                Some(_) => {}
+                None => concerns.push(Concern::OwnerUnchecked { app }),
+            }
+        }
+
         let found = Match {
             path: path.clone(),
             kind: EntryKind::Dir,
@@ -129,6 +142,12 @@ impl<'p> Assessor<'p> {
             evidence: detection.evidence.clone(),
         };
         Candidate::assess(id, found, identity, concerns)
+    }
+
+    fn running(&self) -> Option<&HashSet<String>> {
+        self.running
+            .get_or_init(|| self.probe.running_processes().ok())
+            .as_ref()
     }
 
     /// The identities of `path`'s parent folders that could be read, nearest first. Many

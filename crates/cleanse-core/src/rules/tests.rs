@@ -308,6 +308,14 @@ fn rejects_rules_that_could_escape_or_misbehave() {
         ),
         (VALID.replace("Because.", " "), "`explain` is empty"),
         (format!("{VALID}{VALID}"), "already uses this id"),
+        (
+            format!("{VALID}\n[rule.owner]\napp = \"Thing\"\nprocesses = []\n"),
+            "`owner.processes` is empty",
+        ),
+        (
+            format!("{VALID}\n[rule.owner]\napp = \"Thing\"\nprocesses = [\"Thing.exe\"]\n"),
+            "lowercase program name",
+        ),
     ];
     for (toml, expected) in cases {
         let error = load(&toml).unwrap_err();

@@ -1,0 +1,336 @@
+# Claude Code keeps its data in ~/.claude. These rules match only the folders its documentation
+# says can be deleted (https://code.claude.com/docs/en/claude-directory), which the protected
+# policy exempts from protecting ~/.claude. Everything else there stays protected: transcripts,
+# memory, prompt history, tasks, settings, plugins, and credentials. Claude Code also deletes
+# most of these itself once they're older than its cleanupPeriodDays setting.
+
+[[rule]]
+id = "claude-code.cache"
+name = "Claude Code cache"
+category = "ai_agents"
+risk = "safe"
+explain = "Caches Claude Code keeps, such as its copy of the changelog. It refreshes them on its own."
+regenerate = "Claude Code refills it in the background."
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "windows", base = "home", path = ".claude/cache" },
+    { os = "macos", base = "home", path = ".claude/cache" },
+    { os = "linux", base = "home", path = ".claude/cache" },
+]
+
+[rule.owner]
+app = "Claude Code"
+processes = ["claude"]
+
+[[rule.test]]
+tree = ["home/.claude/cache/x"]
+matches = ["home/.claude/cache"]
+
+[[rule.test]]
+tree = ["home/.claude/projects/p/s.jsonl", "code/.claude/cache/x"]
+matches = []
+
+[[rule]]
+id = "claude-code.debug"
+name = "Claude Code debug logs"
+category = "ai_agents"
+risk = "safe"
+explain = "Logs Claude Code writes while debug logging is on. Its documentation says removing them loses nothing you use."
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "windows", base = "home", path = ".claude/debug" },
+    { os = "macos", base = "home", path = ".claude/debug" },
+    { os = "linux", base = "home", path = ".claude/debug" },
+]
+
+[rule.owner]
+app = "Claude Code"
+processes = ["claude"]
+
+[[rule.test]]
+tree = ["home/.claude/debug/x"]
+matches = ["home/.claude/debug"]
+
+[[rule.test]]
+tree = ["home/.claude/projects/p/s.jsonl", "code/.claude/debug/x"]
+matches = []
+
+[[rule]]
+id = "claude-code.session_env"
+name = "Claude Code session environments"
+category = "ai_agents"
+risk = "safe"
+explain = "Environment details Claude Code keeps for each session. Its documentation says removing them loses nothing you use."
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "windows", base = "home", path = ".claude/session-env" },
+    { os = "macos", base = "home", path = ".claude/session-env" },
+    { os = "linux", base = "home", path = ".claude/session-env" },
+]
+
+[rule.owner]
+app = "Claude Code"
+processes = ["claude"]
+
+[[rule.test]]
+tree = ["home/.claude/session-env/x"]
+matches = ["home/.claude/session-env"]
+
+[[rule.test]]
+tree = ["home/.claude/projects/p/s.jsonl", "code/.claude/session-env/x"]
+matches = []
+
+[[rule]]
+id = "claude-code.shell_snapshots"
+name = "Claude Code shell snapshots"
+category = "ai_agents"
+risk = "safe"
+explain = "Shell settings Claude Code captures when a session starts. Each session removes its own when it exits cleanly, so what's left is from sessions that didn't."
+regenerate = "Each new session captures its own."
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "windows", base = "home", path = ".claude/shell-snapshots" },
+    { os = "macos", base = "home", path = ".claude/shell-snapshots" },
+    { os = "linux", base = "home", path = ".claude/shell-snapshots" },
+]
+
+[rule.owner]
+app = "Claude Code"
+processes = ["claude"]
+
+[[rule.test]]
+tree = ["home/.claude/shell-snapshots/x"]
+matches = ["home/.claude/shell-snapshots"]
+
+[[rule.test]]
+tree = ["home/.claude/projects/p/s.jsonl", "code/.claude/shell-snapshots/x"]
+matches = []
+
+[[rule]]
+id = "claude-code.legacy"
+name = "Old Claude Code folders"
+category = "ai_agents"
+risk = "safe"
+explain = "Folders that older versions of Claude Code wrote. Current versions no longer use them."
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "windows", base = "home", path = ".claude/image-cache" },
+    { os = "macos", base = "home", path = ".claude/image-cache" },
+    { os = "linux", base = "home", path = ".claude/image-cache" },
+    { os = "windows", base = "home", path = ".claude/logs" },
+    { os = "macos", base = "home", path = ".claude/logs" },
+    { os = "linux", base = "home", path = ".claude/logs" },
+    { os = "windows", base = "home", path = ".claude/statsig" },
+    { os = "macos", base = "home", path = ".claude/statsig" },
+    { os = "linux", base = "home", path = ".claude/statsig" },
+    { os = "windows", base = "home", path = ".claude/todos" },
+    { os = "macos", base = "home", path = ".claude/todos" },
+    { os = "linux", base = "home", path = ".claude/todos" },
+]
+
+[rule.owner]
+app = "Claude Code"
+processes = ["claude"]
+
+[[rule.test]]
+tree = [
+    "home/.claude/image-cache/x",
+    "home/.claude/logs/x",
+    "home/.claude/statsig/x",
+    "home/.claude/todos/x",
+]
+matches = [
+    "home/.claude/image-cache",
+    "home/.claude/logs",
+    "home/.claude/statsig",
+    "home/.claude/todos",
+]
+
+[[rule.test]]
+tree = [
+    "home/.claude/projects/p/s.jsonl",
+    "code/.claude/image-cache/x",
+    "code/.claude/logs/x",
+    "code/.claude/statsig/x",
+    "code/.claude/todos/x",
+]
+matches = []
+
+[[rule]]
+id = "claude-code.backups"
+name = "Claude Code settings backups"
+category = "ai_agents"
+risk = "review"
+explain = "Earlier copies of ~/.claude.json, which holds your Claude Code account and project settings. Claude Code makes one each time it rewrites the file and keeps the newest five."
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "windows", base = "home", path = ".claude/backups" },
+    { os = "macos", base = "home", path = ".claude/backups" },
+    { os = "linux", base = "home", path = ".claude/backups" },
+]
+
+[rule.owner]
+app = "Claude Code"
+processes = ["claude"]
+
+[[rule.test]]
+tree = ["home/.claude/backups/x"]
+matches = ["home/.claude/backups"]
+
+[[rule.test]]
+tree = ["home/.claude/projects/p/s.jsonl", "code/.claude/backups/x"]
+matches = []
+
+[[rule]]
+id = "claude-code.file_history"
+name = "Claude Code checkpoints"
+category = "ai_agents"
+risk = "review"
+explain = "Copies of files from before Claude Code edited them. Without them, you can't rewind past sessions to a checkpoint."
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "windows", base = "home", path = ".claude/file-history" },
+    { os = "macos", base = "home", path = ".claude/file-history" },
+    { os = "linux", base = "home", path = ".claude/file-history" },
+]
+
+[rule.owner]
+app = "Claude Code"
+processes = ["claude"]
+
+[[rule.test]]
+tree = ["home/.claude/file-history/x"]
+matches = ["home/.claude/file-history"]
+
+[[rule.test]]
+tree = ["home/.claude/projects/p/s.jsonl", "code/.claude/file-history/x"]
+matches = []
+
+[[rule]]
+id = "claude-code.paste_cache"
+name = "Claude Code pastes"
+category = "ai_agents"
+risk = "review"
+explain = "The contents of large pastes. Without them, prompts you recall lose the pasted text."
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "windows", base = "home", path = ".claude/paste-cache" },
+    { os = "macos", base = "home", path = ".claude/paste-cache" },
+    { os = "linux", base = "home", path = ".claude/paste-cache" },
+]
+
+[rule.owner]
+app = "Claude Code"
+processes = ["claude"]
+
+[[rule.test]]
+tree = ["home/.claude/paste-cache/x"]
+matches = ["home/.claude/paste-cache"]
+
+[[rule.test]]
+tree = ["home/.claude/projects/p/s.jsonl", "code/.claude/paste-cache/x"]
+matches = []
+
+[[rule]]
+id = "claude-code.plans"
+name = "Claude Code plans"
+category = "ai_agents"
+risk = "review"
+explain = "Plans Claude Code wrote in plan mode."
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "windows", base = "home", path = ".claude/plans" },
+    { os = "macos", base = "home", path = ".claude/plans" },
+    { os = "linux", base = "home", path = ".claude/plans" },
+]
+
+[rule.owner]
+app = "Claude Code"
+processes = ["claude"]
+
+[[rule.test]]
+tree = ["home/.claude/plans/x"]
+matches = ["home/.claude/plans"]
+
+[[rule.test]]
+tree = ["home/.claude/projects/p/s.jsonl", "code/.claude/plans/x"]
+matches = []
+
+[[rule]]
+id = "claude-code.trash"
+name = "Claude Code removed skills and plugins"
+category = "ai_agents"
+risk = "review"
+explain = "Skills and plugins that claude.ai sync removed, kept so they can be recovered."
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "windows", base = "home", path = ".claude/plugins/.trash" },
+    { os = "macos", base = "home", path = ".claude/plugins/.trash" },
+    { os = "linux", base = "home", path = ".claude/plugins/.trash" },
+    { os = "windows", base = "home", path = ".claude/skills/.trash" },
+    { os = "macos", base = "home", path = ".claude/skills/.trash" },
+    { os = "linux", base = "home", path = ".claude/skills/.trash" },
+]
+
+[rule.owner]
+app = "Claude Code"
+processes = ["claude"]
+
+[[rule.test]]
+tree = ["home/.claude/plugins/.trash/x", "home/.claude/skills/.trash/x"]
+matches = ["home/.claude/plugins/.trash", "home/.claude/skills/.trash"]
+
+[[rule.test]]
+tree = [
+    "home/.claude/projects/p/s.jsonl",
+    "code/.claude/plugins/.trash/x",
+    "code/.claude/skills/.trash/x",
+]
+matches = []
+
+[[rule]]
+id = "claude-code.usage_data"
+name = "Claude Code insights reports"
+category = "ai_agents"
+risk = "review"
+explain = "Reports from /insights and the cached analysis used to build them."
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "windows", base = "home", path = ".claude/usage-data" },
+    { os = "macos", base = "home", path = ".claude/usage-data" },
+    { os = "linux", base = "home", path = ".claude/usage-data" },
+]
+
+[rule.owner]
+app = "Claude Code"
+processes = ["claude"]
+
+[[rule.test]]
+tree = ["home/.claude/usage-data/x"]
+matches = ["home/.claude/usage-data"]
+
+[[rule.test]]
+tree = ["home/.claude/projects/p/s.jsonl", "code/.claude/usage-data/x"]
+matches = []

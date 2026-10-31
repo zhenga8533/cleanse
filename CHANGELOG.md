@@ -18,6 +18,12 @@ All notable changes to Cleanse are documented here. The format is based on
   deleted, if they're on the same drive. `cleanse quarantine` lists what's there, `cleanse restore
   ID` puts an item back if nothing has taken its place, and `cleanse quarantine purge` deletes
   items for good, by ID, `--all`, or `--older-than DAYS`. Review items are never preselected.
+- Rules for Claude Code's data in `~/.claude`, limited to the folders its documentation says
+  can be deleted. Logs, caches, legacy folders, and leftovers from crashed sessions are Safe.
+  Checkpoints, pastes, plans, `/insights` reports, settings backups, and removed skills and
+  plugins are Review, so they go to quarantine. Transcripts, memory, prompt history, tasks,
+  settings, plugins, and credentials stay protected. Nothing is removed while Claude Code or
+  Claude Desktop is running.
 - A settings file, `cleanse/config.toml` in your settings folder. `exclude` lists folders Cleanse
   never touches, and `disabled_rules` turns rules off. A mistake in it, such as a relative path or
   an unknown rule, stops Cleanse with a message naming the file. `cleanse doctor` shows where it

@@ -6,7 +6,7 @@ use std::path::Path;
 
 use cleanse_model::{EntryKind, FileIdentity};
 
-use crate::{FakeProbe, FileFacts, KnownFolders, Probe, System};
+use crate::{FakeProbe, FileFacts, KnownFolders, Probe, System, process_name};
 
 #[cfg(unix)]
 fn link_dir(target: &Path, link: &Path) {
@@ -196,4 +196,38 @@ fn the_fake_answers_only_what_it_was_told() {
     );
     assert_eq!(probe.known_folders(), &folders);
     assert!(probe.is_elevated());
+}
+
+#[test]
+fn process_names_ignore_case_and_the_exe_extension() {
+    assert_eq!(process_name("Claude.exe"), "claude");
+    assert_eq!(process_name("Claude"), "claude");
+    assert_eq!(process_name("claude"), "claude");
+    assert_eq!(process_name("setup.exe.old"), "setup.exe.old");
+}
+
+#[test]
+fn lists_running_programs_including_this_one() {
+    let this = std::env::current_exe().unwrap();
+    let name = this.file_name().unwrap().to_string_lossy();
+
+    let running = system().running_processes().unwrap();
+
+    // Linux truncates process names to 15 bytes.
+    let name = process_name(&name);
+    assert!(
+        running
+            .iter()
+            .any(|process| name.starts_with(process.as_str())),
+        "{name} isn't among {running:?}"
+    );
+}
+
+#[test]
+fn the_fake_reports_only_the_programs_it_was_told_are_running() {
+    let probe = FakeProbe::default().with_running("Claude.exe");
+
+    let running = probe.running_processes().unwrap();
+
+    assert_eq!(running.into_iter().collect::<Vec<_>>(), ["claude"]);
 }
