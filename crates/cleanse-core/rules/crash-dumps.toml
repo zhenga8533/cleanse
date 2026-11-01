@@ -1,0 +1,79 @@
+# Crash dumps and reports are saved so a crash can be debugged or reported, and only the person
+# who might do that knows whether they still need them. So they're Review: never selected by
+# default, and quarantined rather than deleted. Each file is its own item.
+#
+# Linux has no per-user folder for these: systemd-coredump and apport keep crashes in system
+# folders, which Cleanse can't clean without root.
+
+# https://learn.microsoft.com/en-us/windows/win32/wer/collecting-user-mode-dumps
+# Windows Error Reporting saves dumps locally only once the LocalDumps registry key is set, in
+# DumpFolder, which defaults to %LOCALAPPDATA%\CrashDumps, keeping DumpCount (10) at most.
+[[rule]]
+id = "windows.crash_dumps"
+name = "Windows crash dumps"
+category = "logs"
+risk = "review"
+explain = "Memory dumps Windows saved when apps crashed, for debugging those crashes. Windows only saves them here once local dumps are turned on, and keeps 10 by default, replacing the oldest."
+
+[rule.match]
+kind = "known_location"
+entry = "file"
+locations = [{ os = "windows", base = "data_local", path = "CrashDumps/*.dmp" }]
+
+[[rule.test]]
+os = "windows"
+tree = [
+    "data_local/CrashDumps/app.exe.1234.dmp",
+    "data_local/CrashDumps/Code.exe.5678.dmp",
+    "data_local/CrashDumps/notes.txt",
+    "data_local/CrashDumps/old/app.exe.1.dmp",
+]
+matches = ["data_local/CrashDumps/app.exe.1234.dmp", "data_local/CrashDumps/Code.exe.5678.dmp"]
+
+[[rule.test]]
+tree = [
+    "data_local/CrashDumps/app.exe.1234.dmp/x",
+    "data_local/MyApp/CrashDumps/app.exe.1234.dmp",
+    "projects/CrashDumps/app.exe.1234.dmp",
+]
+matches = []
+
+# ReportCrash(8): crashes of the user's own apps are saved in ~/Library/Logs/DiagnosticReports,
+# and older reports are removed once a process has too many.
+# https://developer.apple.com/documentation/xcode/acquiring-crash-reports-and-diagnostic-logs
+# names `.ips` and `.crash` as the extensions crash reports have.
+[[rule]]
+id = "macos.crash_reports"
+name = "macOS crash reports"
+category = "logs"
+risk = "review"
+explain = "Reports macOS saved when your apps crashed, which the Console app lists under Crash Reports. They're only needed to report or debug those crashes, and macOS removes old ones on its own."
+
+[rule.match]
+kind = "known_location"
+entry = "file"
+locations = [
+    { os = "macos", base = "home", path = "Library/Logs/DiagnosticReports/*.ips" },
+    { os = "macos", base = "home", path = "Library/Logs/DiagnosticReports/*.crash" },
+]
+
+[[rule.test]]
+os = "macos"
+tree = [
+    "home/Library/Logs/DiagnosticReports/Safari-2026-10-30-101500.ips",
+    "home/Library/Logs/DiagnosticReports/MyApp_2025-01-01-000000_Mac.crash",
+    "home/Library/Logs/DiagnosticReports/Retired/Old-2025-01-01-000000.ips",
+    "home/Library/Logs/DiagnosticReports/notes.txt",
+]
+matches = [
+    "home/Library/Logs/DiagnosticReports/MyApp_2025-01-01-000000_Mac.crash",
+    "home/Library/Logs/DiagnosticReports/Safari-2026-10-30-101500.ips",
+]
+
+[[rule.test]]
+tree = [
+    "home/Library/Logs/DiagnosticReports/folder.ips/x",
+    "home/Library/Logs/MyApp/crash.ips",
+    "projects/DiagnosticReports/App.crash",
+]
+matches = []

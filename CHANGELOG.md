@@ -12,6 +12,11 @@ All notable changes to Cleanse are documented here. The format is based on
   `entry = "file"`, and each file it matches is checked, deleted, quarantined, restored, and
   purged the way a folder is. Plans, the journal, and quarantine records now say whether each
   item is a file or a folder; ones saved by 0.2 are read as folders, which is all they held.
+- Rules for crash dumps: the memory dumps Windows Error Reporting saves in
+  `%LOCALAPPDATA%\CrashDumps` once local dumps are turned on, and macOS crash reports in
+  `~/Library/Logs/DiagnosticReports`. They're Review items, never selected by default and
+  quarantined rather than deleted, since only you know whether you still need one to debug or
+  report a crash.
 
 ## [0.2.0] - 2026-11-01
 
