@@ -285,6 +285,112 @@ locations = [
     );
 }
 
+/// A rule whose locations under `cache` are `path` on every OS, naming `entry`s.
+fn location_rule(path: &str, entry: &str) -> RuleSet {
+    load(&format!(
+        r#"
+[[rule]]
+id = "test.dumps"
+name = "Dumps"
+category = "logs"
+risk = "safe"
+explain = "Because."
+
+[rule.match]
+kind = "known_location"
+entry = "{entry}"
+locations = [
+    {{ os = "windows", base = "cache", path = "{path}" }},
+    {{ os = "macos", base = "cache", path = "{path}" }},
+    {{ os = "linux", base = "cache", path = "{path}" }},
+]
+"#
+    ))
+    .unwrap()
+}
+
+#[test]
+fn a_file_location_matches_only_files() {
+    let rules = location_rule("app/Dumps/*.dmp", "file");
+    let tree = tree_only(&[
+        "cache/app/Dumps/crash.dmp",
+        "cache/app/Dumps/notes.txt",
+        "cache/app/Dumps/folder.dmp/x.dmp",
+        "cache/app/Dumps/Nested/deeper.dmp",
+        "cache/other/Dumps/crash.dmp",
+    ]);
+
+    let found = run_fixture(&rules.rules()[0], &tree);
+
+    assert_eq!(
+        found,
+        BTreeSet::from(["cache/app/Dumps/crash.dmp".to_owned()])
+    );
+}
+
+#[test]
+fn file_locations_match_regardless_of_case() {
+    let rules = location_rule("app/Dumps/*.dmp", "file");
+    let tree = tree_only(&["cache/APP/DUMPS/CRASH.DMP"]);
+
+    let found = run_fixture(&rules.rules()[0], &tree);
+
+    assert_eq!(
+        found.len(),
+        usize::from(cfg!(any(windows, target_os = "macos")))
+    );
+}
+
+#[test]
+fn locations_match_only_the_kind_of_item_they_name() {
+    let folder = location_rule("app/Cache", "dir");
+    let file = location_rule("app/log.txt", "file");
+
+    assert_eq!(
+        run_fixture(&folder.rules()[0], &tree_only(&["cache/app/Cache/x"])).len(),
+        1
+    );
+    assert!(run_fixture(&folder.rules()[0], &tree_only(&["cache/app/Cache"])).is_empty());
+    assert_eq!(
+        run_fixture(&file.rules()[0], &tree_only(&["cache/app/log.txt"])).len(),
+        1
+    );
+    assert!(run_fixture(&file.rules()[0], &tree_only(&["cache/app/log.txt/x"])).is_empty());
+}
+
+#[test]
+fn a_location_names_files_or_folders_but_nothing_else() {
+    let rule = |entry: &str| {
+        format!(
+            r#"
+[[rule]]
+id = "test.cache"
+name = "Cache"
+category = "browser_caches"
+risk = "safe"
+explain = "Because."
+
+[rule.match]
+kind = "known_location"
+entry = "{entry}"
+locations = [{{ os = "linux", base = "cache", path = "app/cache" }}]
+"#
+        )
+    };
+
+    assert!(load(&rule("dir")).is_ok());
+    assert!(load(&rule("file")).is_ok());
+    for entry in ["link", "other"] {
+        let error = load(&rule(entry)).unwrap_err();
+        assert!(error.contains("`dir` or `file`"), "{error}");
+    }
+    assert!(
+        load(&rule("folder"))
+            .unwrap_err()
+            .contains("unknown variant")
+    );
+}
+
 #[test]
 fn a_locations_first_name_cant_be_a_wildcard() {
     let rule = |path: &str| {

@@ -15,7 +15,7 @@ use crate::journal::{self, Action, Record};
 pub struct History {
     /// Oldest first.
     pub runs: Vec<Run>,
-    /// Removals that started but whose folder is still on disk, under its tombstone name.
+    /// Removals that started but whose item is still on disk, under its tombstone name.
     pub leftovers: Vec<Leftover>,
     /// Journal files that couldn't be read.
     pub unreadable: Vec<PathBuf>,
@@ -38,15 +38,16 @@ pub struct Run {
     pub finished: bool,
 }
 
-/// What's left of a removal that didn't finish: the folder, renamed to its tombstone and
-/// perhaps partly deleted.
+/// What's left of a removal that didn't finish: the file or folder, renamed to its tombstone,
+/// and a folder perhaps partly deleted.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Leftover {
-    /// Where the folder was before it was renamed.
+    /// Where the item was before it was renamed.
     pub original: PathBuf,
     pub tombstone: PathBuf,
+    pub kind: EntryKind,
     pub rule: RuleId,
-    /// The approved folder's identity. What's at the tombstone is only removed if it matches.
+    /// The approved item's identity. What's at the tombstone is only removed if it matches.
     pub identity: FileIdentity,
 }
 
@@ -77,11 +78,13 @@ pub(crate) fn read(journal_dir: &Path, probe: &dyn Probe) -> io::Result<History>
                 Record::Removing {
                     path,
                     tombstone,
+                    kind,
                     rule,
                     identity,
                 } => started.push(Leftover {
                     original: path.into(),
                     tombstone: tombstone.into(),
+                    kind,
                     rule,
                     identity,
                 }),
@@ -107,8 +110,8 @@ pub(crate) fn read(journal_dir: &Path, probe: &dyn Probe) -> io::Result<History>
         history.runs.extend(run);
     }
 
-    // Every removal renames the folder to its tombstone first, so a tombstone still holding the
-    // approved folder is what's left of a removal that didn't finish, whatever its journal says.
+    // Every removal renames the item to its tombstone first, so a tombstone still holding the
+    // approved item is what's left of a removal that didn't finish, whatever its journal says.
     // Anything else there was swapped in, isn't Cleanse's, and is left alone.
     let mut seen = HashSet::new();
     history.leftovers = started
@@ -118,9 +121,9 @@ pub(crate) fn read(journal_dir: &Path, probe: &dyn Probe) -> io::Result<History>
     Ok(history)
 }
 
-/// Whether the leftover's tombstone still holds the folder that was approved. The tombstone must
-/// also look like one Cleanse made, beside the original, so a damaged journal can't point
-/// anywhere else.
+/// Whether the leftover's tombstone still holds the item that was approved. The tombstone must
+/// also look like one Cleanse made, beside the original, and hold a file or folder, the only
+/// things Cleanse removes, so a damaged journal can't point anywhere else.
 pub(crate) fn still_there(probe: &dyn Probe, leftover: &Leftover) -> bool {
     let named_as_made = leftover
         .tombstone
@@ -129,7 +132,8 @@ pub(crate) fn still_there(probe: &dyn Probe, leftover: &Leftover) -> bool {
         .is_some_and(|name| name.starts_with(TOMBSTONE_PREFIX))
         && leftover.tombstone.parent() == leftover.original.parent();
     named_as_made
+        && matches!(leftover.kind, EntryKind::Dir | EntryKind::File)
         && probe
             .inspect(&leftover.tombstone)
-            .is_ok_and(|facts| facts.kind == EntryKind::Dir && facts.identity == leftover.identity)
+            .is_ok_and(|facts| facts.kind == leftover.kind && facts.identity == leftover.identity)
 }

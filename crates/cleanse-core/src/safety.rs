@@ -66,14 +66,20 @@ impl<'p> Assessor<'p> {
     pub fn assess(&self, id: CandidateId, detection: &Detection<'_>) -> Candidate {
         let path = &detection.path;
         let measured = measure(path);
-        let measurement = measured.as_ref().cloned().unwrap_or_default();
-        // Rules only match directories, so anything else means it changed since the scan.
+        let mut measurement = measured.as_ref().cloned().unwrap_or_default();
+        // Anything other than the kind of item the rule matched means it changed since the scan.
         let facts = self
             .probe
             .inspect(path)
             .ok()
-            .filter(|facts| facts.kind == EntryKind::Dir);
+            .filter(|facts| facts.kind == detection.kind);
         let identity = facts.map(|facts| facts.identity);
+        // Windows listings don't count a file's hard links, but its own facts do. A folder's
+        // link count means something else.
+        if facts.is_some_and(|facts| facts.kind == EntryKind::File && facts.links > 1) {
+            measurement.shared = true;
+            measurement.size.guaranteed = 0;
+        }
 
         let mut concerns = Vec::new();
         if let Some(what) = self
@@ -133,7 +139,7 @@ impl<'p> Assessor<'p> {
 
         let found = Match {
             path: path.clone(),
-            kind: EntryKind::Dir,
+            kind: detection.kind,
             rule: rule.id.clone(),
             category: rule.category,
             declared_risk: rule.risk,

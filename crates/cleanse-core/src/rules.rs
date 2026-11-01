@@ -88,7 +88,10 @@ impl RuleSet {
                 if !ids.insert(rule.id.clone()) {
                     return Err(fail("another rule already uses this id".into()));
                 }
-                if let Target::KnownLocation { locations: specs } = &rule.target {
+                if let Target::KnownLocation {
+                    locations: specs, ..
+                } = &rule.target
+                {
                     for spec in specs {
                         // Lowercased because Windows and macOS don't distinguish case.
                         let key = (spec.os, spec.base, spec.path.to_lowercase());

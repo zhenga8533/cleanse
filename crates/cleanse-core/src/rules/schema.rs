@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use cleanse_model::{Category, Risk, RuleId};
+use cleanse_model::{Category, EntryKind, Risk, RuleId};
 use cleanse_platform::process_name;
 use serde::Deserialize;
 
@@ -58,7 +58,17 @@ pub enum Target {
         require_git_ignored: bool,
     },
     /// A fixed location under one of the user's standard folders.
-    KnownLocation { locations: Vec<Location> },
+    KnownLocation {
+        locations: Vec<Location>,
+        /// What the locations name: folders (`dir`, the default) or files (`file`). Anything
+        /// else at a location doesn't match.
+        #[serde(default = "folders")]
+        entry: EntryKind,
+    },
+}
+
+fn folders() -> EntryKind {
+    EntryKind::Dir
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -165,9 +175,12 @@ impl Rule {
                     validate_relative(file)?;
                 }
             }
-            Target::KnownLocation { locations } => {
+            Target::KnownLocation { locations, entry } => {
                 if locations.is_empty() {
                     return Err("`locations` is empty".into());
+                }
+                if !matches!(entry, EntryKind::Dir | EntryKind::File) {
+                    return Err("`entry` must be `dir` or `file`".into());
                 }
                 for location in locations {
                     validate_location(&location.path)?;

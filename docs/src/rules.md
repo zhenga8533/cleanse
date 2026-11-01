@@ -84,6 +84,22 @@ a browser's profiles: `Google/Chrome/User Data/Profile */Cache` matches `Profile
 `Profile 1/Extensions/Cache`. The first name can't contain `*`, so a location stays inside one
 app's folder.
 
+Locations name folders unless the rule says `entry = "file"`, which makes them name files
+instead, each one a separate item:
+
+```toml
+[rule.match]
+kind = "known_location"
+entry = "file"
+locations = [
+    { os = "windows", base = "data_local", path = "CrashDumps/*.dmp" },
+]
+```
+
+A location only matches the kind of item it names, so a folder named `crash.dmp` isn't matched
+here, and a file named like a folder location isn't matched there. Project artifacts are always
+folders.
+
 Locations match case-insensitively on Windows and macOS. Two rules can't claim the same
 location.
 

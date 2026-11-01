@@ -13,6 +13,14 @@ pub enum EntryKind {
     Other,
 }
 
+impl EntryKind {
+    /// The kind of item in a saved record that doesn't say. Cleanse removed only folders before
+    /// it could remove files, so records from then only ever held folders.
+    pub fn unstated() -> Self {
+        Self::Dir
+    }
+}
+
 impl From<FileType> for EntryKind {
     fn from(file_type: FileType) -> Self {
         // `is_symlink` comes first: on Windows it also covers junctions and mount points.

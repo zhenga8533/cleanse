@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{RuleId, Size};
+use crate::{EntryKind, RuleId, Size};
 
 /// An item in Cleanse's quarantine. This is also what's saved beside it, so it can be listed and
 /// put back.
@@ -11,6 +11,8 @@ pub struct QuarantineEntry {
     pub id: String,
     /// Where it was, and where restoring it puts it back.
     pub original: PathBuf,
+    #[serde(default = "EntryKind::unstated")]
+    pub kind: EntryKind,
     pub rule: RuleId,
     /// What it takes up, and what purging it frees.
     pub size: Size,

@@ -8,10 +8,10 @@ use std::time::{Duration, SystemTime};
 use cleanse_core::rules::{Matcher, Os, RuleSet};
 use cleanse_core::safety::{Assessor, ProtectedPolicy};
 use cleanse_model::{
-    CandidateId, Concern, Disposal, EntryOutcome, Outcome, Plan, PlanItem, QuarantineEntry, RuleId,
-    SavedItem, SavedPlan, Size, SkipReason,
+    CandidateId, Concern, Disposal, EntryKind, EntryOutcome, Outcome, Plan, PlanItem,
+    QuarantineEntry, RuleId, SavedItem, SavedPlan, Size, SkipReason,
 };
-use cleanse_platform::{Probe, System};
+use cleanse_platform::{KnownFolders, Probe, System};
 use serde_json::Value;
 use tempfile::TempDir;
 
@@ -67,8 +67,64 @@ impl Fixture {
         }
     }
 
+    /// A crash dump in an app data folder under a temporary folder, and a rule recognizing the
+    /// files there, instead of the project.
+    fn dump() -> Self {
+        let root = tempfile::tempdir().unwrap();
+        write_old(&root.path().join("data_local/Dumps/crash.dmp"), "abcd");
+        let folders = KnownFolders {
+            home: Some(root.path().join("home")),
+            data_local: Some(root.path().join("data_local")),
+            temp: root.path().join("temp"),
+            ..KnownFolders::default()
+        };
+        let location =
+            |os: &str| format!(r#"{{ os = "{os}", base = "data_local", path = "Dumps/*.dmp" }}"#);
+        let toml = format!(
+            r#"
+[[rule]]
+id = "test.dumps"
+name = "Dumps"
+category = "logs"
+risk = "safe"
+explain = "Because."
+
+[rule.match]
+kind = "known_location"
+entry = "file"
+locations = [{}, {}, {}]
+"#,
+            location("windows"),
+            location("macos"),
+            location("linux")
+        );
+        Self {
+            root,
+            data: tempfile::tempdir().unwrap(),
+            rules: RuleSet::from_sources([("test.toml", toml.as_str())]).unwrap(),
+            system: System::new()
+                .unwrap()
+                .elevated(false)
+                .with_known_folders(folders),
+        }
+    }
+
     fn path(&self, relative: &str) -> PathBuf {
         self.root.path().join(relative)
+    }
+
+    fn crash_dump(&self) -> PathBuf {
+        self.path("data_local/Dumps/crash.dmp")
+    }
+
+    /// Whether `Dumps` holds exactly the crash dump, if it's `there`, and nothing else.
+    fn assert_dumps_hold(&self, there: bool) {
+        let names: Vec<String> = fs::read_dir(self.path("data_local/Dumps"))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        let expected: &[&str] = if there { &["crash.dmp"] } else { &[] };
+        assert_eq!(names, expected);
     }
 
     fn node_modules(&self) -> PathBuf {
@@ -384,7 +440,14 @@ fn puts_back_whatever_replaced_the_folder_before_it_moved() {
     let mut other = fixture.system.inspect(&path).unwrap().identity;
     other.file += 1;
 
-    let outcome = delete::delete(&fixture.system, &path, &tombstone, other, Size::default());
+    let outcome = delete::delete(
+        &fixture.system,
+        &path,
+        &tombstone,
+        EntryKind::Dir,
+        other,
+        Size::default(),
+    );
 
     assert_eq!(outcome, skipped(SkipReason::Replaced));
     fixture.assert_web_untouched();
@@ -530,6 +593,7 @@ fn quarantine_puts_back_whatever_replaced_the_folder_before_it_moved() {
     let entry = QuarantineEntry {
         id: Quarantine::new_id(),
         original: fixture.node_modules(),
+        kind: EntryKind::Dir,
         rule: RuleId("javascript.node_modules".into()),
         size: Size::default(),
         at: 0,
@@ -552,6 +616,7 @@ fn records_that_name_other_folders_arent_listed() {
         serde_json::to_vec(&QuarantineEntry {
             id: id.into(),
             original: fixture.node_modules(),
+            kind: EntryKind::Dir,
             rule: RuleId("javascript.node_modules".into()),
             size: Size::default(),
             at: 0,
@@ -616,7 +681,7 @@ fn history_reads_back_each_run() {
     assert!(history.unreadable.is_empty(), "{history:?}");
 }
 
-/// Starts removing `node_modules` the way a run does, then stops as if the process died after
+/// Starts removing the fixture's one item the way a run does, then stops as if the process died after
 /// renaming it to its tombstone. `identity` is what the journal records as approved.
 fn interrupt_removal(fixture: &Fixture, identity: cleanse_model::FileIdentity) -> Leftover {
     let plan = fixture.plan();
@@ -633,6 +698,7 @@ fn interrupt_removal(fixture: &Fixture, identity: cleanse_model::FileIdentity) -
         .record(&Record::Removing {
             path: item.path.to_str().unwrap().to_owned(),
             tombstone: tombstone.to_str().unwrap().to_owned(),
+            kind: item.kind,
             rule: item.rule.clone(),
             identity,
         })
@@ -641,6 +707,7 @@ fn interrupt_removal(fixture: &Fixture, identity: cleanse_model::FileIdentity) -
     Leftover {
         original: item.path.clone(),
         tombstone,
+        kind: item.kind,
         rule: item.rule.clone(),
         identity,
     }
@@ -757,6 +824,233 @@ fn a_journal_cut_short_ends_its_run_there() {
     assert!(!history.runs[0].finished);
     assert!(history.runs[0].outcomes.is_empty(), "{history:?}");
     assert_eq!(history.unreadable, [journal_dir.join("0-1-0.jsonl")]);
+}
+
+/// Cleanse only removes files and folders, so a journal saying it was removing a link, even one
+/// that's really at a tombstone, has been damaged and is ignored.
+#[test]
+fn a_journal_naming_a_link_has_no_leftover() {
+    let fixture = Fixture::new();
+    let outside = tempfile::tempdir().unwrap();
+    write_old(&outside.path().join("keep.txt"), "x");
+    let tombstone = delete::tombstone_for(&fixture.node_modules()).unwrap();
+    link_dir(outside.path(), &tombstone);
+    let identity = fixture.system.inspect(&tombstone).unwrap().identity;
+    let mut journal = Journal::start(
+        &fixture.data.path().join("journal"),
+        Action::Apply,
+        &[fixture.root.path().to_path_buf()],
+        1,
+    )
+    .unwrap();
+    journal
+        .record(&Record::Removing {
+            path: fixture.node_modules().to_str().unwrap().to_owned(),
+            tombstone: tombstone.to_str().unwrap().to_owned(),
+            kind: EntryKind::Link,
+            rule: RuleId("javascript.node_modules".into()),
+            identity,
+        })
+        .unwrap();
+
+    let history = fixture.executor().history().unwrap();
+
+    assert!(history.leftovers.is_empty(), "{history:?}");
+    assert!(outside.path().join("keep.txt").exists());
+}
+
+#[test]
+fn removals_journaled_before_kinds_were_recorded_are_folders() {
+    let fixture = Fixture::new();
+    let identity = fixture
+        .system
+        .inspect(&fixture.node_modules())
+        .unwrap()
+        .identity;
+    let leftover = interrupt_removal(&fixture, identity);
+    let journal = fs::read_dir(fixture.data.path().join("journal"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let written = fs::read_to_string(&journal).unwrap();
+    assert!(written.contains(r#""kind":"dir","#), "{written}");
+    fs::write(&journal, written.replace(r#""kind":"dir","#, "")).unwrap();
+
+    let history = fixture.executor().history().unwrap();
+
+    assert_eq!(history.leftovers, [leftover]);
+}
+
+#[test]
+fn deletes_an_approved_file_and_journals_it() {
+    let fixture = Fixture::dump();
+    let plan = fixture.plan();
+    assert_eq!(plan.items[0].kind, EntryKind::File);
+
+    let outcomes = fixture.apply(&plan);
+
+    assert!(
+        matches!(&outcomes[..], [Outcome::Deleted { size }] if size.logical == 4),
+        "{outcomes:?}"
+    );
+    fixture.assert_dumps_hold(false);
+    let events = fixture.journal_events();
+    let removing = events
+        .iter()
+        .find(|event| event["event"] == "removing")
+        .unwrap();
+    assert_eq!(removing["kind"], "file");
+}
+
+#[test]
+fn deletes_a_read_only_file() {
+    let fixture = Fixture::dump();
+    let mut permissions = fs::metadata(fixture.crash_dump()).unwrap().permissions();
+    permissions.set_readonly(true);
+    fs::set_permissions(fixture.crash_dump(), permissions).unwrap();
+    let plan = fixture.plan();
+
+    let outcomes = fixture.apply(&plan);
+
+    assert!(
+        matches!(&outcomes[..], [Outcome::Deleted { .. }]),
+        "{outcomes:?}"
+    );
+    fixture.assert_dumps_hold(false);
+}
+
+#[test]
+fn leaves_a_folder_where_an_approved_file_was() {
+    let fixture = Fixture::dump();
+    let plan = fixture.plan();
+    fs::remove_file(fixture.crash_dump()).unwrap();
+    write_old(&fixture.crash_dump().join("inside.txt"), "x");
+
+    let outcomes = fixture.apply(&plan);
+
+    assert_eq!(outcomes, [skipped(SkipReason::Replaced)]);
+    assert!(fixture.crash_dump().join("inside.txt").exists());
+}
+
+/// Windows won't rename a file while a program has it open without allowing that, so it's left
+/// in place.
+#[cfg(windows)]
+#[test]
+fn leaves_a_file_a_program_has_open() {
+    use std::os::windows::fs::OpenOptionsExt;
+    // FILE_SHARE_READ | FILE_SHARE_WRITE, as most programs open files. Rust's default also
+    // shares deleting, which lets the file be renamed and deleted while it's open.
+    const SHARE_READ_WRITE: u32 = 0x1 | 0x2;
+
+    let fixture = Fixture::dump();
+    let plan = fixture.plan();
+    let open = File::options()
+        .read(true)
+        .share_mode(SHARE_READ_WRITE)
+        .open(fixture.crash_dump())
+        .unwrap();
+
+    let outcomes = fixture.apply(&plan);
+    drop(open);
+
+    assert!(
+        matches!(&outcomes[..], [Outcome::Failed { .. }]),
+        "{outcomes:?}"
+    );
+    fixture.assert_dumps_hold(true);
+}
+
+#[test]
+fn quarantines_a_file_and_restores_it() {
+    let fixture = Fixture::dump();
+    let mut plan = fixture.plan();
+    plan.items[0].disposal = Disposal::Quarantine;
+
+    let outcomes = fixture.apply(&plan);
+
+    assert!(
+        matches!(&outcomes[..], [Outcome::Quarantined { .. }]),
+        "{outcomes:?}"
+    );
+    fixture.assert_dumps_hold(false);
+    let listing = fixture.executor().quarantined().unwrap();
+    assert_eq!(listing.entries.len(), 1, "{listing:?}");
+    assert_eq!(listing.entries[0].kind, EntryKind::File);
+
+    let handled = fixture.executor().restore(&listing.entries).unwrap();
+
+    assert_eq!(handled.outcomes, [EntryOutcome::Restored]);
+    assert_eq!(fs::read_to_string(fixture.crash_dump()).unwrap(), "abcd");
+    assert!(fixture.quarantine_is_empty());
+}
+
+#[test]
+fn purging_deletes_a_quarantined_file_for_good() {
+    let fixture = Fixture::dump();
+    let mut plan = fixture.plan();
+    plan.items[0].disposal = Disposal::Quarantine;
+    fixture.apply(&plan);
+    let entries = fixture.executor().quarantined().unwrap().entries;
+
+    let handled = fixture.executor().purge(&entries).unwrap();
+
+    assert!(
+        matches!(&handled.outcomes[..], [EntryOutcome::Purged { size }] if size.logical == 4),
+        "{handled:?}"
+    );
+    assert!(fixture.quarantine_is_empty());
+    let left: Vec<_> = fs::read_dir(fixture.data.path().join("quarantine"))
+        .unwrap()
+        .collect();
+    assert!(left.is_empty(), "{left:?}");
+}
+
+/// Purging acts only on the kind of item its record says was quarantined, so a folder put where
+/// a quarantined file was is left alone.
+#[test]
+fn purging_leaves_a_folder_where_a_quarantined_file_was() {
+    let fixture = Fixture::dump();
+    let mut plan = fixture.plan();
+    plan.items[0].disposal = Disposal::Quarantine;
+    fixture.apply(&plan);
+    let entries = fixture.executor().quarantined().unwrap().entries;
+    let item = fixture.data.path().join("quarantine").join(&entries[0].id);
+    fs::remove_file(&item).unwrap();
+    write_old(&item.join("keep.txt"), "x");
+
+    let handled = fixture.executor().purge(&entries).unwrap();
+
+    assert!(
+        matches!(&handled.outcomes[..], [EntryOutcome::Failed { .. }]),
+        "{handled:?}"
+    );
+    assert!(item.join("keep.txt").exists());
+}
+
+#[test]
+fn finds_and_finishes_a_file_removal_that_was_cut_short() {
+    let fixture = Fixture::dump();
+    let identity = fixture
+        .system
+        .inspect(&fixture.crash_dump())
+        .unwrap()
+        .identity;
+    let leftover = interrupt_removal(&fixture, identity);
+
+    let history = fixture.executor().history().unwrap();
+
+    assert_eq!(history.leftovers, std::slice::from_ref(&leftover));
+    assert_eq!(leftover.kind, EntryKind::File);
+
+    let applied = fixture.executor().finish(&history.leftovers).unwrap();
+
+    assert!(
+        matches!(&applied.outcomes[..], [Outcome::Deleted { size }] if size.logical == 4),
+        "{applied:?}"
+    );
+    fixture.assert_dumps_hold(false);
 }
 
 /// The built-in rule for `node_modules`, but in the Review tier.

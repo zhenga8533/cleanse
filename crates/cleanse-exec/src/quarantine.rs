@@ -1,5 +1,5 @@
-//! Quarantine: approved folders moved into Cleanse's data folder on the same drive, each beside
-//! a record of where it came from, so it can be put back until it's purged.
+//! Quarantine: approved files and folders moved into Cleanse's data folder on the same drive,
+//! each beside a record of where it came from, so it can be put back until it's purged.
 
 #![allow(
     clippy::disallowed_methods,
@@ -18,7 +18,7 @@ use cleanse_platform::Probe;
 
 use crate::delete;
 
-/// The extension of the record saved beside each quarantined folder.
+/// The extension of the record saved beside each quarantined item.
 const RECORD: &str = "json";
 
 /// What's in quarantine.
@@ -30,8 +30,8 @@ pub struct Listing {
     pub unreadable: Vec<PathBuf>,
 }
 
-/// The `quarantine` folder in Cleanse's data folder. Each entry is a folder named by its ID,
-/// with `<id>.json` beside it.
+/// The `quarantine` folder in Cleanse's data folder. Each entry is a file or folder named by its
+/// ID, with `<id>.json` beside it.
 pub(crate) struct Quarantine {
     dir: PathBuf,
 }
@@ -68,16 +68,16 @@ impl Quarantine {
             let entry = fs::read(&path)
                 .ok()
                 .and_then(|bytes| serde_json::from_slice::<QuarantineEntry>(&bytes).ok())
-                // The ID names the folder that restoring or purging acts on, so it has to be one
+                // The ID names the item that restoring or purging acts on, so it has to be one
                 // Cleanse made, and the record's own.
                 .filter(|entry| {
                     is_id(&entry.id)
                         && path.file_stem().is_some_and(|stem| stem == entry.id.as_str())
                 });
             match entry {
-                // A record without its folder is left over from a restore or purge that couldn't
+                // A record without its item is left over from a restore or purge that couldn't
                 // remove it, and describes nothing.
-                Some(entry) if fs::symlink_metadata(self.folder(&entry.id)).is_err() => {}
+                Some(entry) if fs::symlink_metadata(self.item(&entry.id)).is_err() => {}
                 Some(entry) => listing.entries.push(entry),
                 None => listing.unreadable.push(path),
             }
@@ -88,7 +88,8 @@ impl Quarantine {
         Ok(listing)
     }
 
-    /// Moves the folder at `entry.original`, approved as `identity`, into quarantine.
+    /// Moves the `entry.kind` of item at `entry.original`, approved as `identity`, into
+    /// quarantine.
     pub(crate) fn admit(
         &self,
         probe: &dyn Probe,
@@ -113,24 +114,24 @@ impl Quarantine {
             Err(error) => return failed("Couldn't check the quarantine folder", error),
         }
 
-        // Written first, so a folder in quarantine always has a record of where it came from.
+        // Written first, so an item in quarantine always has a record of where it came from.
         let record = self.record(&entry.id);
         if let Err(error) = write_record(&record, entry) {
             return failed("Couldn't save where it came from", error);
         }
-        let folder = self.folder(&entry.id);
-        // On Windows this fails while a program has a file inside open.
-        if let Err(error) = fs::rename(&entry.original, &folder) {
-            // A record without its folder isn't listed, so a leftover one changes nothing.
+        let item = self.item(&entry.id);
+        // On Windows this fails while a program has the file, or a file inside the folder, open.
+        if let Err(error) = fs::rename(&entry.original, &item) {
+            // A record without its item isn't listed, so a leftover one changes nothing.
             let _ = fs::remove_file(&record);
             return failed("Couldn't move it into quarantine", error);
         }
 
-        // If something replaced the folder after it was checked, that's what moved, so it goes
+        // If something replaced the item after it was checked, that's what moved, so it goes
         // back. If it can't, it stays listed in quarantine, where it can be restored.
-        let moved = probe.inspect(&folder);
-        if !moved.is_ok_and(|facts| facts.kind == EntryKind::Dir && facts.identity == identity) {
-            let outcome = delete::put_back(&entry.original, &folder);
+        let moved = probe.inspect(&item);
+        if !moved.is_ok_and(|facts| facts.kind == entry.kind && facts.identity == identity) {
+            let outcome = delete::put_back(&entry.original, &item);
             if matches!(outcome, Outcome::Skipped { .. }) {
                 let _ = fs::remove_file(&record);
             }
@@ -154,35 +155,37 @@ impl Quarantine {
         {
             return failed(format!("{} isn't a folder anymore", parent.display()));
         }
-        if let Err(error) = fs::rename(self.folder(&entry.id), original) {
+        if let Err(error) = fs::rename(self.item(&entry.id), original) {
             return failed(format!("Couldn't move it back: {error}"));
         }
-        // A record without its folder isn't listed, so a leftover one changes nothing.
+        // A record without its item isn't listed, so a leftover one changes nothing.
         let _ = fs::remove_file(self.record(&entry.id));
         EntryOutcome::Restored
     }
 
     /// Deletes an entry for good.
     pub(crate) fn purge(&self, entry: &QuarantineEntry) -> EntryOutcome {
-        let folder = self.folder(&entry.id);
-        // Cleanse only ever quarantines folders, so anything else here isn't its own.
-        if !fs::symlink_metadata(&folder).is_ok_and(|metadata| metadata.is_dir()) {
-            return failed(format!(
-                "{} isn't a folder Cleanse quarantined",
-                folder.display()
-            ));
+        let item = self.item(&entry.id);
+        // Cleanse only quarantines files and folders, and anything other than the kind its record
+        // says was quarantined isn't Cleanse's.
+        let kind =
+            fs::symlink_metadata(&item).map(|metadata| EntryKind::from(metadata.file_type()));
+        if !matches!(entry.kind, EntryKind::Dir | EntryKind::File)
+            || !kind.is_ok_and(|kind| kind == entry.kind)
+        {
+            return failed(format!("{} isn't what Cleanse quarantined", item.display()));
         }
-        if let Err(error) = fs::remove_dir_all(&folder) {
+        if let Err(error) = delete::remove(&item, entry.kind) {
             return failed(format!(
                 "{error}. What's left of it is in {}",
-                folder.display()
+                item.display()
             ));
         }
         let _ = fs::remove_file(self.record(&entry.id));
         EntryOutcome::Purged { size: entry.size }
     }
 
-    fn folder(&self, id: &str) -> PathBuf {
+    fn item(&self, id: &str) -> PathBuf {
         self.dir.join(id)
     }
 
