@@ -1,0 +1,172 @@
+# Browsers keep each profile's history, cookies, saved passwords, and extensions in folders the
+# protected policy in cleanse-core/src/safety/policy.rs protects. It exempts only these caches,
+# and its comments say where each browser documents its folders. Nothing is removed while the
+# browser is running, including in the background after its windows close.
+
+[[rule]]
+id = "chrome.cache"
+name = "Chrome cache"
+category = "browser_caches"
+risk = "safe"
+explain = "Copies of sites' pages, images, and scripts, and scripts Chrome compiled, kept so sites load faster. Chrome downloads and compiles them again as you browse."
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "windows", base = "data_local", path = "Google/Chrome/User Data/Default/Cache" },
+    { os = "windows", base = "data_local", path = "Google/Chrome/User Data/Default/Code Cache" },
+    { os = "windows", base = "data_local", path = "Google/Chrome/User Data/Profile */Cache" },
+    { os = "windows", base = "data_local", path = "Google/Chrome/User Data/Profile */Code Cache" },
+    { os = "macos", base = "cache", path = "Google/Chrome/Default/Cache" },
+    { os = "macos", base = "cache", path = "Google/Chrome/Default/Code Cache" },
+    { os = "macos", base = "cache", path = "Google/Chrome/Profile */Cache" },
+    { os = "macos", base = "cache", path = "Google/Chrome/Profile */Code Cache" },
+    { os = "linux", base = "cache", path = "google-chrome/Default/Cache" },
+    { os = "linux", base = "cache", path = "google-chrome/Default/Code Cache" },
+    { os = "linux", base = "cache", path = "google-chrome/Profile */Cache" },
+    { os = "linux", base = "cache", path = "google-chrome/Profile */Code Cache" },
+]
+
+[rule.owner]
+app = "Chrome"
+processes = ["chrome", "google chrome"]
+
+[[rule.test]]
+os = "windows"
+tree = [
+    "data_local/Google/Chrome/User Data/Default/Cache/Cache_Data/data_0",
+    "data_local/Google/Chrome/User Data/Default/Code Cache/js/index",
+    "data_local/Google/Chrome/User Data/Default/History",
+    "data_local/Google/Chrome/User Data/Profile 2/Cache/Cache_Data/data_0",
+]
+matches = [
+    "data_local/Google/Chrome/User Data/Default/Cache",
+    "data_local/Google/Chrome/User Data/Default/Code Cache",
+    "data_local/Google/Chrome/User Data/Profile 2/Cache",
+]
+
+[[rule.test]]
+os = "macos"
+tree = [
+    "cache/Google/Chrome/Default/Cache/Cache_Data/data_0",
+    "cache/Google/Chrome/Default/Code Cache/js/index",
+    "cache/Google/Chrome/Profile 2/Cache/Cache_Data/data_0",
+    "config/Google/Chrome/Default/History",
+]
+matches = [
+    "cache/Google/Chrome/Default/Cache",
+    "cache/Google/Chrome/Default/Code Cache",
+    "cache/Google/Chrome/Profile 2/Cache",
+]
+
+[[rule.test]]
+os = "linux"
+tree = [
+    "cache/google-chrome/Default/Cache/Cache_Data/data_0",
+    "cache/google-chrome/Default/Code Cache/js/index",
+    "cache/google-chrome/Profile 2/Cache/Cache_Data/data_0",
+    "config/google-chrome/Default/History",
+]
+matches = [
+    "cache/google-chrome/Default/Cache",
+    "cache/google-chrome/Default/Code Cache",
+    "cache/google-chrome/Profile 2/Cache",
+]
+
+[[rule.test]]
+# Only profiles' caches. Other folders can hold a `Cache`, and a site's cache storage is its data.
+tree = [
+    "data_local/Google/Chrome/User Data/Snapshots/Cache/x",
+    "data_local/Google/Chrome/User Data/Default/Service Worker/CacheStorage/x",
+    "data_local/Google/Chrome/User Data/Profile 2/Extensions/Cache/x",
+    "cache/Google/Chrome/Snapshots/Cache/x",
+    "cache/google-chrome/Snapshots/Cache/x",
+    "projects/Default/Cache/x",
+]
+matches = []
+
+[[rule]]
+id = "edge.cache"
+name = "Microsoft Edge cache"
+category = "browser_caches"
+risk = "safe"
+explain = "Copies of sites' pages, images, and scripts, and scripts Edge compiled, kept so sites load faster. Edge downloads and compiles them again as you browse."
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "windows", base = "data_local", path = "Microsoft/Edge/User Data/Default/Cache" },
+    { os = "windows", base = "data_local", path = "Microsoft/Edge/User Data/Default/Code Cache" },
+    { os = "windows", base = "data_local", path = "Microsoft/Edge/User Data/Profile */Cache" },
+    { os = "windows", base = "data_local", path = "Microsoft/Edge/User Data/Profile */Code Cache" },
+]
+
+[rule.owner]
+app = "Microsoft Edge"
+processes = ["msedge"]
+
+[[rule.test]]
+os = "windows"
+tree = [
+    "data_local/Microsoft/Edge/User Data/Default/Cache/Cache_Data/data_0",
+    "data_local/Microsoft/Edge/User Data/Default/Code Cache/js/index",
+    "data_local/Microsoft/Edge/User Data/Default/History",
+    "data_local/Microsoft/Edge/User Data/Profile 1/Code Cache/js/index",
+]
+matches = [
+    "data_local/Microsoft/Edge/User Data/Default/Cache",
+    "data_local/Microsoft/Edge/User Data/Default/Code Cache",
+    "data_local/Microsoft/Edge/User Data/Profile 1/Code Cache",
+]
+
+[[rule.test]]
+tree = ["data_local/Microsoft/Edge/User Data/Snapshots/Cache/x", "projects/Default/Cache/x"]
+matches = []
+
+[[rule]]
+id = "firefox.cache"
+name = "Firefox cache"
+category = "browser_caches"
+risk = "safe"
+explain = "Copies of sites' pages, images, and scripts, kept so sites load faster. Firefox downloads them again as you browse."
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "windows", base = "data_local", path = "Mozilla/Firefox/Profiles/*/cache2" },
+    { os = "macos", base = "cache", path = "Firefox/Profiles/*/cache2" },
+    { os = "linux", base = "cache", path = "mozilla/firefox/*/cache2" },
+]
+
+[rule.owner]
+app = "Firefox"
+processes = ["firefox"]
+
+[[rule.test]]
+os = "windows"
+tree = [
+    "data_local/Mozilla/Firefox/Profiles/x1y2z3.default-release/cache2/entries/A1",
+    "data_local/Mozilla/Firefox/Profiles/x1y2z3.default-release/startupCache/x",
+]
+matches = ["data_local/Mozilla/Firefox/Profiles/x1y2z3.default-release/cache2"]
+
+[[rule.test]]
+os = "macos"
+tree = [
+    "cache/Firefox/Profiles/x1y2z3.default-release/cache2/entries/A1",
+    "cache/Firefox/Profiles/x1y2z3.default-release/startupCache/x",
+]
+matches = ["cache/Firefox/Profiles/x1y2z3.default-release/cache2"]
+
+[[rule.test]]
+os = "linux"
+tree = [
+    "cache/mozilla/firefox/x1y2z3.default-release/cache2/entries/A1",
+    "cache/mozilla/firefox/x1y2z3.default-release/startupCache/x",
+]
+matches = ["cache/mozilla/firefox/x1y2z3.default-release/cache2"]
+
+[[rule.test]]
+# A `cache2` outside a profile isn't Firefox's.
+tree = ["data_local/Mozilla/Firefox/cache2/x", "cache/Firefox/cache2/x", "projects/p/cache2/x"]
+matches = []

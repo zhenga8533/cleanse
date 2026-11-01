@@ -4,6 +4,8 @@ use std::path::{Component, Path, PathBuf, Prefix};
 use cleanse_model::FileIdentity;
 use cleanse_platform::{KnownFolders, Probe};
 
+use crate::rules::{Base, base_folder, wildcard_match};
+
 /// How far a protected location's protection reaches.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Reach {
@@ -20,8 +22,9 @@ pub struct Protected {
     pub reach: Reach,
     /// What it is, for explanations: "SSH keys", "installed programs".
     pub what: String,
-    /// Folders inside a subtree that aren't protected by it, with everything inside them.
-    pub except: Vec<PathBuf>,
+    /// Folders inside a subtree that aren't protected by it, with everything inside them. They're
+    /// `/`-separated paths relative to it, where `*` in a name matches any run of characters.
+    pub except: Vec<String>,
 }
 
 /// Folders under the home folder whose contents are never cleaned. AI agents' folders hold
@@ -69,6 +72,18 @@ const DISPOSABLE: &[(&str, &[&str])] = &[(
     ],
 )];
 
+/// The caches in each profile of a Chromium-based browser: the HTTP cache and compiled scripts.
+/// Profiles are named `Default`, then `Profile 1`, `Profile 2`, and so on
+/// (`chrome/common/chrome_constants.h`), and both caches are in each profile's cache folder
+/// (`GetUserCacheDirectory` in Chromium). Other folders named like caches, such as
+/// `Service Worker/CacheStorage`, hold sites' data and stay protected.
+const CHROMIUM_CACHES: &[&str] = &[
+    "Default/Cache",
+    "Default/Code Cache",
+    "Profile */Cache",
+    "Profile */Code Cache",
+];
+
 /// Never cleaned inside: a bundle is one unit, and its contents aren't build output.
 const BUNDLE_EXTENSIONS: &[&str] = &["app", "photoslibrary", "xcarchive"];
 
@@ -85,7 +100,7 @@ const ELECTRON_APP: [&str; 2] = ["resources", "app"];
 #[derive(Debug)]
 pub struct ProtectedPolicy {
     entries: Vec<(Vec<String>, Protected)>,
-    /// Each entry's `except` folders, compared the same way.
+    /// Each entry's `except` folders, name by name, compared the same way.
     except_keys: Vec<Vec<Vec<String>>>,
     /// Identities of subtree-protected locations, so a path inside one is recognized however
     /// it's spelled, such as through an 8.3 short name.
@@ -133,7 +148,13 @@ impl ProtectedPolicy {
         Self {
             except_keys: locations
                 .iter()
-                .map(|location| location.except.iter().map(|path| key(path)).collect())
+                .map(|location| {
+                    location
+                        .except
+                        .iter()
+                        .map(|relative| relative.split('/').map(fold_case).collect())
+                        .collect()
+                })
                 .collect(),
             entries: locations
                 .into_iter()
@@ -201,9 +222,16 @@ impl ProtectedPolicy {
     /// Whether the path is inside one of entry `index`'s exceptions, spelled the usual way. A
     /// path reaching it another way, such as through a short name, stays protected.
     fn excepted(&self, index: usize, path_key: &[String]) -> bool {
-        self.except_keys[index]
-            .iter()
-            .any(|except| path_key.starts_with(except))
+        let Some(inside) = path_key.strip_prefix(self.entries[index].0.as_slice()) else {
+            return false;
+        };
+        self.except_keys[index].iter().any(|except| {
+            except.len() <= inside.len()
+                && except
+                    .iter()
+                    .zip(inside)
+                    .all(|(pattern, name)| wildcard_match(pattern, name))
+        })
     }
 }
 
@@ -248,6 +276,9 @@ fn is_bundle(name: &str) -> bool {
 fn system_locations(folders: &KnownFolders) -> Vec<Protected> {
     let mut locations = Locations::default();
     user_locations(&mut locations, folders);
+    // Before the OS's own folders, so a browser's data inside one of them, as Edge's is in
+    // Windows', is explained as the browser's.
+    browser_locations(&mut locations, folders);
     os_locations(&mut locations, folders);
     locations.0
 }
@@ -266,6 +297,21 @@ impl Locations {
                 except: Vec::new(),
             });
         }
+    }
+
+    /// A subtree, apart from the folders inside it that `except` names.
+    fn subtree_except(
+        &mut self,
+        path: PathBuf,
+        what: &str,
+        except: impl IntoIterator<Item = String>,
+    ) {
+        self.0.push(Protected {
+            path,
+            reach: Reach::Subtree,
+            what: what.to_owned(),
+            except: except.into_iter().collect(),
+        });
     }
 }
 
@@ -291,26 +337,112 @@ fn user_locations(locations: &mut Locations, folders: &KnownFolders) {
         "Cleanse's journal of what it removed",
     );
     if let Some(home) = &folders.home {
-        let under = |folder: &Path, relative: &str| {
-            let mut path = folder.to_path_buf();
-            path.extend(relative.split('/'));
-            path
-        };
         for (relative, what) in HOME_SUBTREES {
-            let path = under(home, relative);
             let except = DISPOSABLE
                 .iter()
                 .filter(|(folder, _)| folder == relative)
-                .flat_map(|(_, inside)| inside.iter().map(|inner| under(&path, inner)))
-                .collect();
-            locations.0.push(Protected {
-                path,
-                reach: Reach::Subtree,
-                what: (*what).to_owned(),
-                except,
-            });
+                .flat_map(|(_, inside)| inside.iter().map(|&inner| inner.to_owned()));
+            locations.subtree_except(under(home, relative), what, except);
         }
     }
+}
+
+/// A browser's folder, which holds each profile's history, cookies, saved passwords, and
+/// extensions: the standard folder it's in, its path there, the browser, and the caches inside it
+/// that are disposable. Built-in rules match exactly those caches.
+type Browser = (Base, &'static str, &'static str, &'static [&'static str]);
+
+// The folders are from
+// https://chromium.googlesource.com/chromium/src/+/main/docs/user_data_dir.md,
+// https://learn.microsoft.com/en-us/deployedge/edge-learnmore-create-user-directory-vars, and
+// `toolkit/xre/nsXREDirProvider.cpp` in Firefox, whose cache is `cache2` in each profile's local
+// folder (`netwerk/cache2/CacheFileIOManager.cpp`).
+#[cfg(windows)]
+const BROWSERS: &[Browser] = &[
+    (
+        Base::DataLocal,
+        "Google/Chrome/User Data",
+        "Chrome",
+        CHROMIUM_CACHES,
+    ),
+    (
+        Base::DataLocal,
+        "Google/Chrome Beta/User Data",
+        "Chrome Beta",
+        &[],
+    ),
+    (
+        Base::DataLocal,
+        "Google/Chrome Dev/User Data",
+        "Chrome Dev",
+        &[],
+    ),
+    (
+        Base::DataLocal,
+        "Google/Chrome SxS/User Data",
+        "Chrome Canary",
+        &[],
+    ),
+    (Base::DataLocal, "Chromium/User Data", "Chromium", &[]),
+    (
+        Base::DataLocal,
+        "Microsoft/Edge/User Data",
+        "Microsoft Edge",
+        CHROMIUM_CACHES,
+    ),
+    (Base::Config, "Mozilla/Firefox", "Firefox", &[]),
+    (
+        Base::DataLocal,
+        "Mozilla/Firefox",
+        "Firefox",
+        &["Profiles/*/cache2"],
+    ),
+];
+// On macOS and Linux, Chromium keeps caches apart from profiles, in a folder that mirrors the
+// profiles' folder.
+#[cfg(target_os = "macos")]
+const BROWSERS: &[Browser] = &[
+    (Base::Config, "Google/Chrome", "Chrome", &[]),
+    (Base::Cache, "Google/Chrome", "Chrome", CHROMIUM_CACHES),
+    (Base::Config, "Google/Chrome Beta", "Chrome Beta", &[]),
+    (Base::Config, "Google/Chrome Dev", "Chrome Dev", &[]),
+    (Base::Config, "Google/Chrome Canary", "Chrome Canary", &[]),
+    (Base::Config, "Chromium", "Chromium", &[]),
+    (Base::Config, "Firefox", "Firefox", &[]),
+    (Base::Cache, "Firefox", "Firefox", &["Profiles/*/cache2"]),
+];
+// Firefox moved its profiles from `~/.mozilla` to `~/.config`, keeping the old place for anyone
+// who already had it.
+#[cfg(all(unix, not(target_os = "macos")))]
+const BROWSERS: &[Browser] = &[
+    (Base::Config, "google-chrome", "Chrome", &[]),
+    (Base::Cache, "google-chrome", "Chrome", CHROMIUM_CACHES),
+    (Base::Config, "google-chrome-beta", "Chrome Beta", &[]),
+    (Base::Config, "google-chrome-unstable", "Chrome Dev", &[]),
+    (Base::Config, "google-chrome-canary", "Chrome Canary", &[]),
+    (Base::Config, "chromium", "Chromium", &[]),
+    (Base::Home, ".mozilla/firefox", "Firefox", &[]),
+    (Base::Config, "mozilla/firefox", "Firefox", &[]),
+    (Base::Cache, "mozilla/firefox", "Firefox", &["*/cache2"]),
+];
+
+fn browser_locations(locations: &mut Locations, folders: &KnownFolders) {
+    for &(base, path, browser, caches) in BROWSERS {
+        if let Some(folder) = base_folder(folders, base) {
+            locations.subtree_except(
+                under(folder, path),
+                &format!("{browser}'s profiles"),
+                caches.iter().map(|&cache| cache.to_owned()),
+            );
+        }
+    }
+}
+
+/// `relative` is `/`-separated.
+fn under(folder: &Path, relative: &str) -> PathBuf {
+    let mut path = folder.to_path_buf();
+    path.extend(relative.split('/'));
+    path
 }
 
 #[cfg(windows)]
@@ -333,7 +465,14 @@ fn os_locations(locations: &mut Locations, folders: &KnownFolders) {
             Reach::Subtree,
             "Microsoft Store apps' data",
         );
-        locations.add(Some(local.join("Microsoft")), Reach::Subtree, microsoft);
+        // Edge keeps its profiles in here, so its caches are excepted here too.
+        locations.subtree_except(
+            local.join("Microsoft"),
+            microsoft,
+            CHROMIUM_CACHES
+                .iter()
+                .map(|cache| format!("Edge/User Data/{cache}")),
+        );
     }
     if let Some(roaming) = &folders.config {
         locations.add(Some(roaming.join("Microsoft")), Reach::Subtree, microsoft);
