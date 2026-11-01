@@ -15,7 +15,7 @@ use cleanse_platform::{Probe, System};
 use serde_json::Value;
 use tempfile::TempDir;
 
-use super::journal::{Journal, Record};
+use super::journal::{self, Journal, Record};
 use super::quarantine::Quarantine;
 use super::{Action, ApplyError, Executor, Leftover, PlanFileError, delete, load_plan, save_plan};
 
@@ -644,6 +644,24 @@ fn interrupt_removal(fixture: &Fixture, identity: cleanse_model::FileIdentity) -
         rule: item.rule.clone(),
         identity,
     }
+}
+
+#[test]
+fn runs_started_in_the_same_millisecond_stay_in_order() {
+    let dir = tempfile::tempdir().unwrap();
+    // Sorted as text, the folder would list `1000-5-10` before `1000-5-2`.
+    let names = ["999-9-7.jsonl", "1000-5-2.jsonl", "1000-5-10.jsonl"];
+    for name in names.iter().rev() {
+        fs::write(dir.path().join(name), "").unwrap();
+    }
+
+    let files = journal::files(dir.path()).unwrap();
+
+    let found: Vec<&str> = files
+        .iter()
+        .map(|path| path.file_name().unwrap().to_str().unwrap())
+        .collect();
+    assert_eq!(found, names);
 }
 
 #[test]
