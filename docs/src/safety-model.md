@@ -79,15 +79,15 @@ a secret, or is a virtual machine disk. A file modified in the last ten minutes 
   somewhere else, such as Chrome started with `--user-data-dir`.
 - **Uncommitted changes** and **recent project activity** warnings: need a working-tree scan.
 - **Sizes on Windows** come from the directory listing, which has no allocation data. They count
-  each file's length, or nothing for cloud files that aren't downloaded. Compression and hard
-  links other than pnpm's store aren't reflected.
+  each file's length, or nothing for cloud files that aren't downloaded. Compression isn't
+  reflected, and hard links are only noticed in pnpm's store and for items that are single files.
 
 ## Execution and recovery
 
 - Nothing is removed while Cleanse runs as an administrator or root, or if it can't start a
   journal.
-- Before acting, each item is re-checked: it still exists, it's still the same folder (by
-  identity, not just path), it's still not a link, its rule still recognizes it, and it still
+- Before acting, each item is re-checked: it still exists, it's still the same file or folder
+  (by identity, not just path), it's still not a link, its rule still recognizes it, and it still
   passes every gate. It's also skipped if its tier has risen, or a new kind of warning has
   appeared, since it was approved. Anything modified after the run starts counts as modified
   moments ago.
@@ -99,18 +99,20 @@ a secret, or is a virtual machine disk. A file modified in the last ten minutes 
   tier in the file makes it skipped as risen, and a Review item the plan says to delete is
   skipped, since Review items are only quarantined. Paths must be full paths. Saving replaces an
   existing file only if it's a plan Cleanse saved.
-- **Delete** first renames the item to a sibling tombstone, so a project never sees a
-  half-deleted `node_modules`. If what landed there isn't the approved folder, because
-  something replaced it after the re-check, it's put back untouched. Otherwise the tombstone is
-  removed, along with any links inside, never what they point to. On Windows the rename fails
-  while a program has a file inside open, so the folder stays whole.
+- **Delete** first renames the item, a file or a folder, to a sibling tombstone, so a project
+  never sees a half-deleted `node_modules`. If what landed there isn't the approved item,
+  because something replaced it after the re-check, it's put back untouched. Otherwise the
+  tombstone is removed, along with any links inside, never what they point to. On Windows the
+  rename fails while a program has the file, or a file inside the folder, open, so nothing is
+  removed. A program can open a file in a way that allows deleting it, and then, as on macOS and
+  Linux, the file disappears but its space isn't freed until the program closes it.
 - **Quarantine** moves the item into the `quarantine` folder in Cleanse's data folder, with a
   record of where it came from written first. It's a rename, so it only works on the same drive;
-  items elsewhere are skipped rather than copied. If what moved isn't the approved folder, it's
+  items elsewhere are skipped rather than copied. If what moved isn't the approved item, it's
   put back. `cleanse restore` moves an item back only if nothing has taken its place, and
   `cleanse quarantine purge` deletes it for good. Quarantined space isn't freed until the purge,
-  and the commands say so. Restoring and purging act only on folders named by records Cleanse
-  wrote, inside the quarantine.
+  and the commands say so. Restoring and purging act only on items named by records Cleanse
+  wrote, inside the quarantine, and purging only if the item is the kind its record says.
 - **Trash** uses the operating system's trash, after checking that the item will really land
   there.
 - Every run writes an append-only journal in Cleanse's data folder, which is itself protected.
@@ -118,8 +120,8 @@ a secret, or is a virtual machine disk. A file modified in the last ten minutes 
   it back.
 - If a removal stops partway, such as when the computer shuts down, what's left stays in its
   tombstone. `cleanse history` lists it, and `cleanse history --finish` removes it, but only if
-  the tombstone still holds the folder that was approved, by identity, under the name Cleanse
-  gave it, beside where it was.
+  the tombstone still holds the file or folder that was approved, by identity, under the name
+  Cleanse gave it, beside where it was.
 
 ### Not built yet
 

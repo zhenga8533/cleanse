@@ -6,6 +6,13 @@ All notable changes to Cleanse are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- Cleanse can remove files as well as folders. A known location in a rule can name files with
+  `entry = "file"`, and each file it matches is checked, deleted, quarantined, restored, and
+  purged the way a folder is. Plans, the journal, and quarantine records now say whether each
+  item is a file or a folder; ones saved by 0.2 are read as folders, which is all they held.
+
 ## [0.2.0] - 2026-11-01
 
 Cleanup and recovery. Cleanse now removes what you approve: it deletes what comes back on its

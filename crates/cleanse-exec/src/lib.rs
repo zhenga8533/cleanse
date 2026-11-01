@@ -24,7 +24,7 @@ use cleanse_core::rules::{Matcher, Os, RuleSet};
 use cleanse_core::safety::{Assessor, ProtectedPolicy};
 use cleanse_core::scan::measure;
 use cleanse_model::{
-    Candidate, CandidateId, Concern, Disposal, EntryKind, EntryOutcome, Outcome, Plan, PlanItem,
+    Candidate, CandidateId, Concern, Disposal, EntryOutcome, Outcome, Plan, PlanItem,
     QuarantineEntry, Risk, SkipReason,
 };
 use cleanse_platform::Probe;
@@ -221,6 +221,7 @@ impl<'a> Executor<'a> {
             let entry = QuarantineEntry {
                 id: Quarantine::new_id(),
                 original: item.path.clone(),
+                kind: item.kind,
                 rule: item.rule.clone(),
                 size: candidate.found.size,
                 at: journal::now(),
@@ -228,6 +229,7 @@ impl<'a> Executor<'a> {
             journal.record(&Record::Quarantining {
                 path: path.to_owned(),
                 entry: entry.id.clone(),
+                kind: item.kind,
                 rule: item.rule.clone(),
                 identity: item.identity,
             })?;
@@ -245,6 +247,7 @@ impl<'a> Executor<'a> {
         journal.record(&Record::Removing {
             path: path.to_owned(),
             tombstone: tombstone.to_string_lossy().into_owned(),
+            kind: item.kind,
             rule: item.rule.clone(),
             identity: item.identity,
         })?;
@@ -252,6 +255,7 @@ impl<'a> Executor<'a> {
             self.probe,
             &item.path,
             &tombstone,
+            item.kind,
             item.identity,
             candidate.found.size,
         ))
@@ -263,7 +267,7 @@ impl<'a> Executor<'a> {
     }
 
     /// Removes what's left of removals that didn't finish, each only if its tombstone still
-    /// holds the folder that was approved.
+    /// holds the item that was approved.
     pub fn finish(&self, leftovers: &[Leftover]) -> Result<Applied, ApplyError> {
         let mut journal = self.start(Action::Finish, &[], leftovers.len())?;
         let mut journal_ok = true;
@@ -272,6 +276,7 @@ impl<'a> Executor<'a> {
             let removing = Record::Removing {
                 path: leftover.original.to_string_lossy().into_owned(),
                 tombstone: leftover.tombstone.to_string_lossy().into_owned(),
+                kind: leftover.kind,
                 rule: leftover.rule.clone(),
                 identity: leftover.identity,
             };
@@ -286,7 +291,7 @@ impl<'a> Executor<'a> {
                 let size = measure(&leftover.tombstone)
                     .map(|measurement| measurement.size)
                     .unwrap_or_default();
-                delete::finish(&leftover.tombstone, size)
+                delete::finish(&leftover.tombstone, leftover.kind, size)
             };
             if journal_ok {
                 let done = Record::Done {
@@ -369,8 +374,8 @@ impl<'a> Executor<'a> {
         })
     }
 
-    /// Checks that `item` is still the folder that was approved, that its rule still recognizes
-    /// it, and that the safety checks find nothing new, returning their assessment.
+    /// Checks that `item` is still the file or folder that was approved, that its rule still
+    /// recognizes it, and that the safety checks find nothing new, returning their assessment.
     fn check(
         &self,
         item: &PlanItem,
@@ -388,11 +393,11 @@ impl<'a> Executor<'a> {
                 });
             }
         };
-        if facts.kind != EntryKind::Dir || facts.identity != item.identity {
+        if facts.kind != item.kind || facts.identity != item.identity {
             return Err(skipped(SkipReason::Replaced));
         }
         let Some(detection) = matcher
-            .match_dir(&item.path)
+            .match_entry(&item.path, item.kind)
             .filter(|detection| detection.rule.id == item.rule)
         else {
             return Err(skipped(SkipReason::NoLongerMatches));

@@ -1,3 +1,4 @@
+use std::fs::{self, Metadata};
 use std::io;
 use std::path::Path;
 use std::sync::{Mutex, PoisonError};
@@ -35,7 +36,8 @@ const VM_DISK_EXTENSIONS: &[&str] = &["vhd", "vhdx", "vmdk", "qcow2", "vdi"];
 /// the files in here to its global store, so removing them frees little.
 const PNPM_STORE: &str = ".pnpm";
 
-/// Everything the safety checks need to know about a directory's contents, from one walk.
+/// Everything the safety checks need to know about a file, or a directory's contents from one
+/// walk.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Measurement {
     pub size: Size,
@@ -54,40 +56,25 @@ pub struct Measurement {
     pub shared: bool,
 }
 
-/// Walks everything below `dir` without following links.
-pub fn measure(dir: &Path) -> io::Result<Measurement> {
+/// Walks everything below `path` without following links, or measures it alone if it's a file.
+pub fn measure(path: &Path) -> io::Result<Measurement> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.is_file() {
+        let mut measurement = Measurement::default();
+        measurement.add(path, &metadata, false);
+        return Ok(measurement);
+    }
+
     let measurement = Mutex::new(Measurement::default());
-    let report = walk(dir, |entry| {
+    let report = walk(path, |entry| {
         if entry.kind != EntryKind::File {
             return Descend::Yes;
         }
-        let listed = listed_facts(entry.metadata);
-        let name = entry
-            .path
-            .file_name()
-            .map(|name| name.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
-        let hard_linked = listed.links.is_some_and(|links| links > 1)
-            || (cfg!(windows) && in_pnpm_store(entry.path, dir));
-
-        let mut m = measurement.lock().unwrap_or_else(PoisonError::into_inner);
-        m.files += 1;
-        m.size.logical += entry.len;
-        m.size.on_disk += listed.on_disk;
-        if hard_linked {
-            m.shared = true;
-        } else {
-            m.size.guaranteed += listed.on_disk;
-        }
-        if let Ok(modified) = entry.metadata.modified() {
-            m.newest_modified = m.newest_modified.max(Some(modified));
-        }
-        if m.secret.is_none() && is_secret_name(&name) {
-            m.secret = Some(name.clone());
-        }
-        if m.vm_disk.is_none() && is_vm_disk(&name) {
-            m.vm_disk = Some(name);
-        }
+        let in_store = cfg!(windows) && in_pnpm_store(entry.path, path);
+        measurement
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .add(entry.path, entry.metadata, in_store);
         Descend::Yes
     })?;
 
@@ -97,6 +84,34 @@ pub fn measure(dir: &Path) -> io::Result<Measurement> {
     measurement.unreadable = report.errors.len();
     measurement.mounts = report.other_filesystems.len();
     Ok(measurement)
+}
+
+impl Measurement {
+    /// Counts one file, which is `hard_linked` even if its listing doesn't say so.
+    fn add(&mut self, path: &Path, metadata: &Metadata, hard_linked: bool) {
+        let listed = listed_facts(metadata);
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        self.files += 1;
+        self.size.logical += metadata.len();
+        self.size.on_disk += listed.on_disk;
+        if hard_linked || listed.links.is_some_and(|links| links > 1) {
+            self.shared = true;
+        } else {
+            self.size.guaranteed += listed.on_disk;
+        }
+        if let Ok(modified) = metadata.modified() {
+            self.newest_modified = self.newest_modified.max(Some(modified));
+        }
+        if self.secret.is_none() && is_secret_name(&name) {
+            self.secret = Some(name.clone());
+        }
+        if self.vm_disk.is_none() && is_vm_disk(&name) {
+            self.vm_disk = Some(name);
+        }
+    }
 }
 
 fn is_secret_name(name: &str) -> bool {

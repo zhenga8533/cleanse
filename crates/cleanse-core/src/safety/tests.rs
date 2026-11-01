@@ -289,7 +289,10 @@ fn assess_all(root: &Path, probe: &dyn Probe) -> Vec<Candidate> {
 }
 
 fn assess_at(root: &Path, probe: &dyn Probe, now: SystemTime) -> Vec<Candidate> {
-    let rules = RuleSet::builtin().unwrap();
+    assess_with(&RuleSet::builtin().unwrap(), root, probe, now)
+}
+
+fn assess_with(rules: &RuleSet, root: &Path, probe: &dyn Probe, now: SystemTime) -> Vec<Candidate> {
     let folders = fake_folders(root);
     let matcher = Matcher::new(rules.rules(), &folders, Os::current());
     let (found, _) = matcher.find(root).unwrap();
@@ -441,6 +444,145 @@ fn unreadable_contents_block_removal() {
     }
 
     assert_eq!(only(&candidates).concerns(), [Concern::Incomplete]);
+}
+
+/// Matches any file in `Dumps` under the app data folder.
+fn dump_rules() -> RuleSet {
+    let location =
+        |os: &str| format!(r#"{{ os = "{os}", base = "data_local", path = "Dumps/*" }}"#);
+    let toml = format!(
+        r#"
+[[rule]]
+id = "test.dumps"
+name = "Dumps"
+category = "logs"
+risk = "safe"
+explain = "Because."
+
+[rule.match]
+kind = "known_location"
+entry = "file"
+locations = [{}, {}, {}]
+"#,
+        location("windows"),
+        location("macos"),
+        location("linux")
+    );
+    RuleSet::from_sources([("test.toml", toml.as_str())]).unwrap()
+}
+
+fn dumps(root: &Path) -> PathBuf {
+    fake_folders(root).data_local.unwrap().join("Dumps")
+}
+
+#[test]
+fn a_file_a_rule_recognizes_is_removable_on_its_own() {
+    let root = tempfile::tempdir().unwrap();
+    let dump = dumps(root.path()).join("crash.dmp");
+    write(&dump, "abcd");
+
+    let candidates = assess_with(
+        &dump_rules(),
+        root.path(),
+        &system(),
+        SystemTime::now() + Duration::from_hours(1),
+    );
+    let candidate = only(&candidates);
+
+    assert_eq!(candidate.found.path, dump);
+    assert_eq!(candidate.found.kind, EntryKind::File);
+    assert_eq!(
+        (candidate.found.files, candidate.found.size.logical),
+        (1, 4)
+    );
+    assert_eq!(candidate.risk(), Risk::Safe, "{candidate:#?}");
+    assert!(candidate.concerns().is_empty(), "{candidate:#?}");
+    assert!(candidate.identity.is_some());
+}
+
+#[test]
+fn a_file_modified_moments_ago_is_in_use() {
+    let root = tempfile::tempdir().unwrap();
+    write(&dumps(root.path()).join("crash.dmp"), "abcd");
+
+    let candidates = assess_with(&dump_rules(), root.path(), &system(), SystemTime::now());
+    let candidate = only(&candidates);
+
+    assert_eq!(candidate.risk(), Risk::Protected);
+    assert!(
+        matches!(candidate.concerns(), [Concern::RecentlyModified { .. }]),
+        "{candidate:#?}"
+    );
+}
+
+#[test]
+fn a_virtual_machine_disk_is_protected_wherever_a_rule_finds_it() {
+    let root = tempfile::tempdir().unwrap();
+    write(&dumps(root.path()).join("Ubuntu.vhdx"), "");
+
+    let candidates = assess_with(
+        &dump_rules(),
+        root.path(),
+        &system(),
+        SystemTime::now() + Duration::from_hours(1),
+    );
+
+    assert_eq!(
+        only(&candidates).concerns(),
+        [Concern::ProtectedLocation {
+            what: "a virtual machine disk (ubuntu.vhdx)".into()
+        }]
+    );
+}
+
+#[test]
+fn a_file_with_other_hard_links_frees_nothing_for_certain() {
+    let root = tempfile::tempdir().unwrap();
+    let dump = dumps(root.path()).join("crash.dmp");
+    write(&dump, "abcd");
+    let probe = probe_reporting(
+        root.path(),
+        &dump,
+        FileFacts {
+            kind: EntryKind::File,
+            links: 2,
+            ..dir_facts()
+        },
+    );
+
+    let candidates = assess_with(
+        &dump_rules(),
+        root.path(),
+        &probe,
+        SystemTime::now() + Duration::from_hours(1),
+    );
+    let candidate = only(&candidates);
+
+    assert_eq!(candidate.concerns(), [Concern::SharedData]);
+    assert_eq!(candidate.found.size.guaranteed, 0);
+    assert_eq!(candidate.found.size.logical, 4);
+}
+
+#[test]
+fn a_file_replaced_by_a_folder_cant_be_verified() {
+    let root = tempfile::tempdir().unwrap();
+    let dump = dumps(root.path()).join("crash.dmp");
+    write(&dump, "abcd");
+    let probe = probe_reporting(root.path(), &dump, dir_facts());
+
+    let candidates = assess_with(
+        &dump_rules(),
+        root.path(),
+        &probe,
+        SystemTime::now() + Duration::from_hours(1),
+    );
+    let candidate = only(&candidates);
+
+    assert_eq!(candidate.risk(), Risk::Protected);
+    assert!(
+        candidate.concerns().contains(&Concern::Unverifiable),
+        "{candidate:#?}"
+    );
 }
 
 /// Real cloud placeholders and swapped-in links can't be staged reliably, so the probe reports
@@ -661,7 +803,7 @@ fn claude_home(root: &Path) -> Vec<PathBuf> {
         .iter()
         .filter(|rule| rule.id.0.starts_with("claude-code."))
     {
-        let Target::KnownLocation { locations } = &rule.target else {
+        let Target::KnownLocation { locations, .. } = &rule.target else {
             panic!("{} isn't a known location", rule.id);
         };
         for location in locations
@@ -763,7 +905,7 @@ fn browser_home(root: &Path) -> Vec<PathBuf> {
         .iter()
         .filter(|rule| rule.category == Category::BrowserCaches)
     {
-        let Target::KnownLocation { locations } = &rule.target else {
+        let Target::KnownLocation { locations, .. } = &rule.target else {
             panic!("{} isn't a known location", rule.id);
         };
         for location in locations

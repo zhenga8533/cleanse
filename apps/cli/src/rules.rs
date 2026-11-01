@@ -1,4 +1,5 @@
 use cleanse_engine::{Engine, Os, Rule, Target};
+use cleanse_model::EntryKind;
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
@@ -75,7 +76,7 @@ fn show(rule: &Rule) {
                 println!("               that Git ignores");
             }
         }
-        Target::KnownLocation { locations } => {
+        Target::KnownLocation { locations, entry } => {
             let here: Vec<String> = locations
                 .iter()
                 .filter(|location| location.os == Os::current())
@@ -83,6 +84,8 @@ fn show(rule: &Rule) {
                 .collect();
             if here.is_empty() {
                 println!("  Matches:     nothing on this operating system");
+            } else if *entry == EntryKind::File {
+                println!("  Matches:     files at {}", here.join(", "));
             } else {
                 println!("  Matches:     {}", here.join(", "));
             }

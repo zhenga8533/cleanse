@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Candidate, Concern, Disposal, FileIdentity, Risk, RuleId, Size};
+use crate::{Candidate, Concern, Disposal, EntryKind, FileIdentity, Risk, RuleId, Size};
 
 /// The items a person approved for removal, and the folders the scan covered.
 #[derive(Clone, Debug, Default)]
@@ -18,6 +18,8 @@ pub struct Plan {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlanItem {
     pub path: PathBuf,
+    #[serde(default = "EntryKind::unstated")]
+    pub kind: EntryKind,
     pub rule: RuleId,
     pub identity: FileIdentity,
     pub risk: Risk,
@@ -33,6 +35,7 @@ impl PlanItem {
     pub fn approve(candidate: &Candidate) -> Option<Self> {
         Some(Self {
             path: candidate.found.path.clone(),
+            kind: candidate.found.kind,
             rule: candidate.found.rule.clone(),
             identity: candidate.identity?,
             risk: candidate.risk(),
@@ -139,7 +142,7 @@ impl fmt::Display for Outcome {
 pub enum SkipReason {
     /// Nothing is at its path anymore.
     Gone,
-    /// Something else is at its path now: a different folder, or a link.
+    /// Something else is at its path now: a different file or folder, or a link.
     Replaced,
     /// Its rule no longer recognizes it.
     NoLongerMatches,
@@ -304,8 +307,25 @@ mod tests {
         let item = &json["items"][0];
         assert_eq!(item["selected"], false);
         assert_eq!(item["path"], "project/node_modules");
+        assert_eq!(item["kind"], "dir");
         assert_eq!(item["disposal"], "quarantine");
         assert_eq!(serde_json::from_value::<SavedPlan>(json).unwrap(), saved);
+    }
+
+    #[test]
+    fn items_saved_before_kinds_were_recorded_are_folders() {
+        let saved = SavedPlan::new(
+            &[PathBuf::from("project")],
+            &[candidate(Risk::Review, Some(IDENTITY))],
+            7,
+        );
+        let mut json = serde_json::to_value(&saved).unwrap();
+        json["items"][0].as_object_mut().unwrap().remove("kind");
+
+        let read: SavedPlan = serde_json::from_value(json).unwrap();
+
+        assert_eq!(read.items[0].item.kind, EntryKind::Dir);
+        assert_eq!(read, saved);
     }
 
     #[test]

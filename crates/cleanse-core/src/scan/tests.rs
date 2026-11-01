@@ -104,6 +104,41 @@ fn measures_contents_and_notes_what_the_safety_checks_need() {
 }
 
 #[test]
+fn measures_a_file_on_its_own() {
+    let root = tempfile::tempdir().unwrap();
+    let dump = root.path().join("crash.dmp");
+    fs::write(&dump, "abcd").unwrap();
+    let disk = root.path().join("Ubuntu.vhdx");
+    fs::write(&disk, "").unwrap();
+
+    let measurement = measure(&dump).unwrap();
+
+    assert_eq!(measurement.files, 1);
+    assert_eq!(measurement.size.logical, 4);
+    assert_eq!(measurement.size.guaranteed, measurement.size.on_disk);
+    assert!(measurement.newest_modified.is_some());
+    assert_eq!(measurement.vm_disk, None);
+    assert_eq!(
+        measure(&disk).unwrap().vm_disk.as_deref(),
+        Some("ubuntu.vhdx")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_hard_linked_file_counts_as_shared() {
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("a.log");
+    fs::write(&file, "abcd").unwrap();
+    fs::hard_link(&file, root.path().join("b.log")).unwrap();
+
+    let measurement = measure(&file).unwrap();
+
+    assert!(measurement.shared);
+    assert_eq!(measurement.size.guaranteed, 0);
+}
+
+#[test]
 fn reports_a_pruned_directory_but_not_its_contents() {
     let root = tempfile::tempdir().unwrap();
     fs::create_dir_all(root.path().join("app/node_modules/pkg")).unwrap();

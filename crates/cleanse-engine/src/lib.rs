@@ -203,10 +203,7 @@ impl Engine {
                 if seen.is_multiple_of(PROGRESS_INTERVAL) {
                     progress(Progress::Walking { entries: seen });
                 }
-                if entry.kind != EntryKind::Dir {
-                    return Descend::Yes;
-                }
-                match matcher.match_dir(entry.path) {
+                match matcher.match_entry(entry.path, entry.kind) {
                     Some(detection) => {
                         found
                             .lock()
@@ -273,11 +270,10 @@ impl Engine {
         let matcher = Matcher::new(self.rules.rules(), folders, Os::current());
         let policy = ProtectedPolicy::for_system(folders, &self.system, &self.config.exclude);
 
-        let is_dir = |path: &Path| fs::symlink_metadata(path).is_ok_and(|m| m.is_dir());
-        let detection = path
-            .ancestors()
-            .filter(|ancestor| is_dir(ancestor))
-            .find_map(|ancestor| matcher.match_dir(ancestor));
+        let detection = path.ancestors().find_map(|ancestor| {
+            let metadata = fs::symlink_metadata(ancestor).ok()?;
+            matcher.match_entry(ancestor, EntryKind::from(metadata.file_type()))
+        });
         let Some(detection) = detection else {
             let identity = self.system.inspect(&path).ok().map(|facts| facts.identity);
             return Ok(Explanation::Unmatched {

@@ -174,6 +174,14 @@ impl System {
         self.elevated = elevated;
         self
     }
+
+    /// Replaces the known folders read at startup, so known locations resolve inside a test's
+    /// own folder while files are still read for real.
+    #[must_use]
+    pub fn with_known_folders(mut self, known_folders: KnownFolders) -> Self {
+        self.known_folders = known_folders;
+        self
+    }
 }
 
 impl Probe for System {

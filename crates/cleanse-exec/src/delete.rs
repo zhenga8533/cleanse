@@ -1,6 +1,6 @@
-//! Deleting through a tombstone: the folder is first renamed to a hidden sibling, so a project
-//! never sees it half-deleted, and what landed there is checked to be the approved folder before
-//! anything is removed.
+//! Deleting through a tombstone: the item is first renamed to a hidden sibling, so a project
+//! never sees a folder half-deleted, and what landed there is checked to be the approved item
+//! before anything is removed.
 
 #![allow(
     clippy::disallowed_methods,
@@ -8,6 +8,7 @@
 )]
 
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -32,12 +33,13 @@ pub(crate) fn tombstone_for(path: &Path) -> Option<PathBuf> {
     )))
 }
 
-/// Deletes the folder at `path` by way of `tombstone`, provided it's still the folder with
+/// Deletes the `kind` of item at `path` by way of `tombstone`, provided it's still the item with
 /// `identity`. `size` is what it's reported to free.
 pub(crate) fn delete(
     probe: &dyn Probe,
     path: &Path,
     tombstone: &Path,
+    kind: EntryKind,
     identity: FileIdentity,
     size: Size,
 ) -> Outcome {
@@ -47,27 +49,28 @@ pub(crate) fn delete(
             error: format!("{} is already taken", tombstone.display()),
         };
     }
-    // On Windows this fails while a program has a file inside open, before anything is removed.
+    // On Windows this fails while a program has the file, or a file inside the folder, open,
+    // before anything is removed.
     if let Err(error) = fs::rename(path, tombstone) {
         return Outcome::Failed {
             error: format!("Couldn't start removing it: {error}"),
         };
     }
 
-    // Whatever was at `path` is at `tombstone` now. If something replaced the folder after it
-    // was checked, that's what moved, so it goes back untouched.
+    // Whatever was at `path` is at `tombstone` now. If something replaced the item after it was
+    // checked, that's what moved, so it goes back untouched.
     let moved = probe.inspect(tombstone);
-    if !moved.is_ok_and(|facts| facts.kind == EntryKind::Dir && facts.identity == identity) {
+    if !moved.is_ok_and(|facts| facts.kind == kind && facts.identity == identity) {
         return put_back(path, tombstone);
     }
-    finish(tombstone, size)
+    finish(tombstone, kind, size)
 }
 
-/// Removes the approved folder at `tombstone`, or what's left of it after a removal that didn't
-/// finish. The caller has checked that it's the approved folder. `size` is what it's reported to
-/// free.
-pub(crate) fn finish(tombstone: &Path, size: Size) -> Outcome {
-    match fs::remove_dir_all(tombstone) {
+/// Removes the approved `kind` of item at `tombstone`, or what's left of it after a removal that
+/// didn't finish. The caller has checked that it's the approved item. `size` is what it's
+/// reported to free.
+pub(crate) fn finish(tombstone: &Path, kind: EntryKind, size: Size) -> Outcome {
+    match remove(tombstone, kind) {
         Ok(()) => Outcome::Deleted { size },
         Err(error) => Outcome::Failed {
             error: format!("{error}. What's left of it is in {}", tombstone.display()),
@@ -75,8 +78,17 @@ pub(crate) fn finish(tombstone: &Path, size: Size) -> Outcome {
     }
 }
 
+/// Removes a folder with everything inside, or a file.
+pub(crate) fn remove(path: &Path, kind: EntryKind) -> io::Result<()> {
+    if kind == EntryKind::Dir {
+        fs::remove_dir_all(path)
+    } else {
+        fs::remove_file(path)
+    }
+}
+
 /// Moves whatever is at `moved` back to `path`, where it was before something swapped it in
-/// for the approved folder.
+/// for the approved item.
 pub(crate) fn put_back(path: &Path, moved: &Path) -> Outcome {
     let result = if fs::symlink_metadata(path).is_ok() {
         Err(format!("{} was recreated", path.display()))

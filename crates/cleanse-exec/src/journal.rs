@@ -13,7 +13,7 @@ use std::process;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use cleanse_model::{EntryOutcome, FileIdentity, Outcome, RuleId};
+use cleanse_model::{EntryKind, EntryOutcome, FileIdentity, Outcome, RuleId};
 use serde::{Deserialize, Serialize};
 
 pub(crate) struct Journal {
@@ -50,6 +50,8 @@ pub(crate) enum Record {
     Removing {
         path: String,
         tombstone: String,
+        #[serde(default = "EntryKind::unstated")]
+        kind: EntryKind,
         rule: RuleId,
         identity: FileIdentity,
     },
@@ -57,6 +59,8 @@ pub(crate) enum Record {
     Quarantining {
         path: String,
         entry: String,
+        #[serde(default = "EntryKind::unstated")]
+        kind: EntryKind,
         rule: RuleId,
         identity: FileIdentity,
     },

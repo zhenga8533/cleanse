@@ -15,23 +15,28 @@ use crate::scan::{Descend, WalkReport, walk};
 
 const CACHEDIR_TAG: &str = "CACHEDIR.TAG";
 
-/// A directory that a rule recognized.
+/// A file or directory that a rule recognized.
 #[derive(Clone, Debug)]
 pub struct Detection<'r> {
     pub rule: &'r Rule,
     pub path: PathBuf,
+    pub kind: EntryKind,
     pub evidence: Vec<Evidence>,
-    /// What Git says about the directory, which the safety checks use to rule out tracked files.
+    /// What Git says about the item, which the safety checks use to rule out tracked files.
     pub git: GitStatus,
 }
 
-/// Matches directories against a set of rules, with known locations resolved for one user and
-/// OS.
+/// Matches files and directories against a set of rules, with known locations resolved for one
+/// user and OS.
 #[derive(Debug)]
 pub struct Matcher<'r> {
     artifacts: Vec<&'r Rule>,
     locations: HashMap<PathBuf, &'r Rule>,
     patterns: Vec<Pattern<'r>>,
+    /// The last name of every location that names files, compared like [`fold_name`]. A walk
+    /// sees far more files than folders, so a file whose name isn't here is ruled out before
+    /// its whole path is compared.
+    file_names: Vec<String>,
     git: GitInfo,
 }
 
@@ -49,14 +54,22 @@ impl<'r> Matcher<'r> {
         let mut artifacts = Vec::new();
         let mut locations = HashMap::new();
         let mut patterns = Vec::new();
+        let mut file_names = Vec::new();
         for rule in rules {
             match &rule.target {
                 Target::ProjectArtifact { .. } => artifacts.push(rule),
-                Target::KnownLocation { locations: specs } => {
+                Target::KnownLocation {
+                    locations: specs,
+                    entry,
+                } => {
                     for spec in specs.iter().filter(|spec| spec.os == os) {
                         let Some(base) = base_folder(folders, spec.base) else {
                             continue;
                         };
+                        if *entry == EntryKind::File {
+                            let name = spec.path.rsplit('/').next().unwrap_or_default();
+                            file_names.push(fold_name(name));
+                        }
                         if spec.path.contains('*') {
                             patterns.push(Pattern {
                                 base: location_key(base),
@@ -74,28 +87,40 @@ impl<'r> Matcher<'r> {
             artifacts,
             locations,
             patterns,
+            file_names,
             git: GitInfo::new(),
         }
     }
 
-    /// Checks one directory, as found by a walk. Known locations only match absolute paths.
+    /// Checks one file or directory of `kind`, as found by a walk. Known locations only match
+    /// absolute paths, and project artifacts are only directories. Links never match.
     ///
     /// Evidence that can't be read counts as missing, so a project that can't be inspected isn't
     /// matched. The walk reports the unreadable directories itself.
-    pub fn match_dir(&self, path: &Path) -> Option<Detection<'r>> {
+    pub fn match_entry(&self, path: &Path, kind: EntryKind) -> Option<Detection<'r>> {
+        match kind {
+            EntryKind::Dir => {}
+            EntryKind::File if self.may_be_file_location(path) => {}
+            EntryKind::File | EntryKind::Link | EntryKind::Other => return None,
+        }
         let key = location_key(path);
-        if let Some(rule) = self
+        let location = self
             .locations
             .get(&key)
             .copied()
-            .or_else(|| self.match_pattern(&key))
-        {
+            .filter(|rule| location_entry(rule) == kind)
+            .or_else(|| self.match_pattern(&key, kind));
+        if let Some(rule) = location {
             return Some(Detection {
                 rule,
                 path: path.to_path_buf(),
+                kind,
                 evidence: Vec::new(),
                 git: self.git.status(path),
             });
+        }
+        if kind != EntryKind::Dir {
+            return None;
         }
 
         // Rules are written in ASCII, so a name that isn't valid Unicode can't match one.
@@ -128,15 +153,33 @@ impl<'r> Matcher<'r> {
             Some(Detection {
                 rule,
                 path: path.to_path_buf(),
+                kind,
                 evidence,
                 git: git.clone(),
             })
         })
     }
 
-    /// The rule whose location, written with a `*`, is the path with this key.
-    fn match_pattern(&self, key: &Path) -> Option<&'r Rule> {
+    /// Whether the file at `path` has the name of a location that names files.
+    fn may_be_file_location(&self, path: &Path) -> bool {
+        !self.file_names.is_empty()
+            && path
+                .file_name()
+                .and_then(OsStr::to_str)
+                .is_some_and(|name| {
+                    let name = fold_name(name);
+                    self.file_names
+                        .iter()
+                        .any(|wanted| wildcard_match(wanted, &name))
+                })
+    }
+
+    /// The rule whose location, written with a `*`, is the `kind` of item with this key.
+    fn match_pattern(&self, key: &Path, kind: EntryKind) -> Option<&'r Rule> {
         self.patterns.iter().find_map(|pattern| {
+            if location_entry(pattern.rule) != kind {
+                return None;
+            }
             let mut names = key.strip_prefix(&pattern.base).ok()?.iter();
             let all_match = pattern.names.iter().all(|wanted| {
                 names
@@ -154,10 +197,7 @@ impl<'r> Matcher<'r> {
         let root = path::absolute(root)?;
         let found = Mutex::new(Vec::new());
         let report = walk(&root, |entry| {
-            if entry.kind != EntryKind::Dir {
-                return Descend::Yes;
-            }
-            match self.match_dir(entry.path) {
+            match self.match_entry(entry.path, entry.kind) {
                 Some(detection) => {
                     found
                         .lock()
@@ -171,6 +211,14 @@ impl<'r> Matcher<'r> {
         let mut found = found.into_inner().unwrap_or_else(PoisonError::into_inner);
         found.sort_by(|a, b| a.path.cmp(&b.path));
         Ok((found, report))
+    }
+}
+
+/// What a known location rule's locations name.
+fn location_entry(rule: &Rule) -> EntryKind {
+    match &rule.target {
+        Target::KnownLocation { entry, .. } => *entry,
+        Target::ProjectArtifact { .. } => EntryKind::Dir,
     }
 }
 
