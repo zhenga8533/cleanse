@@ -26,7 +26,10 @@ use rayon::prelude::*;
 
 pub use cleanse_core::config::Config;
 pub use cleanse_core::rules::{Base, Location, Os, Rule, RuleError, RuleSet, RuleTest, Target};
-pub use cleanse_exec::{Action, Applied, ApplyError, Handled, History, Leftover, Listing, Run};
+pub use cleanse_exec::{
+    Action, Applied, ApplyError, Handled, History, Leftover, Listing, PlanFileError, Run,
+    load_plan, save_plan,
+};
 pub use cleanse_platform::{KnownFolders, Probe, System};
 
 /// Walk progress is reported every this many entries.

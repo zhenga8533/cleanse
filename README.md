@@ -21,6 +21,8 @@ cleanse scan --show-protected     # also what's kept and why (defaults to your h
 cleanse explain ~/code/app/node_modules
 cleanse clean ~/code              # choose what to delete, then confirm; each item is re-checked first
 cleanse clean --dry-run ~/code    # what `clean --yes --max-risk regenerable` would delete
+cleanse scan ~/code --save plan.json  # save a plan to review and edit
+cleanse apply plan.json           # remove its selected items, re-checking each first
 cleanse quarantine                # what's in quarantine; `quarantine purge` deletes it for good
 cleanse restore ID                # put a quarantined item back
 cleanse history                   # what Cleanse has removed, restored, and purged

@@ -16,7 +16,7 @@ pub use candidate::{Candidate, CandidateId, Concern, Evidence, Match, RuleId};
 pub use category::Category;
 pub use entry::EntryKind;
 pub use identity::FileIdentity;
-pub use plan::{Outcome, Plan, PlanItem, SkipReason};
+pub use plan::{Outcome, Plan, PlanItem, SavedItem, SavedPlan, SkipReason};
 pub use quarantine::{EntryOutcome, QuarantineEntry};
 pub use risk::{Disposal, Risk};
 pub use size::Size;

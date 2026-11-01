@@ -24,6 +24,12 @@ All notable changes to Cleanse are documented here. The format is based on
   plugins are Review, so they go to quarantine. Transcripts, memory, prompt history, tasks,
   settings, plugins, and credentials stay protected. Nothing is removed while Claude Code or
   Claude Desktop is running.
+- Saved plans. `cleanse scan --save plan.json` writes what can be removed to a JSON file, with
+  only what `clean` would preselect selected. Review it, change `selected` on any item, then
+  `cleanse apply plan.json` removes the selected items, re-checking each one as `clean` does.
+  `--yes` skips the question. Editing a plan can't remove anything the rules and safety checks
+  wouldn't, and a Review item the plan says to delete is skipped, since Review items are only
+  quarantined. Saving replaces an existing file only if it's a plan Cleanse saved.
 - `cleanse history` lists what each run removed, quarantined, restored, or purged. If a
   removal stopped partway, it shows what's left, and `cleanse history --finish` removes it once
   it's confirmed to be the folder that was approved.
