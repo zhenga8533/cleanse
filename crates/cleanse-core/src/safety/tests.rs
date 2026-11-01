@@ -822,6 +822,34 @@ fn claude_home(root: &Path) -> Vec<PathBuf> {
 }
 
 #[test]
+fn crash_dumps_are_review_items_nothing_protects() {
+    let root = tempfile::tempdir().unwrap();
+    let folders = fake_folders(root.path());
+    let dump = if cfg!(windows) {
+        folders
+            .data_local
+            .unwrap()
+            .join("CrashDumps/app.exe.1234.dmp")
+    } else if cfg!(target_os = "macos") {
+        let reports = folders.home.unwrap().join("Library/Logs/DiagnosticReports");
+        reports.join("App-2026-10-30-101500.ips")
+    } else {
+        // Linux keeps crashes only in system folders.
+        return;
+    };
+    write(&dump, "abcd");
+
+    let candidates = assess_all(root.path(), &system());
+    let candidate = only(&candidates);
+
+    assert_eq!(candidate.found.path, dump);
+    assert_eq!(candidate.found.kind, EntryKind::File);
+    assert_eq!(candidate.risk(), Risk::Review, "{candidate:#?}");
+    assert!(candidate.concerns().is_empty(), "{candidate:#?}");
+    assert!(!candidate.preselected());
+}
+
+#[test]
 fn claude_codes_documented_folders_are_removable_and_the_rest_stays_protected() {
     let root = tempfile::tempdir().unwrap();
     let removable = claude_home(root.path());

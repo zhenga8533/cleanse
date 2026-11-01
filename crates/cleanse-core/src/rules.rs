@@ -25,6 +25,10 @@ pub use schema::{Base, Location, Os, Rule, RuleTest, Target};
 const BUILTIN: &[(&str, &str)] = &[
     ("ai-agents.toml", include_str!("../rules/ai-agents.toml")),
     ("browsers.toml", include_str!("../rules/browsers.toml")),
+    (
+        "crash-dumps.toml",
+        include_str!("../rules/crash-dumps.toml"),
+    ),
     ("dotnet.toml", include_str!("../rules/dotnet.toml")),
     (
         "game-engines.toml",
