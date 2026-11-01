@@ -460,3 +460,162 @@ fn finishing_refuses_while_elevated() {
         stderr(&output)
     );
 }
+
+/// Scans the fixture at `root`, saving a plan to `plan`.
+fn save_plan(root: &Path, plan: &Path) {
+    stdout(&cleanse(&["scan", arg(root), "--save", arg(plan)]));
+}
+
+#[test]
+fn scan_save_writes_a_plan_with_the_preselected_items_selected() {
+    let root = fixture();
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dir.path().join("plan.json");
+
+    let report = stdout(&cleanse(&["scan", arg(root.path()), "--save", arg(&plan)]));
+
+    assert!(
+        report.contains("Saved a plan of 1 item, 1 selected"),
+        "{report}"
+    );
+    let json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&plan).unwrap()).unwrap();
+    assert_eq!(json["cleanse_plan"], 1);
+    assert_eq!(json["items"][0]["selected"], true);
+    assert_eq!(json["items"][0]["rule"], "javascript.node_modules");
+    assert!(node_modules_intact(root.path()));
+}
+
+#[test]
+fn scan_json_save_keeps_stdout_for_the_json() {
+    let root = fixture();
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dir.path().join("plan.json");
+
+    let output = cleanse(&["scan", "--json", "--save", arg(&plan), arg(root.path())]);
+
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(json["candidates"].as_array().unwrap().len(), 1);
+    assert!(
+        stderr(&output).contains("Saved a plan"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn scan_save_never_replaces_a_file_that_isnt_a_plan() {
+    let root = fixture();
+    let dir = tempfile::tempdir().unwrap();
+    let notes = dir.path().join("notes.txt");
+    fs::write(&notes, "keep me").unwrap();
+
+    let output = cleanse(&["scan", arg(root.path()), "--save", arg(&notes)]);
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        stderr(&output).contains("isn't a plan Cleanse saved"),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(fs::read_to_string(&notes).unwrap(), "keep me");
+}
+
+#[test]
+fn apply_without_a_terminal_asks_for_yes_and_removes_nothing() {
+    let root = fixture();
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dir.path().join("plan.json");
+    save_plan(root.path(), &plan);
+
+    let output = cleanse(&["apply", arg(&plan)]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("--yes"), "{}", stderr(&output));
+    assert!(node_modules_intact(root.path()));
+}
+
+#[test]
+fn apply_says_when_a_file_isnt_a_plan() {
+    if elevated() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let notes = dir.path().join("notes.txt");
+    fs::write(&notes, "keep me").unwrap();
+
+    let output = cleanse(&["apply", "--yes", arg(&notes)]);
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        stderr(&output).contains("isn't a plan Cleanse saved"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn apply_removes_nothing_when_nothing_is_selected() {
+    if elevated() {
+        return;
+    }
+    let root = fixture();
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dir.path().join("plan.json");
+    save_plan(root.path(), &plan);
+    let mut json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&plan).unwrap()).unwrap();
+    json["items"][0]["selected"] = false.into();
+    fs::write(&plan, json.to_string()).unwrap();
+
+    let report = stdout(&cleanse(&["apply", "--yes", arg(&plan)]));
+
+    assert!(report.contains("Nothing in it is selected"), "{report}");
+    assert!(node_modules_intact(root.path()));
+}
+
+/// Windows CI runs tests as an administrator, so that's where this gets checked.
+#[test]
+fn apply_refuses_while_elevated() {
+    if !elevated() {
+        return;
+    }
+    let root = fixture();
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dir.path().join("plan.json");
+    save_plan(root.path(), &plan);
+
+    let output = cleanse(&["apply", "--yes", arg(&plan)]);
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        stderr(&output).contains("administrator or root"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(node_modules_intact(root.path()));
+}
+
+#[cfg(unix)]
+#[test]
+fn apply_yes_removes_the_selected_items_in_a_saved_plan() {
+    if elevated() {
+        return;
+    }
+    let root = fixture();
+    let home = tempfile::tempdir().unwrap();
+    let plan = home.path().join("plan.json");
+    stdout(&cleanse_at_home(
+        home.path(),
+        &["scan", arg(root.path()), "--save", arg(&plan)],
+    ));
+
+    let report = stdout(&cleanse_at_home(
+        home.path(),
+        &["apply", "--yes", arg(&plan)],
+    ));
+
+    assert!(report.contains("Deleted 1 item"), "{report}");
+    assert!(!root.path().join("web/node_modules").exists());
+    assert!(root.path().join("web/package.json").exists());
+}
