@@ -1,7 +1,7 @@
 # Rules
 
-> Status: project artifacts, known locations, and Git checks are implemented. AI agent rules
-> and insights come in M2.
+> Status: project artifacts, known locations, and Git checks are implemented, including rules
+> for AI agents' and browsers' folders. Insights come in M3.
 
 Rules describe what Cleanse can recognize. They're TOML files in
 [`crates/cleanse-core/rules/`](https://github.com/zhenga8533/cleanse/tree/main/crates/cleanse-core/rules),

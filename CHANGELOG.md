@@ -6,6 +6,13 @@ All notable changes to Cleanse are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-01
+
+Cleanup and recovery. Cleanse now removes what you approve: it deletes what comes back on its
+own or with a rebuild, quarantines what needs your judgment so you can restore it, and records
+every run in a journal. It still asks before removing anything, checks each item again right
+before touching it, and removes nothing while running as an administrator or root.
+
 ### Added
 
 - `cleanse clean [PATHS]` deletes what you choose from a scan. It lists what can be deleted,
@@ -68,5 +75,6 @@ and Linux. It never removes anything; cleanup arrives in 0.2.
   cloud-synced folders, folders containing possible secrets or virtual machine disks, and
   anything that couldn't be fully read.
 
-[Unreleased]: https://github.com/zhenga8533/cleanse/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/zhenga8533/cleanse/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/zhenga8533/cleanse/releases/tag/v0.2.0
 [0.1.0]: https://github.com/zhenga8533/cleanse/releases/tag/v0.1.0
