@@ -8,10 +8,9 @@ and everyday junk; tells you why each item is safe to remove and how it comes ba
 removes anything you haven't approved.
 
 > **Status: pre-alpha.** `cleanse scan` and `cleanse explain` find and assess what could be
-> removed. On the main branch, `cleanse clean` deletes what you approve, or quarantines it so
-> `cleanse restore` can put it back.
-> [v0.1.0](https://github.com/zhenga8533/cleanse/releases/tag/v0.1.0), the read-only preview,
-> has prebuilt binaries and installers.
+> removed, and `cleanse clean` deletes what you approve, or quarantines it so `cleanse restore`
+> can put it back. [v0.2.0](https://github.com/zhenga8533/cleanse/releases/tag/v0.2.0) has
+> prebuilt binaries and installers.
 
 ## Try it
 
@@ -91,10 +90,10 @@ Where a native tool is the right answer, Cleanse points you to it instead: `pnpm
 
 | Milestone | Scope |
 |---|---|
-| M0 | Repository foundation (current) |
+| M0 | Repository foundation |
 | M1 · v0.1 | Read-only engine and CLI: `scan`, `explain`, rules, safety checks |
-| M2 · v0.2 | Cleanup with quarantine, restore, and a journal; AI agent and general rules |
-| M3 · v0.3 | Disk analysis and insights; CLI feature-complete |
+| M2 · v0.2 | Cleanup with quarantine, restore, a journal, and saved plans; AI agent and browser cache rules |
+| M3 · v0.3 | Removing files as well as folders, for temp files, app logs, and crash dumps; disk analysis and insights; CLI feature-complete (current) |
 | M4 · v0.5 | Desktop app (Tauri + React) |
 | M5 · v1.0 | Elevated system cleanup on Windows and Linux, signed builds, package managers |
 
