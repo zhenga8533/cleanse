@@ -137,7 +137,7 @@ impl Journal {
     }
 }
 
-/// The journal files in `dir`, oldest first. Their names start with the time the run began.
+/// The journal files in `dir`, oldest first.
 pub(crate) fn files(dir: &Path) -> io::Result<Vec<PathBuf>> {
     let mut files = match fs::read_dir(dir) {
         Ok(entries) => entries
@@ -150,14 +150,24 @@ pub(crate) fn files(dir: &Path) -> io::Result<Vec<PathBuf>> {
         path.extension()
             .is_some_and(|extension| extension == "jsonl")
     });
-    files.sort_by_key(|path| started_millis(path));
+    files.sort_by_key(|path| start_order(path));
     Ok(files)
 }
 
-fn started_millis(path: &Path) -> u128 {
-    path.file_stem()
-        .and_then(|stem| stem.to_str()?.split('-').next()?.parse().ok())
-        .unwrap_or(0)
+/// A journal's name: the millisecond its run began, the process, and how many runs that process
+/// had started. The last part orders the runs a process starts within one millisecond, which
+/// the time alone leaves in whatever order the folder lists them.
+fn start_order(path: &Path) -> [u128; 3] {
+    let mut order = [0; 3];
+    let parts = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or_default()
+        .split('-');
+    for (slot, part) in order.iter_mut().zip(parts) {
+        *slot = part.parse().unwrap_or(0);
+    }
+    order
 }
 
 /// Reads a journal's records, stopping at the first line that can't be read, such as one a crash
