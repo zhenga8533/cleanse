@@ -39,6 +39,13 @@ pub struct SizeTree {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct NodeId(u32);
 
+impl NodeId {
+    /// A number for the node that a front end can hold and give back to [`SizeTree::node_id`].
+    pub fn index(self) -> u32 {
+        self.0
+    }
+}
+
 #[derive(Debug)]
 pub struct Node {
     /// A root's full path, or the name inside its parent.
@@ -236,6 +243,11 @@ impl SizeTree {
     /// The roots, largest first.
     pub fn roots(&self) -> &[NodeId] {
         &self.roots
+    }
+
+    /// The node an [`NodeId::index`] names, if this tree has it.
+    pub fn node_id(&self, index: u32) -> Option<NodeId> {
+        (usize::try_from(index).is_ok_and(|at| at < self.nodes.len())).then_some(NodeId(index))
     }
 
     pub fn node(&self, id: NodeId) -> &Node {

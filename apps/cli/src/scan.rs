@@ -7,8 +7,8 @@ use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use clap::builder::{PossibleValuesParser, TypedValueParser};
-use cleanse_engine::{Engine, Progress, RuleSet, Scan, save_plan};
-use cleanse_model::{Candidate, Category, Concern, PlanItem, Risk, RuleId, SavedPlan, Size};
+use cleanse_engine::{Engine, Progress, RuleSet, Scan, advice, save_plan};
+use cleanse_model::{Candidate, Category, PlanItem, Risk, RuleId, SavedPlan, Size};
 use serde::Serialize;
 
 use crate::{format, now};
@@ -352,16 +352,6 @@ fn by_rule<'c>(engine: &Engine, candidates: &[&'c Candidate]) -> Vec<(String, Ve
         .collect();
     rules.sort_by_key(|(_, group)| Reverse(format::total(group).on_disk));
     rules
-}
-
-/// The command that cleans `candidate` better than removing it would, from its rule. An item a
-/// safety check keeps for another reason, such as a folder excluded in the settings, has none,
-/// and is listed as kept with that reason instead.
-pub(crate) fn advice<'r>(rules: &'r RuleSet, candidate: &Candidate) -> Option<&'r str> {
-    if candidate.concerns().iter().any(Concern::blocks) {
-        return None;
-    }
-    rules.get(&candidate.found.rule)?.advise.as_deref()
 }
 
 /// The candidates with [`advice`], in the order given, each with its command.

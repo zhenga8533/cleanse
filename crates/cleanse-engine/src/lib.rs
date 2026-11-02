@@ -3,6 +3,7 @@
 //! The CLI and desktop app call only this crate. It owns progress reporting, cancellation, and
 //! the in-memory scan results, so front-ends never touch the filesystem directly.
 
+mod session;
 #[cfg(test)]
 mod tests;
 
@@ -22,7 +23,7 @@ use cleanse_core::rules::{Detection, Listed, Matcher};
 use cleanse_core::safety::{Assessor, ProtectedPolicy};
 use cleanse_core::scan::{Descend, DirFiles, distinct_roots, walk_with};
 use cleanse_exec::Executor;
-use cleanse_model::{Candidate, CandidateId, Plan, QuarantineEntry};
+use cleanse_model::{Candidate, CandidateId, Concern, Plan, QuarantineEntry, Risk};
 use rayon::prelude::*;
 
 pub use cleanse_core::analyze::{Node, NodeId, NodeKind, SizeTree, Usage, removable_under};
@@ -35,9 +36,50 @@ pub use cleanse_exec::{
     load_plan, save_plan,
 };
 pub use cleanse_platform::{KnownFolders, Probe, System};
+pub use session::{
+    Cleaned, Explained, FolderEntry, FolderView, Page, RuleSummary, ScanId, SectionSummary,
+    Session, SessionError, Summary,
+};
 
 /// Walk progress is reported every this many entries.
 const PROGRESS_INTERVAL: u64 = 1024;
+
+/// Where a candidate belongs in a scan's results.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Section {
+    /// Safe and Regenerable items.
+    Removable,
+    /// Review items, which only a person can decide about.
+    Review,
+    /// Kept, because their own tool cleans them better: see [`advice`].
+    Advice,
+    /// Kept by a safety check or their rule.
+    Kept,
+}
+
+impl Section {
+    /// In the order results are shown.
+    pub const ALL: [Self; 4] = [Self::Removable, Self::Review, Self::Advice, Self::Kept];
+
+    pub fn of(rules: &RuleSet, candidate: &Candidate) -> Self {
+        match candidate.risk() {
+            Risk::Safe | Risk::Regenerable => Self::Removable,
+            Risk::Review => Self::Review,
+            Risk::Protected if advice(rules, candidate).is_some() => Self::Advice,
+            Risk::Protected => Self::Kept,
+        }
+    }
+}
+
+/// The command that cleans `candidate` better than removing it would, from its rule. An item a
+/// safety check keeps for another reason, such as a folder excluded in the settings, has none,
+/// and is kept with that reason instead.
+pub fn advice<'r>(rules: &'r RuleSet, candidate: &Candidate) -> Option<&'r str> {
+    if candidate.concerns().iter().any(Concern::blocks) {
+        return None;
+    }
+    rules.get(&candidate.found.rule)?.advise.as_deref()
+}
 
 /// The rules and platform a session works with.
 #[derive(Debug)]

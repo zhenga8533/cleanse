@@ -227,3 +227,19 @@ fn finds_what_can_be_removed_under_a_folder() {
     );
     assert_eq!(under(&["root", "c"]), Vec::<PathBuf>::new());
 }
+
+#[test]
+fn a_node_can_be_named_by_its_index_only_in_its_own_tree() {
+    let tree = SizeTree::build(
+        &[path(&["root"])],
+        vec![folder(&["root"], 1, 1), folder(&["root", "a"], 1, 1)],
+        Vec::new(),
+        &[],
+        false,
+    );
+    let a = child(&tree, tree.roots()[0], "a");
+
+    assert_eq!(tree.node_id(a.index()), Some(a));
+    assert_eq!(tree.node_id(2), None);
+    assert_eq!(tree.node_id(u32::MAX), None);
+}
