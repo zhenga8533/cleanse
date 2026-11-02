@@ -146,9 +146,15 @@ fn analyze_json_has_the_folder_tree() {
     assert!(web["path"].as_str().unwrap().ends_with("web"), "{web}");
     // package.json, node_modules/left-pad/index.js, and src/index.js.
     assert_eq!(web["size"]["logical"], 2 + 4 + 1);
-    assert_eq!(web["removable"], web["children"][0]["size"]["on_disk"]);
-    assert_eq!(web["children"][0]["kind"], "item");
-    assert_eq!(web["children"][0]["rule"], "javascript.node_modules");
+    let node_modules = web["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|child| child["path"].as_str().unwrap().ends_with("node_modules"))
+        .unwrap();
+    assert_eq!(node_modules["kind"], "item");
+    assert_eq!(node_modules["rule"], "javascript.node_modules");
+    assert_eq!(web["removable"], node_modules["size"]["on_disk"]);
     assert_eq!(json["removable"]["items"], 1);
     assert!(
         json["removable"]["by_risk"]["regenerable"]

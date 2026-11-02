@@ -86,6 +86,29 @@ fn totals_add_up_through_the_tree_largest_first() {
 }
 
 #[test]
+fn folders_of_equal_size_are_in_name_order() {
+    let tree = SizeTree::build(
+        &[path(&["root"])],
+        vec![
+            folder(&["root"], 0, 0),
+            folder(&["root", "src"], 1, 4096),
+            folder(&["root", "build"], 1, 4096),
+            folder(&["root", "docs"], 1, 4096),
+        ],
+        Vec::new(),
+        &[],
+        false,
+    );
+
+    let root = tree.roots()[0];
+    let names: Vec<String> = named(&tree, tree.children(root))
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
+    assert_eq!(names, ["build", "docs", "src"]);
+}
+
+#[test]
 fn measured_items_and_other_filesystems_are_leaves() {
     let mut mount = Leaf::other_filesystem(path(&["root", "mnt"]));
     mount.usage = Usage::default();

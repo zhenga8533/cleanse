@@ -133,13 +133,19 @@ fn analyzes_where_space_goes_under_the_roots() {
         panic!("{:?}", tree.roots())
     };
     assert_eq!(tree.path(*top), std::path::absolute(root.path()).unwrap());
-    let web = tree.children(*top)[0];
+    let named = |parent, name: &str| {
+        *tree
+            .children(parent)
+            .iter()
+            .find(|&&id| tree.node(id).name.to_string_lossy() == name)
+            .unwrap_or_else(|| panic!("no {name}"))
+    };
+    let web = named(*top, "web");
     // package.json, then node_modules measured as a whole, then src.
     assert_eq!(tree.node(web).usage.logical, 2 + 4 + 1);
     assert_eq!(tree.node(web).files, 3);
-    let largest = tree.node(tree.children(web)[0]);
-    assert_eq!(largest.name.to_string_lossy(), "node_modules");
-    assert_eq!(largest.kind, NodeKind::Item);
+    assert_eq!(tree.node(named(web, "node_modules")).kind, NodeKind::Item);
+    assert_eq!(tree.node(named(web, "src")).kind, NodeKind::Folder);
     let removable: Vec<_> = removable_under(&analysis.scan.candidates, &tree.path(web)).collect();
     assert_eq!(removable.len(), 1);
     assert!(!tree.partial && !tree.node(*top).incomplete);

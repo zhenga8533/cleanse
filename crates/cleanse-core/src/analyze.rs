@@ -224,12 +224,7 @@ impl SizeTree {
                 .children
                 .push(NodeId(u32::try_from(at).expect("fewer than 2^32 folders")));
         }
-        for at in 0..nodes.len() {
-            let mut children = std::mem::take(&mut nodes[at].children);
-            children.sort_by_key(|child| Reverse(nodes[child.0 as usize].usage.on_disk));
-            nodes[at].children = children;
-        }
-        tree_roots.sort_by_key(|root| Reverse(nodes[root.0 as usize].usage.on_disk));
+        sort_largest_first(&mut nodes, &mut tree_roots);
 
         Self {
             nodes,
@@ -261,6 +256,29 @@ impl SizeTree {
             at = node.parent;
         }
         names.iter().rev().collect()
+    }
+}
+
+/// Puts each node's children, and the roots, largest first, and by name among equals, which
+/// on Unix are common: small files each take a whole block.
+fn sort_largest_first(nodes: &mut [Node], roots: &mut [NodeId]) {
+    let mut children: Vec<Vec<NodeId>> = nodes
+        .iter_mut()
+        .map(|node| std::mem::take(&mut node.children))
+        .collect();
+    let order = |a: &NodeId, b: &NodeId| {
+        let (a, b) = (&nodes[a.0 as usize], &nodes[b.0 as usize]);
+        b.usage
+            .on_disk
+            .cmp(&a.usage.on_disk)
+            .then_with(|| a.name.cmp(&b.name))
+    };
+    for list in &mut children {
+        list.sort_by(order);
+    }
+    roots.sort_by(order);
+    for (node, list) in nodes.iter_mut().zip(children) {
+        node.children = list;
     }
 }
 
