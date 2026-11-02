@@ -119,7 +119,7 @@ impl Reporter {
         }
     }
 
-    fn scanning(&self, progress: Progress) {
+    pub(crate) fn scanning(&self, progress: Progress) {
         self.show(|| match progress {
             Progress::Walking { entries } => {
                 format!("Scanning: {} entries", format::count(entries))

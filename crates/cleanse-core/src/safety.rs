@@ -18,6 +18,7 @@ use std::time::{Duration, SystemTime};
 use cleanse_model::{Candidate, CandidateId, Concern, EntryKind, FileIdentity, Match};
 use cleanse_platform::Probe;
 
+pub(crate) use policy::key;
 pub use policy::{Protected, ProtectedPolicy, Reach};
 
 use crate::git::GitStatus;

@@ -16,14 +16,16 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant, SystemTime};
 
+use cleanse_core::analyze::Leaf;
 use cleanse_core::config::ConfigError;
 use cleanse_core::rules::{Detection, Matcher};
 use cleanse_core::safety::{Assessor, ProtectedPolicy};
-use cleanse_core::scan::{Descend, walk};
+use cleanse_core::scan::{Descend, DirFiles, distinct_roots, walk_with};
 use cleanse_exec::Executor;
 use cleanse_model::{Candidate, CandidateId, EntryKind, Plan, QuarantineEntry};
 use rayon::prelude::*;
 
+pub use cleanse_core::analyze::{Node, NodeId, NodeKind, SizeTree, Usage, removable_under};
 pub use cleanse_core::config::Config;
 pub use cleanse_core::rules::{
     Base, Entry, Location, Os, Rule, RuleError, RuleSet, RuleTest, Target,
@@ -98,6 +100,7 @@ pub enum Progress {
 
 #[derive(Debug)]
 pub struct Scan {
+    /// The folders scanned: absolute, and none inside another.
     pub roots: Vec<PathBuf>,
     /// Sorted by path.
     pub candidates: Vec<Candidate>,
@@ -108,6 +111,13 @@ pub struct Scan {
     pub elapsed: Duration,
     /// The scan was cancelled, so the results are partial.
     pub cancelled: bool,
+}
+
+/// A scan, and how much space every folder under its roots takes.
+#[derive(Debug)]
+pub struct Analysis {
+    pub scan: Scan,
+    pub tree: SizeTree,
 }
 
 #[derive(Debug)]
@@ -181,11 +191,55 @@ impl Engine {
         progress: &(dyn Fn(Progress) + Sync),
         cancel: &AtomicBool,
     ) -> io::Result<Scan> {
-        let started = Instant::now();
-        let roots: Vec<PathBuf> = roots
+        let (scan, _) = self.scan_with(roots, progress, cancel, |_, _| {})?;
+        Ok(scan)
+    }
+
+    /// Scans `roots` as [`Engine::scan`] does, and also adds up how much space every folder
+    /// under them takes, which costs a little more time and memory.
+    pub fn analyze(
+        &self,
+        roots: &[PathBuf],
+        progress: &(dyn Fn(Progress) + Sync),
+        cancel: &AtomicBool,
+    ) -> io::Result<Analysis> {
+        let folders = Mutex::new(Vec::new());
+        let (scan, other_filesystems) = self.scan_with(roots, progress, cancel, |dir, files| {
+            folders
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push((dir, files));
+        })?;
+        let leaves = scan
+            .candidates
             .iter()
-            .map(path::absolute)
-            .collect::<io::Result<_>>()?;
+            .filter_map(Leaf::of)
+            .chain(other_filesystems.into_iter().map(Leaf::other_filesystem))
+            .collect();
+        let tree = SizeTree::build(
+            &scan.roots,
+            folders.into_inner().unwrap_or_else(PoisonError::into_inner),
+            leaves,
+            &scan.unreadable,
+            scan.cancelled,
+        );
+        Ok(Analysis { scan, tree })
+    }
+
+    /// Scans, calling `listed` for each folder read, and returns the scan and the folders on
+    /// other filesystems it didn't enter.
+    fn scan_with<L>(
+        &self,
+        roots: &[PathBuf],
+        progress: &(dyn Fn(Progress) + Sync),
+        cancel: &AtomicBool,
+        listed: L,
+    ) -> io::Result<(Scan, Vec<PathBuf>)>
+    where
+        L: Fn(PathBuf, DirFiles) + Sync,
+    {
+        let started = Instant::now();
+        let roots = distinct_roots(roots)?;
         let matcher = Matcher::new(
             self.rules.rules(),
             self.system.known_folders(),
@@ -193,11 +247,12 @@ impl Engine {
         );
 
         let entries = AtomicU64::new(0);
-        // Keyed by path, so overlapping roots don't produce duplicates.
+        // Sorted by path, which `removable_under` relies on.
         let found: Mutex<BTreeMap<PathBuf, Detection<'_>>> = Mutex::default();
         let mut unreadable = Vec::new();
+        let mut other_filesystems = Vec::new();
         for root in &roots {
-            let report = walk(root, |entry| {
+            let visit = |entry: &cleanse_core::scan::Entry<'_>| {
                 if cancel.load(Ordering::Relaxed) {
                     return Descend::No;
                 }
@@ -215,14 +270,15 @@ impl Engine {
                     }
                     None => Descend::Yes,
                 }
-            })
-            .map_err(|error| {
+            };
+            let report = walk_with(root, visit, &listed).map_err(|error| {
                 io::Error::new(
                     error.kind(),
                     format!("couldn't scan {}: {error}", root.display()),
                 )
             })?;
             unreadable.extend(report.errors.into_iter().map(|error| error.path));
+            other_filesystems.extend(report.other_filesystems);
         }
 
         let detections: Vec<Detection<'_>> = found
@@ -253,14 +309,15 @@ impl Engine {
             })
             .collect();
 
-        Ok(Scan {
+        let scan = Scan {
             roots,
             candidates,
             entries: entries.into_inner(),
             unreadable,
             elapsed: started.elapsed(),
             cancelled: cancel.load(Ordering::Relaxed),
-        })
+        };
+        Ok((scan, other_filesystems))
     }
 
     /// Explains what Cleanse would make of `path`: the rule that recognizes it or the folder

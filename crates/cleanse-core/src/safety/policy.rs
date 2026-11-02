@@ -237,7 +237,7 @@ impl ProtectedPolicy {
 
 /// A path's components for comparison: case-folded where the OS ignores case, with `\\?\C:`
 /// and `C:` treated alike.
-pub(super) fn key(path: &Path) -> Vec<String> {
+pub(crate) fn key(path: &Path) -> Vec<String> {
     path.components()
         .map(|component| match component {
             Component::Prefix(prefix) => match prefix.kind() {
