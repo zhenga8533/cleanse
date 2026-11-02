@@ -16,7 +16,7 @@ use super::{
 };
 
 /// Writes a file dated a day ago, so it doesn't count as recent activity.
-fn write_old(path: &Path, contents: &str) {
+pub(crate) fn write_old(path: &Path, contents: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(path, contents).unwrap();
     File::options()
@@ -27,7 +27,7 @@ fn write_old(path: &Path, contents: &str) {
         .unwrap();
 }
 
-fn project(root: &Path) {
+pub(crate) fn project(root: &Path) {
     write_old(&root.join("web/package.json"), "{}");
     write_old(&root.join("web/node_modules/left-pad/index.js"), "abcd");
     write_old(&root.join("web/src/index.js"), "x");

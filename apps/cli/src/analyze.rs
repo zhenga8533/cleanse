@@ -4,14 +4,13 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
-use cleanse_engine::{Analysis, Engine, NodeId, NodeKind, SizeTree, removable_under};
+use cleanse_engine::{Analysis, Engine, NodeId, NodeKind, SizeTree, advice, removable_under};
 use cleanse_model::{Candidate, Category, EntryKind, Risk, Size};
 use serde::Serialize;
 
 use crate::format;
 use crate::scan::{
-    Categories, JsonAdvice, Reporter, advice, advised, items, json_advice, print_advice,
-    print_scanned,
+    Categories, JsonAdvice, Reporter, advised, items, json_advice, print_advice, print_scanned,
 };
 
 #[derive(Debug, clap::Args)]

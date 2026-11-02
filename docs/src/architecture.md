@@ -51,8 +51,11 @@ Windows-specific situations (junctions, cloud placeholders, 8.3 names) on any OS
 
 The CLI and the desktop app both call `cleanse-engine` in-process. The desktop app (Tauri v2
 with React) exposes only narrow commands to its web view; no command accepts a path to delete.
-Applying a plan takes plan item IDs held by the engine, so a compromised web view can't direct
-deletions. Large results are served as aggregated, paged views rather than whole trees.
+It goes through the engine's `Session`, which holds the latest scan's results and runs one scan
+or change at a time. Candidates, folders, and quarantine entries are named by IDs the session
+gave out, and an ID from an earlier scan is refused, so a compromised web view can't direct
+deletions or name something it wasn't shown. Results are served as summaries and pages, and the
+size tree a folder at a time, rather than whole.
 
 ## Enforcement
 
