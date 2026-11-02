@@ -82,10 +82,11 @@ The location must be exactly this path under one of the user's standard folders:
 In names after the first, `*` matches any run of characters, for folders whose names vary, like
 a browser's profiles: `Google/Chrome/User Data/Profile */Cache` matches `Profile 1/Cache` but not
 `Profile 1/Extensions/Cache`. The first name can't contain `*`, so a location stays inside one
-app's folder.
+app's folder. The exception is `temp`, which every app shares for files it only needs for a
+while, so `path = "*"` there is each item directly in the temp folder.
 
 Locations name folders unless the rule says `entry = "file"`, which makes them name files
-instead, each one a separate item:
+instead, or `entry = "any"`, which makes them name both. Each match is a separate item:
 
 ```toml
 [rule.match]
@@ -97,8 +98,8 @@ locations = [
 ```
 
 A location only matches the kind of item it names, so a folder named `crash.dmp` isn't matched
-here, and a file named like a folder location isn't matched there. Project artifacts are always
-folders.
+here, and a file named like a folder location isn't matched there. Links are never matched, and
+neither is what's left of a removal Cleanse didn't finish. Project artifacts are always folders.
 
 Locations match case-insensitively on Windows and macOS. Two rules can't claim the same
 location.
@@ -121,6 +122,21 @@ lowercase and without `.exe`, and they're compared ignoring case, so `claude` ma
 `claude.exe` on Windows and `Claude` on macOS. If the running programs can't be listed, the
 matches are kept too.
 
+## Waiting until a match is idle
+
+Some places hold files no one app owns, like the temp folder, so there's no program to check.
+For those, `idle_days` keeps each match until nothing in it has changed for that many days, and
+nothing since the computer last started:
+
+```toml
+idle_days = 7
+```
+
+A change is a file's contents being modified, or the entries of a folder inside changing, which
+also shows when unpacked files arrived even though they keep their original dates. When files
+were last opened doesn't count, since scanners open them without anything needing them. If when
+the computer started can't be read, the matches are kept.
+
 ## Fields
 
 | Field | |
@@ -132,6 +148,7 @@ matches are kept too.
 | `explain` | Why it's safe to remove, in a sentence or two |
 | `regenerate` | Optional: how to get it back, when that takes a deliberate step |
 | `owner` | Optional: the app that writes what the rule matches; see [an owner](#an-owner) |
+| `idle_days` | Optional: how many days a match must go unchanged; see [waiting until a match is idle](#waiting-until-a-match-is-idle) |
 
 Paths in rules are `/`-separated and relative. Cleanse rejects a rule file with `.` or `..`
 segments, absolute paths, backslashes, colons (drive letters and NTFS alternate data streams),

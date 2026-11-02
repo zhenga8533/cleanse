@@ -4,7 +4,7 @@
 )]
 
 use std::collections::HashSet;
-use std::fs;
+use std::fs::{self, File, FileTimes};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -15,7 +15,7 @@ use cleanse_platform::{FakeProbe, FileFacts, KnownFolders, Probe, System};
 use proptest::prelude::*;
 
 use super::{Assessor, Protected, ProtectedPolicy, Reach};
-use crate::rules::{Base, Matcher, Os, RuleSet, Target, base_folder};
+use crate::rules::{Base, Entry, Matcher, Os, RuleSet, Target, base_folder};
 
 fn write(path: &Path, contents: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -757,18 +757,26 @@ fn canaries_are_never_removable() {
 }
 
 /// The real filesystem, with the running programs a test chooses: `None` when they can't be
-/// listed. On a developer's machine Claude Code may well be running.
+/// listed. On a developer's machine Claude Code may well be running. The computer started when
+/// the test says, or when it really did.
 struct Running {
     system: System,
-    running: Option<HashSet<String>>,
+    programs: Option<HashSet<String>>,
+    booted_at: Option<io::Result<SystemTime>>,
 }
 
 impl Running {
     fn programs(names: &[&str]) -> Self {
         Self {
             system: system(),
-            running: Some(names.iter().map(|name| (*name).to_owned()).collect()),
+            programs: Some(names.iter().map(|name| (*name).to_owned()).collect()),
+            booted_at: None,
         }
+    }
+
+    fn booted(mut self, at: io::Result<SystemTime>) -> Self {
+        self.booted_at = Some(at);
+        self
     }
 }
 
@@ -786,9 +794,17 @@ impl Probe for Running {
     }
 
     fn running_processes(&self) -> io::Result<HashSet<String>> {
-        self.running
+        self.programs
             .clone()
             .ok_or_else(|| io::Error::other("can't list processes"))
+    }
+
+    fn booted_at(&self) -> io::Result<SystemTime> {
+        match &self.booted_at {
+            Some(Ok(at)) => Ok(*at),
+            Some(Err(error)) => Err(io::Error::new(error.kind(), error.to_string())),
+            None => self.system.booted_at(),
+        }
     }
 }
 
@@ -837,7 +853,7 @@ fn fill_locations(folders: &KnownFolders, ids: &[&str]) -> Vec<PathBuf> {
         {
             let mut path = base_folder(folders, location.base).unwrap().to_path_buf();
             path.extend(location.path.replace('*', "x").split('/'));
-            if *entry == EntryKind::File {
+            if *entry == Entry::File {
                 write(&path, "x");
             } else {
                 write(&path.join("x.log"), "x");
@@ -846,6 +862,180 @@ fn fill_locations(folders: &KnownFolders, ids: &[&str]) -> Vec<PathBuf> {
         }
     }
     items
+}
+
+/// Sets when a file or folder was last modified and opened.
+fn set_times(path: &Path, at: SystemTime) {
+    let mut options = File::options();
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // FILE_WRITE_ATTRIBUTES, and FILE_FLAG_BACKUP_SEMANTICS, which opening a folder needs.
+        options.access_mode(0x100).custom_flags(0x0200_0000);
+    }
+    #[cfg(unix)]
+    options.read(true);
+    let times = FileTimes::new().set_modified(at).set_accessed(at);
+    options.open(path).unwrap().set_times(times).unwrap();
+}
+
+fn days_ago(days: u64) -> SystemTime {
+    SystemTime::now() - Duration::from_hours(24 * days)
+}
+
+/// Matches everything directly in the temp folder, kept until unchanged for 7 days and since the
+/// computer started.
+fn idle_rules() -> RuleSet {
+    let location = |os: &str| format!(r#"{{ os = "{os}", base = "temp", path = "*" }}"#);
+    let toml = format!(
+        r#"
+[[rule]]
+id = "test.temp"
+name = "Temp"
+category = "temp"
+risk = "safe"
+explain = "Because."
+idle_days = 7
+
+[rule.match]
+kind = "known_location"
+entry = "any"
+locations = [{}, {}, {}]
+"#,
+        location("windows"),
+        location("macos"),
+        location("linux")
+    );
+    RuleSet::from_sources([("test.toml", toml.as_str())]).unwrap()
+}
+
+/// A file and a folder in the temp folder, both last changed `days` ago.
+fn temp_items(root: &Path, days: u64) -> [PathBuf; 2] {
+    let temp = fake_folders(root).temp;
+    let file = temp.join("setup.tmp");
+    let folder = temp.join("unpacked");
+    write(&file, "x");
+    write(&folder.join("app.exe"), "x");
+    for path in [&file, &folder.join("app.exe"), &folder] {
+        set_times(path, days_ago(days));
+    }
+    [file, folder]
+}
+
+fn assess_idle(root: &Path, probe: &dyn Probe) -> Vec<Candidate> {
+    assess_with(&idle_rules(), root, probe, SystemTime::now())
+}
+
+#[test]
+fn items_unchanged_for_long_enough_and_since_startup_are_removable() {
+    let root = tempfile::tempdir().unwrap();
+    let items = temp_items(root.path(), 8);
+
+    let candidates = assess_idle(root.path(), &Running::programs(&[]).booted(Ok(days_ago(2))));
+
+    assert_eq!(candidates.len(), 2, "{candidates:#?}");
+    for (candidate, item) in candidates.iter().zip(&items) {
+        assert_eq!(&candidate.found.path, item);
+        assert_eq!(candidate.risk(), Risk::Safe, "{candidate:#?}");
+        assert!(candidate.concerns().is_empty(), "{candidate:#?}");
+    }
+}
+
+#[test]
+fn items_changed_too_recently_are_kept() {
+    let root = tempfile::tempdir().unwrap();
+    temp_items(root.path(), 3);
+
+    // Started since, so only the week is missing.
+    let candidates = assess_idle(root.path(), &Running::programs(&[]).booted(Ok(days_ago(1))));
+
+    assert_eq!(candidates.len(), 2, "{candidates:#?}");
+    for candidate in &candidates {
+        assert_eq!(candidate.risk(), Risk::Protected);
+        assert_eq!(
+            candidate.concerns(),
+            [Concern::ChangedRecently {
+                days_ago: 3,
+                keep_days: 7
+            }]
+        );
+    }
+}
+
+#[test]
+fn items_changed_since_the_computer_started_are_kept() {
+    let root = tempfile::tempdir().unwrap();
+    temp_items(root.path(), 8);
+
+    let candidates = assess_idle(
+        root.path(),
+        &Running::programs(&[]).booted(Ok(days_ago(10))),
+    );
+
+    assert_eq!(candidates.len(), 2, "{candidates:#?}");
+    for candidate in &candidates {
+        assert_eq!(candidate.concerns(), [Concern::ChangedSinceStartup]);
+    }
+}
+
+#[test]
+fn a_folder_whose_contents_just_changed_is_kept_however_old_its_files() {
+    let root = tempfile::tempdir().unwrap();
+    let [_, folder] = temp_items(root.path(), 400);
+    write(&folder.join("new.dat"), "x");
+    set_times(&folder.join("new.dat"), days_ago(400));
+
+    let candidates = assess_idle(root.path(), &Running::programs(&[]).booted(Ok(days_ago(2))));
+
+    let candidate = candidates
+        .iter()
+        .find(|candidate| candidate.found.path == folder)
+        .unwrap();
+    assert!(
+        candidate.concerns().contains(&Concern::ChangedRecently {
+            days_ago: 0,
+            keep_days: 7
+        }),
+        "{candidate:#?}"
+    );
+    assert!(candidate.concerns().contains(&Concern::ChangedSinceStartup));
+}
+
+#[test]
+fn items_are_kept_when_startup_cant_be_read() {
+    let root = tempfile::tempdir().unwrap();
+    temp_items(root.path(), 8);
+
+    let candidates = assess_idle(
+        root.path(),
+        &Running::programs(&[]).booted(Err(io::Error::other("unknown"))),
+    );
+
+    assert_eq!(candidates.len(), 2, "{candidates:#?}");
+    for candidate in &candidates {
+        assert_eq!(candidate.concerns(), [Concern::StartupUnchecked]);
+    }
+}
+
+/// Windows only: elsewhere the temp folder has no rule yet.
+#[test]
+fn windows_temp_items_are_safe_once_idle() {
+    if !cfg!(windows) {
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    let items = temp_items(root.path(), 8);
+
+    let candidates = assess_all(root.path(), &Running::programs(&[]).booted(Ok(days_ago(2))));
+
+    assert_eq!(candidates.len(), 2, "{candidates:#?}");
+    for (candidate, item) in candidates.iter().zip(&items) {
+        assert_eq!(&candidate.found.path, item);
+        assert_eq!(candidate.found.rule.0, "windows.temp");
+        assert_eq!(candidate.risk(), Risk::Safe, "{candidate:#?}");
+        assert!(candidate.concerns().is_empty(), "{candidate:#?}");
+        assert!(candidate.preselected());
+    }
 }
 
 #[test]
@@ -956,7 +1146,8 @@ fn an_apps_folders_are_kept_while_it_runs() {
         root.path(),
         &Running {
             system: system(),
-            running: None,
+            programs: None,
+            booted_at: None,
         },
     );
 

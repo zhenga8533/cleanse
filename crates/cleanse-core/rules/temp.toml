@@ -1,0 +1,38 @@
+# Programs keep files they only need for a while in the temp folder, and often leave them
+# behind. Each item directly inside is its own match, and nothing names who left it, so being in
+# the temp folder is the reason it can go. What keeps it is use: a program can still need an item
+# hours after it last wrote it. So an item is kept until nothing in it has changed for a week, and
+# nothing since the computer last started, when every program that could be relying on it was
+# stopped. Both are needed: the week covers an installer that carries on after a restart, and
+# the restart covers a program that's been running all along.
+#
+# For comparison, Windows Disk Cleanup's "Temporary files" keeps files in %TEMP% that were opened
+# in the last 7 days (`LastAccess` under
+# HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\VolumeCaches\Temporary Files).
+# Cleanse goes by changes instead, since scanners open files, especially programs, without
+# anything needing them.
+#
+# Windows never clears %TEMP% on its own, which is why it comes first. On Linux, systemd clears
+# /tmp after 10 days by default (tmpfiles.d/tmp.conf), and every user shares it. macOS isn't
+# covered yet.
+[[rule]]
+id = "windows.temp"
+name = "Temporary files"
+category = "temp"
+risk = "safe"
+explain = "Files and folders programs left in your temp folder, which holds what they only need for a while. Each is kept until nothing in it has changed for 7 days, and nothing since the computer last started."
+idle_days = 7
+
+[rule.match]
+kind = "known_location"
+entry = "any"
+locations = [{ os = "windows", base = "temp", path = "*" }]
+
+[[rule.test]]
+os = "windows"
+tree = ["temp/setup.tmp", "temp/nsis123.tmp/setup.exe", "temp/empty/"]
+matches = ["temp/empty", "temp/nsis123.tmp", "temp/setup.tmp"]
+
+[[rule.test]]
+tree = ["temp/.cleanse-tombstone-1-2-3/x", "home/projects/temp/setup.tmp"]
+matches = []

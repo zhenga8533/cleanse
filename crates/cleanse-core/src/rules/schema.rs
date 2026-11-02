@@ -23,6 +23,11 @@ pub struct Rule {
     /// The app that writes what this rule matches. While it's running, matches are kept.
     #[serde(default)]
     pub owner: Option<Owner>,
+    /// Keep each match until nothing in it has changed for this many days, and not since the
+    /// computer last started. For places programs leave files they may still need later, like
+    /// the temp folder.
+    #[serde(default)]
+    pub idle_days: Option<u32>,
     /// Small directory trees, and exactly what this rule must match in each.
     #[serde(default, rename = "test")]
     pub tests: Vec<RuleTest>,
@@ -60,15 +65,32 @@ pub enum Target {
     /// A fixed location under one of the user's standard folders.
     KnownLocation {
         locations: Vec<Location>,
-        /// What the locations name: folders (`dir`, the default) or files (`file`). Anything
-        /// else at a location doesn't match.
-        #[serde(default = "folders")]
-        entry: EntryKind,
+        /// What the locations name. Anything else at a location doesn't match.
+        #[serde(default)]
+        entry: Entry,
     },
 }
 
-fn folders() -> EntryKind {
-    EntryKind::Dir
+/// What a known location names.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Entry {
+    #[default]
+    Dir,
+    File,
+    /// Files and folders alike.
+    Any,
+}
+
+impl Entry {
+    /// Whether an item of `kind` is what this names. A link never is.
+    pub fn allows(self, kind: EntryKind) -> bool {
+        match self {
+            Self::Dir => kind == EntryKind::Dir,
+            Self::File => kind == EntryKind::File,
+            Self::Any => matches!(kind, EntryKind::Dir | EntryKind::File),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -77,7 +99,8 @@ pub struct Location {
     pub os: Os,
     pub base: Base,
     /// A `/`-separated path relative to `base`. In names after the first, `*` matches any run
-    /// of characters, for folders whose names vary, like a browser's profiles.
+    /// of characters, for folders whose names vary, like a browser's profiles. Under `temp`, the
+    /// first name can have `*` too.
     pub path: String,
 }
 
@@ -175,17 +198,17 @@ impl Rule {
                     validate_relative(file)?;
                 }
             }
-            Target::KnownLocation { locations, entry } => {
+            Target::KnownLocation { locations, .. } => {
                 if locations.is_empty() {
                     return Err("`locations` is empty".into());
                 }
-                if !matches!(entry, EntryKind::Dir | EntryKind::File) {
-                    return Err("`entry` must be `dir` or `file`".into());
-                }
                 for location in locations {
-                    validate_location(&location.path)?;
+                    validate_location(location)?;
                 }
             }
+        }
+        if self.idle_days == Some(0) {
+            return Err("`idle_days` must be at least 1".into());
         }
         if let Some(owner) = &self.owner {
             if owner.app.trim().is_empty() {
@@ -244,7 +267,7 @@ fn validate_id(id: &str) -> Result<(), String> {
 
 /// A single name, possibly with `*` wildcards.
 fn validate_name(name: &str) -> Result<(), String> {
-    if name.contains('/') || !is_plain_segment(&name.replace('*', "x")) {
+    if name.contains('/') || !is_pattern_segment(name) {
         return Err(format!("`{name}` must be a single file or directory name"));
     }
     Ok(())
@@ -261,17 +284,30 @@ fn validate_relative(path: &str) -> Result<(), String> {
 }
 
 /// Like [`validate_relative`], but names after the first may contain `*`. The first is literal,
-/// so a location always stays inside one app's folder.
-fn validate_location(path: &str) -> Result<(), String> {
+/// so a location always stays inside one app's folder, except under `temp`, which every app
+/// shares for files it only needs for a while.
+fn validate_location(location: &Location) -> Result<(), String> {
+    let path = &location.path;
     let mut names = path.split('/');
-    let first_is_literal = names.next().is_some_and(is_plain_segment);
-    if !first_is_literal || !names.all(|name| is_plain_segment(&name.replace('*', "x"))) {
+    let first_ok = names.next().is_some_and(|first| {
+        if location.base == Base::Temp {
+            is_pattern_segment(first)
+        } else {
+            is_plain_segment(first)
+        }
+    });
+    if !first_ok || !names.all(is_pattern_segment) {
         return Err(format!(
             "`{path}` must be a relative path made of `/`-separated names, without `.` or `..`, \
-             and with `*` only after the first name"
+             and with `*` only after the first name, except under `temp`"
         ));
     }
     Ok(())
+}
+
+/// A name that may contain `*`, but is otherwise plain.
+fn is_pattern_segment(segment: &str) -> bool {
+    is_plain_segment(&segment.replace('*', "x"))
 }
 
 /// Rejects `.` and `..`, which could leave the folder; `\`, so `/` is the only separator;

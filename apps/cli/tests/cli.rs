@@ -148,8 +148,20 @@ fn explain_describes_the_folder_a_file_belongs_to() {
 #[test]
 fn explain_says_when_nothing_recognizes_a_path() {
     let root = fixture();
+    // The fixture is in the temp folder, where on Windows the temp rule recognizes every item, so
+    // the temp folder is somewhere else for this run.
+    let temp = root.path().join("temp");
+    fs::create_dir(&temp).unwrap();
 
-    let report = stdout(&cleanse(&["explain", arg(&root.path().join("web/src"))]));
+    let report = stdout(
+        &Command::new(env!("CARGO_BIN_EXE_cleanse"))
+            .args(["explain", arg(&root.path().join("web/src"))])
+            .env("TMP", &temp)
+            .env("TEMP", &temp)
+            .env("TMPDIR", &temp)
+            .output()
+            .unwrap(),
+    );
 
     assert!(report.contains("No rule recognizes this"), "{report}");
 }
@@ -169,7 +181,7 @@ fn rules_lists_and_shows_rules() {
 fn doctor_reports_rules_and_folders() {
     let report = stdout(&cleanse(&["doctor"]));
 
-    assert!(report.contains("Rules: 49 built in"), "{report}");
+    assert!(report.contains("Rules: 50 built in"), "{report}");
     assert!(report.contains("Home"), "{report}");
 }
 

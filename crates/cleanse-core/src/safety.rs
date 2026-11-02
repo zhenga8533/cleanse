@@ -28,6 +28,8 @@ use crate::scan::{Measurement, measure};
 /// a running build or dev server pausing between writes.
 const IN_USE_WINDOW: Duration = Duration::from_mins(10);
 
+const SECONDS_PER_DAY: u64 = 24 * 60 * 60;
+
 /// Applies the safety gates to rule matches.
 pub struct Assessor<'p> {
     probe: &'p dyn Probe,
@@ -38,6 +40,9 @@ pub struct Assessor<'p> {
     identities: Mutex<HashMap<PathBuf, Option<FileIdentity>>>,
     /// Listed the first time a match's rule has an owner. `None` if they couldn't be listed.
     running: OnceLock<Option<HashSet<String>>>,
+    /// Read the first time a match's rule keeps items until they're idle. `None` if it couldn't
+    /// be read.
+    booted_at: OnceLock<Option<SystemTime>>,
 }
 
 impl<'p> Assessor<'p> {
@@ -60,6 +65,7 @@ impl<'p> Assessor<'p> {
             now,
             identities: Mutex::default(),
             running: OnceLock::new(),
+            booted_at: OnceLock::new(),
         })
     }
 
@@ -126,6 +132,9 @@ impl<'p> Assessor<'p> {
             concerns.push(Concern::SharedData);
         }
         let rule = detection.rule;
+        if let Some(days) = rule.idle_days {
+            concerns.extend(self.not_idle(&measurement, days));
+        }
         if let Some(owner) = &rule.owner {
             let app = owner.app.clone();
             match self.running() {
@@ -154,6 +163,34 @@ impl<'p> Assessor<'p> {
         self.running
             .get_or_init(|| self.probe.running_processes().ok())
             .as_ref()
+    }
+
+    /// Why an item whose rule keeps it until it's been unchanged for `days`, and since the
+    /// computer last started, isn't there yet.
+    fn not_idle(&self, measurement: &Measurement, days: u32) -> Vec<Concern> {
+        let Some(last_change) = measurement.newest_change else {
+            return Vec::new();
+        };
+        let mut concerns = Vec::new();
+        // Changed in the future: a skewed clock, or something changing it right now.
+        let unchanged_for = self
+            .now
+            .duration_since(last_change)
+            .unwrap_or(Duration::ZERO);
+        if unchanged_for < Duration::from_hours(24) * days {
+            concerns.push(Concern::ChangedRecently {
+                days_ago: unchanged_for.as_secs() / SECONDS_PER_DAY,
+                keep_days: days,
+            });
+        }
+        match self.booted_at.get_or_init(|| self.probe.booted_at().ok()) {
+            Some(booted_at) if last_change > *booted_at => {
+                concerns.push(Concern::ChangedSinceStartup);
+            }
+            Some(_) => {}
+            None => concerns.push(Concern::StartupUnchecked),
+        }
+        concerns
     }
 
     /// The identities of `path`'s parent folders that could be read, nearest first. Many

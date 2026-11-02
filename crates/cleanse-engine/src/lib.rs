@@ -25,7 +25,9 @@ use cleanse_model::{Candidate, CandidateId, EntryKind, Plan, QuarantineEntry};
 use rayon::prelude::*;
 
 pub use cleanse_core::config::Config;
-pub use cleanse_core::rules::{Base, Location, Os, Rule, RuleError, RuleSet, RuleTest, Target};
+pub use cleanse_core::rules::{
+    Base, Entry, Location, Os, Rule, RuleError, RuleSet, RuleTest, Target,
+};
 pub use cleanse_exec::{
     Action, Applied, ApplyError, Handled, History, Leftover, Listing, PlanFileError, Run,
     load_plan, save_plan,

@@ -21,6 +21,16 @@ All notable changes to Cleanse are documented here. The format is based on
   logs, and Gradle daemon logs. They're Safe, since each tool writes new ones as it runs. VS
   Code's are kept while it's running, and any log modified in the last few minutes is kept as in
   use.
+- A rule for the temp folder on Windows. Each file and folder programs left in `%TEMP%` is Safe
+  to remove once nothing in it has changed for 7 days, and nothing since the computer last
+  started, when every program that could still need it was stopped. Rules can wait for a match
+  to go idle like this with `idle_days`, name files and folders alike with `entry = "any"`, and
+  match everything directly in the temp folder with `path = "*"`.
+
+### Fixed
+
+- On Windows, the temp folder is now found by its long names, even when `%TEMP%` uses 8.3 short
+  names such as `C:\Users\RUNNER~1`, so locations under it match.
 
 ## [0.2.0] - 2026-11-01
 

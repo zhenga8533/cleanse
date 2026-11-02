@@ -44,6 +44,11 @@ pub struct Measurement {
     pub files: u64,
     /// When the most recently changed file was modified.
     pub newest_modified: Option<SystemTime>,
+    /// When anything last changed: a file's contents, or the entries of a folder, counting the
+    /// item itself. A file unpacked from an archive keeps the archive's modified time, but its
+    /// folder still shows when it arrived. When files were last opened isn't counted: scanners
+    /// open files, and especially programs, without anything needing them.
+    pub newest_change: Option<SystemTime>,
     /// Entries inside that couldn't be read.
     pub unreadable: usize,
     /// Directories on other filesystems mounted inside, which a removal could reach.
@@ -65,16 +70,19 @@ pub fn measure(path: &Path) -> io::Result<Measurement> {
         return Ok(measurement);
     }
 
-    let measurement = Mutex::new(Measurement::default());
+    let mut started = Measurement::default();
+    started.changed(metadata.modified().ok());
+    let measurement = Mutex::new(started);
     let report = walk(path, |entry| {
-        if entry.kind != EntryKind::File {
-            return Descend::Yes;
+        let mut measurement = measurement.lock().unwrap_or_else(PoisonError::into_inner);
+        match entry.kind {
+            EntryKind::File => {
+                let in_store = cfg!(windows) && in_pnpm_store(entry.path, path);
+                measurement.add(entry.path, entry.metadata, in_store);
+            }
+            EntryKind::Dir => measurement.changed(entry.metadata.modified().ok()),
+            EntryKind::Link | EntryKind::Other => {}
         }
-        let in_store = cfg!(windows) && in_pnpm_store(entry.path, path);
-        measurement
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .add(entry.path, entry.metadata, in_store);
         Descend::Yes
     })?;
 
@@ -105,12 +113,18 @@ impl Measurement {
         if let Ok(modified) = metadata.modified() {
             self.newest_modified = self.newest_modified.max(Some(modified));
         }
+        self.changed(metadata.modified().ok());
         if self.secret.is_none() && is_secret_name(&name) {
             self.secret = Some(name.clone());
         }
         if self.vm_disk.is_none() && is_vm_disk(&name) {
             self.vm_disk = Some(name);
         }
+    }
+
+    /// Notes a time something changed, if the system records it.
+    fn changed(&mut self, time: Option<SystemTime>) {
+        self.newest_change = self.newest_change.max(time);
     }
 }
 

@@ -3,6 +3,7 @@
 use std::fs;
 use std::io;
 use std::path::Path;
+use std::time::{Duration, SystemTime};
 
 use cleanse_model::{EntryKind, FileIdentity};
 
@@ -166,6 +167,33 @@ fn finds_the_home_and_temp_folders() {
     assert!(folders.temp.is_dir());
 }
 
+/// GitHub's Windows runners set `%TEMP%` with short names, like `C:\Users\RUNNER~1\...`.
+#[test]
+fn the_temp_folder_is_given_by_its_long_names() {
+    let temp = KnownFolders::current().temp;
+
+    assert_eq!(
+        system().inspect(&temp).unwrap().identity,
+        system().inspect(&std::env::temp_dir()).unwrap().identity
+    );
+    if cfg!(windows) {
+        let short = temp.iter().find(|name| {
+            let name = name.to_string_lossy();
+            name.find('~')
+                .is_some_and(|tilde| name[tilde + 1..].starts_with(|c: char| c.is_ascii_digit()))
+        });
+        assert_eq!(short, None, "{}", temp.display());
+    }
+}
+
+#[test]
+fn knows_when_the_computer_started() {
+    let booted_at = system().booted_at().unwrap();
+
+    assert!(booted_at <= SystemTime::now());
+    assert!(booted_at > SystemTime::UNIX_EPOCH + Duration::from_hours(24 * 365 * 30));
+}
+
 #[test]
 fn the_fake_answers_only_what_it_was_told() {
     let facts = FileFacts {
@@ -196,6 +224,9 @@ fn the_fake_answers_only_what_it_was_told() {
     );
     assert_eq!(probe.known_folders(), &folders);
     assert!(probe.is_elevated());
+    assert!(probe.booted_at().is_err());
+    let started = SystemTime::UNIX_EPOCH + Duration::from_secs(7);
+    assert_eq!(probe.with_boot_time(started).booted_at().unwrap(), started);
 }
 
 #[test]

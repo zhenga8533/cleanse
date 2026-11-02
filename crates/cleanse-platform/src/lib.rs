@@ -20,9 +20,9 @@ mod tests;
 compile_error!("Cleanse supports Windows, macOS, and Linux");
 
 use std::collections::HashSet;
-use std::env;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
 use cleanse_model::{EntryKind, FileIdentity};
 
@@ -51,6 +51,9 @@ pub trait Probe: Send + Sync {
 
     /// The names of the programs running now, for every user, as [`process_name`] gives them.
     fn running_processes(&self) -> io::Result<HashSet<String>>;
+
+    /// When the computer last started. No program running now started before then.
+    fn booted_at(&self) -> io::Result<SystemTime>;
 }
 
 /// A program's process name for comparing: lowercase, without a trailing `.exe`, so `Claude.exe`
@@ -136,7 +139,7 @@ impl KnownFolders {
             cache: dirs::cache_dir(),
             config: dirs::config_dir(),
             data_local: dirs::data_local_dir(),
-            temp: env::temp_dir(),
+            temp: os::temp_dir(),
         }
     }
 
@@ -209,5 +212,10 @@ impl Probe for System {
             .values()
             .map(|process| process_name(&process.name().to_string_lossy()))
             .collect())
+    }
+
+    fn booted_at(&self) -> io::Result<SystemTime> {
+        let seconds = sysinfo::System::boot_time().map_err(io::Error::other)?;
+        Ok(SystemTime::UNIX_EPOCH + Duration::from_secs(seconds))
     }
 }

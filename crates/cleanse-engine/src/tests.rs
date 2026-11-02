@@ -10,7 +10,7 @@ use cleanse_model::{Outcome, Plan, PlanItem, Risk};
 
 use cleanse_model::{Concern, RuleId};
 
-use super::{Config, Engine, Explanation, Probe, Progress, RuleSet, System};
+use super::{Config, Engine, Explanation, KnownFolders, Probe, Progress, RuleSet, System};
 
 /// Writes a file dated a day ago, so it doesn't count as recent activity.
 fn write_old(path: &Path, contents: &str) {
@@ -133,7 +133,14 @@ fn explains_the_folder_a_path_belongs_to() {
 fn explains_that_unrecognized_paths_are_left_alone() {
     let root = tempfile::tempdir().unwrap();
     project(root.path());
-    let engine = Engine::new().unwrap();
+    // The project is in the temp folder, where on Windows the temp rule recognizes every item, so
+    // the temp folder is somewhere else here.
+    let mut folders = KnownFolders::current();
+    folders.temp = root.path().join("temp");
+    let engine = Engine {
+        system: System::new().unwrap().with_known_folders(folders),
+        ..Engine::new().unwrap()
+    };
 
     let explanation = engine.explain(&root.path().join("web/src")).unwrap();
 

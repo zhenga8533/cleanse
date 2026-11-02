@@ -8,3 +8,8 @@ pub mod git;
 pub mod rules;
 pub mod safety;
 pub mod scan;
+
+/// The start of the name `cleanse-exec` gives an item while deleting it, beside where it was. No
+/// rule matches one: what's left of a removal that stopped is only removed by finishing it,
+/// which checks that it's what was approved.
+pub const TOMBSTONE_PREFIX: &str = ".cleanse-tombstone-";

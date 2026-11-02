@@ -1,5 +1,4 @@
-use cleanse_engine::{Engine, Os, Rule, Target};
-use cleanse_model::EntryKind;
+use cleanse_engine::{Engine, Entry, Os, Rule, Target};
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
@@ -82,17 +81,23 @@ fn show(rule: &Rule) {
                 .filter(|location| location.os == Os::current())
                 .map(|location| format!("{:?}/{}", location.base, location.path))
                 .collect();
+            let what = match entry {
+                Entry::Dir => "",
+                Entry::File => "files at ",
+                Entry::Any => "files and folders at ",
+            };
             if here.is_empty() {
                 println!("  Matches:     nothing on this operating system");
-            } else if *entry == EntryKind::File {
-                println!("  Matches:     files at {}", here.join(", "));
             } else {
-                println!("  Matches:     {}", here.join(", "));
+                println!("  Matches:     {what}{}", here.join(", "));
             }
         }
     }
     if let Some(owner) = &rule.owner {
         println!("  Kept while:  {} is running", owner.app);
+    }
+    if let Some(days) = rule.idle_days {
+        println!("  Kept until:  unchanged for {days} days, and since the computer last started");
     }
     println!("  Tests:       {}", rule.tests.len());
 }
