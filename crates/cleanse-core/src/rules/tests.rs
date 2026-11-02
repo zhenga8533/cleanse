@@ -38,6 +38,17 @@ fn build_tree(root: &Path, tree: &[String]) {
     }
 }
 
+#[cfg(unix)]
+fn link_dir(target: &Path, link: &Path) {
+    std::os::unix::fs::symlink(target, link).unwrap();
+}
+
+/// Junctions need no special privileges, unlike directory symlinks on Windows.
+#[cfg(windows)]
+fn link_dir(target: &Path, link: &Path) {
+    junction::create(target, link).unwrap();
+}
+
 fn relative(root: &Path, path: &str) -> PathBuf {
     let mut joined = root.to_path_buf();
     joined.extend(path.split('/'));
@@ -378,17 +389,93 @@ locations = [{{ os = "linux", base = "cache", path = "app/cache" }}]
         )
     };
 
-    assert!(load(&rule("dir")).is_ok());
-    assert!(load(&rule("file")).is_ok());
-    for entry in ["link", "other"] {
-        let error = load(&rule(entry)).unwrap_err();
-        assert!(error.contains("`dir` or `file`"), "{error}");
+    for entry in ["dir", "file", "any"] {
+        assert!(load(&rule(entry)).is_ok(), "{entry}");
     }
-    assert!(
-        load(&rule("folder"))
-            .unwrap_err()
-            .contains("unknown variant")
+    for entry in ["link", "other", "folder"] {
+        let error = load(&rule(entry)).unwrap_err();
+        assert!(error.contains("unknown variant"), "{error}");
+    }
+}
+
+#[test]
+fn a_location_for_any_entry_matches_files_and_folders_but_not_links() {
+    let rules = location_rule("app/*", "any");
+    let root = tempfile::tempdir().unwrap();
+    build_tree(
+        root.path(),
+        &[
+            "cache/app/file.tmp".to_owned(),
+            "cache/app/folder/x".to_owned(),
+            "outside/x".to_owned(),
+        ],
     );
+    link_dir(
+        &root.path().join("outside"),
+        &root.path().join("cache/app/link"),
+    );
+    let matcher = Matcher::new(rules.rules(), &fixture_folders(root.path()), Os::current());
+
+    let (found, _) = matcher.find(root.path()).unwrap();
+
+    let names: BTreeSet<_> = found
+        .iter()
+        .map(|detection| detection.path.file_name().unwrap().to_owned())
+        .collect();
+    assert_eq!(names, BTreeSet::from(["file.tmp".into(), "folder".into()]));
+}
+
+#[test]
+fn cleanses_own_tombstones_never_match() {
+    let rules = location_rule("app/*", "any");
+    let tree = tree_only(&[
+        "cache/app/.cleanse-tombstone-1-2-3/x",
+        "cache/app/.cleanse-tombstone-4-5-6",
+        "cache/app/kept.tmp",
+    ]);
+
+    let found = run_fixture(&rules.rules()[0], &tree);
+
+    assert_eq!(found, BTreeSet::from(["cache/app/kept.tmp".to_owned()]));
+}
+
+#[test]
+fn only_temp_locations_can_start_with_a_wildcard() {
+    let rule = |base: &str| {
+        format!(
+            r#"
+[[rule]]
+id = "test.temp"
+name = "Temp"
+category = "temp"
+risk = "safe"
+explain = "Because."
+
+[rule.match]
+kind = "known_location"
+entry = "any"
+locations = [{{ os = "windows", base = "{base}", path = "*" }}]
+"#
+        )
+    };
+
+    assert!(load(&rule("temp")).is_ok());
+    let error = load(&rule("cache")).unwrap_err();
+    assert!(error.contains("only after the first name"), "{error}");
+}
+
+#[test]
+fn idle_days_must_be_at_least_one() {
+    let rule = |days: u32| {
+        VALID.replace(
+            "[rule.match]",
+            &format!("idle_days = {days}\n\n[rule.match]"),
+        )
+    };
+
+    assert!(load(&rule(7)).is_ok());
+    let error = load(&rule(0)).unwrap_err();
+    assert!(error.contains("`idle_days` must be at least 1"), "{error}");
 }
 
 #[test]

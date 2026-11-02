@@ -1,14 +1,18 @@
 #![allow(
     unsafe_code,
-    reason = "file identity, sync root, and token queries need Win32 calls that std doesn't wrap"
+    reason = "file identity, sync root, token, and long name queries need Win32 calls that std \
+              doesn't wrap"
 )]
 
+use std::env;
+use std::ffi::OsString;
 use std::fs::{File, Metadata, OpenOptions};
 use std::io;
 use std::mem::size_of;
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::ptr;
 
 use cleanse_model::{EntryKind, FileIdentity};
@@ -27,7 +31,7 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_ID_INFO,
     FILE_INFO_BY_HANDLE_CLASS, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ,
     FILE_SHARE_WRITE, FILE_STANDARD_INFO, FileAttributeTagInfo, FileIdInfo, FileStandardInfo,
-    GetFileInformationByHandleEx,
+    GetFileInformationByHandleEx, GetLongPathNameW,
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
@@ -73,6 +77,35 @@ pub(crate) fn inspect(path: &Path) -> io::Result<FileFacts> {
         cloud_synced: in_sync_root(&file)?,
         offline: tag.FileAttributes & OFFLINE_ATTRIBUTES != 0,
     })
+}
+
+/// `%TEMP%` can name folders by their 8.3 short names, like `C:\Users\RUNNER~1\...`, but folder
+/// listings give long names, which known locations are compared with. So the temp folder is
+/// given by its long names, or as it is if they can't be read.
+pub(crate) fn temp_dir() -> PathBuf {
+    let temp = env::temp_dir();
+    long_path(&temp).unwrap_or(temp)
+}
+
+fn long_path(path: &Path) -> Option<PathBuf> {
+    let short: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+    // SAFETY: `short` is NUL-terminated. Without a buffer, the call only returns the length
+    // needed, counting the NUL.
+    let needed = unsafe { GetLongPathNameW(short.as_ptr(), ptr::null_mut(), 0) };
+    if needed == 0 {
+        return None;
+    }
+    let mut long = vec![0; usize::try_from(needed).ok()?];
+    // SAFETY: `short` is NUL-terminated, and `long` is writable for the `needed` characters
+    // passed as its size.
+    let written = unsafe { GetLongPathNameW(short.as_ptr(), long.as_mut_ptr(), needed) };
+    // The length written doesn't count the NUL. Needing more than fits means the path changed
+    // between the calls.
+    if written == 0 || written >= needed {
+        return None;
+    }
+    long.truncate(usize::try_from(written).ok()?);
+    Some(PathBuf::from(OsString::from_wide(&long)))
 }
 
 pub(crate) fn listed_facts(metadata: &Metadata) -> ListedFacts {

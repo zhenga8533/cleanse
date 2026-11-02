@@ -1,9 +1,10 @@
 #![allow(clippy::disallowed_methods, reason = "tests build fixture trees")]
 
-use std::fs;
+use std::fs::{self, File, FileTimes};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{Duration, SystemTime};
 
 use cleanse_model::EntryKind;
 
@@ -101,6 +102,70 @@ fn measures_contents_and_notes_what_the_safety_checks_need() {
     assert!(measurement.newest_modified.is_some());
     assert_eq!((measurement.unreadable, measurement.mounts), (0, 0));
     assert!(!measurement.shared);
+}
+
+/// Sets when a file or folder was last modified and opened.
+fn set_times(path: &Path, modified: SystemTime, accessed: SystemTime) {
+    let mut options = File::options();
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // FILE_WRITE_ATTRIBUTES, and FILE_FLAG_BACKUP_SEMANTICS, which opening a folder needs.
+        options.access_mode(0x100).custom_flags(0x0200_0000);
+    }
+    #[cfg(unix)]
+    options.read(true);
+    let times = FileTimes::new()
+        .set_modified(modified)
+        .set_accessed(accessed);
+    options.open(path).unwrap().set_times(times).unwrap();
+}
+
+fn days_ago(days: u64) -> SystemTime {
+    SystemTime::now() - Duration::from_hours(24 * days)
+}
+
+/// Filesystems store times less precisely than `SystemTime`.
+fn assert_near(actual: Option<SystemTime>, expected: SystemTime) {
+    let actual = actual.unwrap();
+    let apart = actual
+        .duration_since(expected)
+        .unwrap_or_else(|error| error.duration());
+    assert!(apart < Duration::from_secs(2), "{actual:?} vs {expected:?}");
+}
+
+/// Scanners open files without anything needing them, so only changes count.
+#[test]
+fn notes_when_anything_inside_last_changed_but_not_when_it_was_opened() {
+    let root = tempfile::tempdir().unwrap();
+    let sub = root.path().join("sub");
+    fs::create_dir(&sub).unwrap();
+    let opened = sub.join("opened.txt");
+    fs::write(&opened, "x").unwrap();
+    set_times(&opened, days_ago(9), days_ago(1));
+    set_times(&sub, days_ago(5), days_ago(5));
+    set_times(root.path(), days_ago(9), days_ago(9));
+
+    let measurement = measure(root.path()).unwrap();
+
+    assert_near(measurement.newest_modified, days_ago(9));
+    assert_near(measurement.newest_change, days_ago(5));
+}
+
+/// A file unpacked from an archive keeps the archive's dates, but the folder it landed in
+/// changed when it arrived.
+#[test]
+fn a_folder_changed_since_its_files_counts_as_used_then() {
+    let root = tempfile::tempdir().unwrap();
+    let unpacked = root.path().join("unpacked.exe");
+    fs::write(&unpacked, "x").unwrap();
+    set_times(&unpacked, days_ago(400), days_ago(400));
+    set_times(root.path(), days_ago(1), days_ago(1));
+
+    let measurement = measure(root.path()).unwrap();
+
+    assert_near(measurement.newest_modified, days_ago(400));
+    assert_near(measurement.newest_change, days_ago(1));
 }
 
 #[test]

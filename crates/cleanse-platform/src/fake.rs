@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use crate::{FileFacts, KnownFolders, Probe, process_name};
 
@@ -11,6 +12,7 @@ pub struct FakeProbe {
     known_folders: KnownFolders,
     elevated: bool,
     running: HashSet<String>,
+    booted_at: Option<SystemTime>,
 }
 
 impl FakeProbe {
@@ -39,6 +41,13 @@ impl FakeProbe {
         self.running.insert(process_name(name));
         self
     }
+
+    /// Reports the computer as started at `time`.
+    #[must_use]
+    pub fn with_boot_time(mut self, time: SystemTime) -> Self {
+        self.booted_at = Some(time);
+        self
+    }
 }
 
 impl Probe for FakeProbe {
@@ -62,5 +71,11 @@ impl Probe for FakeProbe {
 
     fn running_processes(&self) -> io::Result<HashSet<String>> {
         Ok(self.running.clone())
+    }
+
+    /// Unknown unless the test said when the computer started.
+    fn booted_at(&self) -> io::Result<SystemTime> {
+        self.booted_at
+            .ok_or_else(|| io::Error::other("FakeProbe wasn't told when the computer started"))
     }
 }

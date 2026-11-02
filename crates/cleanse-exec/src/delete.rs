@@ -17,7 +17,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use cleanse_model::{EntryKind, FileIdentity, Outcome, Size, SkipReason};
 use cleanse_platform::Probe;
 
-pub(crate) const TOMBSTONE_PREFIX: &str = ".cleanse-tombstone-";
+pub(crate) use cleanse_core::TOMBSTONE_PREFIX;
 
 /// A sibling of `path` with a name no other removal uses, or `None` for a drive's root.
 pub(crate) fn tombstone_for(path: &Path) -> Option<PathBuf> {

@@ -9,7 +9,8 @@ use std::sync::{Mutex, PoisonError};
 use cleanse_model::{EntryKind, Evidence};
 use cleanse_platform::KnownFolders;
 
-use super::{Base, Os, Rule, Target};
+use super::{Base, Entry, Os, Rule, Target};
+use crate::TOMBSTONE_PREFIX;
 use crate::git::{GitInfo, GitStatus};
 use crate::scan::{Descend, WalkReport, walk};
 
@@ -33,10 +34,10 @@ pub struct Matcher<'r> {
     artifacts: Vec<&'r Rule>,
     locations: HashMap<PathBuf, &'r Rule>,
     patterns: Vec<Pattern<'r>>,
-    /// The last name of every location that names files, compared like [`fold_name`]. A walk
-    /// sees far more files than folders, so a file whose name isn't here is ruled out before
-    /// its whole path is compared.
-    file_names: Vec<String>,
+    /// The depth, in path components, and the last name, compared like [`fold_name`], of every
+    /// location that names files. A walk sees far more files than folders, so a file at a depth
+    /// or with a name none of them has is ruled out before its whole path is compared.
+    file_locations: Vec<(usize, String)>,
     git: GitInfo,
 }
 
@@ -54,7 +55,7 @@ impl<'r> Matcher<'r> {
         let mut artifacts = Vec::new();
         let mut locations = HashMap::new();
         let mut patterns = Vec::new();
-        let mut file_names = Vec::new();
+        let mut file_locations = Vec::new();
         for rule in rules {
             match &rule.target {
                 Target::ProjectArtifact { .. } => artifacts.push(rule),
@@ -66,9 +67,10 @@ impl<'r> Matcher<'r> {
                         let Some(base) = base_folder(folders, spec.base) else {
                             continue;
                         };
-                        if *entry == EntryKind::File {
+                        if entry.allows(EntryKind::File) {
+                            let depth = join_relative(base, &spec.path).components().count();
                             let name = spec.path.rsplit('/').next().unwrap_or_default();
-                            file_names.push(fold_name(name));
+                            file_locations.push((depth, fold_name(name)));
                         }
                         if spec.path.contains('*') {
                             patterns.push(Pattern {
@@ -87,13 +89,14 @@ impl<'r> Matcher<'r> {
             artifacts,
             locations,
             patterns,
-            file_names,
+            file_locations,
             git: GitInfo::new(),
         }
     }
 
     /// Checks one file or directory of `kind`, as found by a walk. Known locations only match
-    /// absolute paths, and project artifacts are only directories. Links never match.
+    /// absolute paths, and project artifacts are only directories. Links and Cleanse's own
+    /// tombstones never match.
     ///
     /// Evidence that can't be read counts as missing, so a project that can't be inspected isn't
     /// matched. The walk reports the unreadable directories itself.
@@ -103,12 +106,19 @@ impl<'r> Matcher<'r> {
             EntryKind::File if self.may_be_file_location(path) => {}
             EntryKind::File | EntryKind::Link | EntryKind::Other => return None,
         }
+        if path
+            .file_name()
+            .and_then(OsStr::to_str)
+            .is_some_and(|name| name.starts_with(TOMBSTONE_PREFIX))
+        {
+            return None;
+        }
         let key = location_key(path);
         let location = self
             .locations
             .get(&key)
             .copied()
-            .filter(|rule| location_entry(rule) == kind)
+            .filter(|rule| location_entry(rule).allows(kind))
             .or_else(|| self.match_pattern(&key, kind));
         if let Some(rule) = location {
             return Some(Detection {
@@ -160,24 +170,30 @@ impl<'r> Matcher<'r> {
         })
     }
 
-    /// Whether the file at `path` has the name of a location that names files.
+    /// Whether the file at `path` is at the depth, and has the name, of a location that names
+    /// files.
     fn may_be_file_location(&self, path: &Path) -> bool {
-        !self.file_names.is_empty()
-            && path
-                .file_name()
-                .and_then(OsStr::to_str)
-                .is_some_and(|name| {
-                    let name = fold_name(name);
-                    self.file_names
-                        .iter()
-                        .any(|wanted| wildcard_match(wanted, &name))
-                })
+        if self.file_locations.is_empty() {
+            return false;
+        }
+        let depth = path.components().count();
+        if !self.file_locations.iter().any(|(at, _)| *at == depth) {
+            return false;
+        }
+        path.file_name()
+            .and_then(OsStr::to_str)
+            .is_some_and(|name| {
+                let name = fold_name(name);
+                self.file_locations
+                    .iter()
+                    .any(|(at, wanted)| *at == depth && wildcard_match(wanted, &name))
+            })
     }
 
     /// The rule whose location, written with a `*`, is the `kind` of item with this key.
     fn match_pattern(&self, key: &Path, kind: EntryKind) -> Option<&'r Rule> {
         self.patterns.iter().find_map(|pattern| {
-            if location_entry(pattern.rule) != kind {
+            if !location_entry(pattern.rule).allows(kind) {
                 return None;
             }
             let mut names = key.strip_prefix(&pattern.base).ok()?.iter();
@@ -215,10 +231,10 @@ impl<'r> Matcher<'r> {
 }
 
 /// What a known location rule's locations name.
-fn location_entry(rule: &Rule) -> EntryKind {
+fn location_entry(rule: &Rule) -> Entry {
     match &rule.target {
         Target::KnownLocation { entry, .. } => *entry,
-        Target::ProjectArtifact { .. } => EntryKind::Dir,
+        Target::ProjectArtifact { .. } => Entry::Dir,
     }
 }
 

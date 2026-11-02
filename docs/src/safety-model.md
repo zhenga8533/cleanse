@@ -54,7 +54,10 @@ blocks, including any new kind of concern until it's deliberately classified.
    than assumed empty.
 5. **Activity.** Recently modified items, and items whose owning app, agent, or browser is
    running, are blocked as in use. A rule names its owner's programs; if the running programs
-   can't be listed, its matches are blocked too.
+   can't be listed, its matches are blocked too. Where no app owns what a rule matches, as in
+   the temp folder, the rule can instead keep each match until nothing in it has changed for a
+   number of days and nothing since the computer last started, when every program that could
+   be relying on it was stopped. If the start time can't be read, those matches are blocked.
 6. **Cloud sync.** OneDrive, iCloud Drive, Dropbox, and Google Drive folders are protected by
    default because deletions sync to the cloud and other devices. Placeholder file contents are
    never read, since that would download them.

@@ -1,7 +1,8 @@
+use std::env;
 use std::fs::{self, Metadata};
 use std::io;
 use std::os::unix::fs::MetadataExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use cleanse_model::{EntryKind, FileIdentity};
 
@@ -23,6 +24,10 @@ pub(crate) fn inspect(path: &Path) -> io::Result<FileFacts> {
         cloud_synced: false,
         offline: is_dataless(&metadata),
     })
+}
+
+pub(crate) fn temp_dir() -> PathBuf {
+    env::temp_dir()
 }
 
 pub(crate) fn listed_facts(metadata: &Metadata) -> ListedFacts {

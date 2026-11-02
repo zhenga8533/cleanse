@@ -18,7 +18,7 @@ use serde::Deserialize;
 
 pub use matcher::{Detection, Matcher};
 pub(crate) use matcher::{base_folder, wildcard_match};
-pub use schema::{Base, Location, Os, Rule, RuleTest, Target};
+pub use schema::{Base, Entry, Location, Os, Rule, RuleTest, Target};
 
 /// The rule files that ship with Cleanse, embedded at build time. A test checks that this list
 /// matches the files in `rules/`.
@@ -48,6 +48,7 @@ const BUILTIN: &[(&str, &str)] = &[
     ),
     ("python.toml", include_str!("../rules/python.toml")),
     ("rust.toml", include_str!("../rules/rust.toml")),
+    ("temp.toml", include_str!("../rules/temp.toml")),
     (
         "tool-caches.toml",
         include_str!("../rules/tool-caches.toml"),

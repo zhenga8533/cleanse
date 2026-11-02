@@ -148,6 +148,15 @@ pub enum Concern {
     OwnerRunning { app: String },
     /// The running programs couldn't be listed, so the app that owns the item may be running.
     OwnerUnchecked { app: String },
+    /// Its rule keeps items until nothing in them has changed for `keep_days`, and something in
+    /// this one changed `days_ago`.
+    ChangedRecently { days_ago: u64, keep_days: u32 },
+    /// Something in the item changed since the computer last started, so a program running now
+    /// may still need it.
+    ChangedSinceStartup,
+    /// When the computer last started couldn't be read, so a program running now may still need
+    /// the item.
+    StartupUnchecked,
     /// The item is in a cloud-synced folder, so removing it would remove it on every device.
     CloudSynced { provider: String },
     /// The item belongs to another user.
@@ -197,6 +206,21 @@ impl fmt::Display for Concern {
             }
             Self::OwnerRunning { app } => write!(f, "{app} is running"),
             Self::OwnerUnchecked { app } => write!(f, "Couldn't check whether {app} is running"),
+            Self::ChangedRecently {
+                days_ago,
+                keep_days,
+            } => {
+                match days_ago {
+                    0 => f.write_str("Changed today")?,
+                    1 => f.write_str("Changed yesterday")?,
+                    _ => write!(f, "Changed {days_ago} days ago")?,
+                }
+                write!(f, ", and it's kept until unchanged for {keep_days} days")
+            }
+            Self::ChangedSinceStartup => f.write_str(
+                "Changed since the computer last started, so a running program may still need it",
+            ),
+            Self::StartupUnchecked => f.write_str("Couldn't check when the computer last started"),
             Self::CloudSynced { provider } => write!(
                 f,
                 "Synced by {provider}, so removing it would remove it on every device"
@@ -348,6 +372,12 @@ mod tests {
             },
             Concern::OwnedByAnotherUser,
             Concern::Unverifiable,
+            Concern::ChangedRecently {
+                days_ago: 2,
+                keep_days: 7,
+            },
+            Concern::ChangedSinceStartup,
+            Concern::StartupUnchecked,
         ];
 
         assert!(warnings.iter().all(|concern| !concern.blocks()));
@@ -370,6 +400,14 @@ mod tests {
         assert_eq!(
             Concern::RecentProjectActivity { days_ago: 12 }.to_string(),
             "The project was worked on 12 days ago"
+        );
+        assert_eq!(
+            Concern::ChangedRecently {
+                days_ago: 3,
+                keep_days: 7
+            }
+            .to_string(),
+            "Changed 3 days ago, and it's kept until unchanged for 7 days"
         );
     }
 
