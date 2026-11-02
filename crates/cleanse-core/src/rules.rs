@@ -36,6 +36,7 @@ const BUILTIN: &[(&str, &str)] = &[
     ),
     ("java.toml", include_str!("../rules/java.toml")),
     ("javascript.toml", include_str!("../rules/javascript.toml")),
+    ("logs.toml", include_str!("../rules/logs.toml")),
     ("native.toml", include_str!("../rules/native.toml")),
     (
         "other-languages.toml",

@@ -17,6 +17,10 @@ All notable changes to Cleanse are documented here. The format is based on
   `~/Library/Logs/DiagnosticReports`. They're Review items, never selected by default and
   quarantined rather than deleted, since only you know whether you still need one to debug or
   report a crash.
+- Rules for developer tools' logs: npm's debug logs, VS Code's session logs, JetBrains IDEs'
+  logs, and Gradle daemon logs. They're Safe, since each tool writes new ones as it runs. VS
+  Code's are kept while it's running, and any log modified in the last few minutes is kept as in
+  use.
 
 ## [0.2.0] - 2026-11-01
 
