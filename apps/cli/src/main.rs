@@ -16,8 +16,10 @@ use std::io::{self, IsTerminal};
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::Shell;
 use cleanse_engine::Engine;
+use serde::Serialize;
 
 type Result = std::result::Result<(), Box<dyn Error>>;
 
@@ -43,6 +45,13 @@ fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| since.as_secs())
+}
+
+/// Prints `value` as JSON on stdout, for `--json`.
+fn write_json<T: Serialize + ?Sized>(value: &T) -> Result {
+    serde_json::to_writer_pretty(io::stdout().lock(), value)?;
+    println!();
+    Ok(())
 }
 
 /// Find files you can safely remove, with an explanation for every item.
@@ -77,28 +86,26 @@ enum Command {
     /// List the cleanup rules, or show one in detail
     Rules(rules::Args),
     /// Show what Cleanse knows about this system
-    Doctor,
+    Doctor(doctor::Args),
+    /// Print completions for a shell, to load from its profile
+    Completions {
+        /// The shell to print completions for.
+        shell: Shell,
+    },
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let result = Engine::new()
-        .map_err(Into::into)
-        .and_then(|engine| match &cli.command {
-            Command::Scan(args) => scan::run(&engine, args).map(|()| ExitCode::SUCCESS),
-            Command::Analyze(args) => analyze::run(&engine, args).map(|()| ExitCode::SUCCESS),
-            Command::Clean(args) => clean::run(&engine, args),
-            Command::Apply(args) => apply::run(&engine, args),
-            Command::Quarantine(args) => quarantine::run(&engine, args),
-            Command::Restore(args) => quarantine::restore(&engine, args),
-            Command::History(args) => history::run(&engine, args),
-            Command::Explain(args) => explain::run(&engine, args).map(|()| ExitCode::SUCCESS),
-            Command::Rules(args) => rules::run(&engine, args).map(|()| ExitCode::SUCCESS),
-            Command::Doctor => {
-                doctor::run(&engine);
-                Ok(ExitCode::SUCCESS)
-            }
-        });
+    let result = match &cli.command {
+        // They only describe the command line, so a problem with the settings doesn't stop them.
+        Command::Completions { shell } => {
+            print_completions(*shell);
+            Ok(ExitCode::SUCCESS)
+        }
+        command => Engine::new()
+            .map_err(Into::into)
+            .and_then(|engine| run(&engine, command)),
+    };
     match result {
         Ok(code) => code,
         Err(error) => {
@@ -106,4 +113,27 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn run(engine: &Engine, command: &Command) -> std::result::Result<ExitCode, Box<dyn Error>> {
+    match command {
+        Command::Scan(args) => scan::run(engine, args).map(|()| ExitCode::SUCCESS),
+        Command::Analyze(args) => analyze::run(engine, args).map(|()| ExitCode::SUCCESS),
+        Command::Clean(args) => clean::run(engine, args),
+        Command::Apply(args) => apply::run(engine, args),
+        Command::Quarantine(args) => quarantine::run(engine, args),
+        Command::Restore(args) => quarantine::restore(engine, args),
+        Command::History(args) => history::run(engine, args),
+        Command::Explain(args) => explain::run(engine, args).map(|()| ExitCode::SUCCESS),
+        Command::Rules(args) => rules::run(engine, args).map(|()| ExitCode::SUCCESS),
+        Command::Doctor(args) => doctor::run(engine, args).map(|()| ExitCode::SUCCESS),
+        Command::Completions { shell } => {
+            print_completions(*shell);
+            Ok(ExitCode::SUCCESS)
+        }
+    }
+}
+
+fn print_completions(shell: Shell) {
+    clap_complete::generate(shell, &mut Cli::command(), "cleanse", &mut io::stdout());
 }

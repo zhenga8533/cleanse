@@ -1,12 +1,14 @@
 use std::error::Error;
+use std::path::Path;
 use std::process::ExitCode;
 
-use cleanse_engine::{Action, ApplyError, Engine, Probe, Run};
-use cleanse_model::{EntryOutcome, Outcome, Size};
+use cleanse_engine::{Action, ApplyError, Engine, History, Probe, Run};
+use cleanse_model::{EntryKind, EntryOutcome, Outcome, RuleId, Size};
+use serde::Serialize;
 
 use crate::exit::PARTIAL;
 use crate::scan::items;
-use crate::{SECONDS_PER_DAY, format, now};
+use crate::{SECONDS_PER_DAY, format, now, write_json};
 
 /// How many runs are listed without `--all`.
 const RECENT: usize = 20;
@@ -19,6 +21,9 @@ pub struct Args {
     /// Remove what's left of removals that didn't finish.
     #[arg(long)]
     finish: bool,
+    /// Print every run, and what's left of removals that didn't finish, as JSON.
+    #[arg(long, conflicts_with_all = ["all", "finish"])]
+    json: bool,
 }
 
 pub fn run(engine: &Engine, args: &Args) -> Result<ExitCode, Box<dyn Error>> {
@@ -26,6 +31,10 @@ pub fn run(engine: &Engine, args: &Args) -> Result<ExitCode, Box<dyn Error>> {
         return finish(engine);
     }
     let history = engine.history()?;
+    if args.json {
+        print_json(&history)?;
+        return Ok(ExitCode::SUCCESS);
+    }
     for journal in &history.unreadable {
         eprintln!("cleanse: couldn't read the journal {}", journal.display());
     }
@@ -116,6 +125,66 @@ fn finish(engine: &Engine) -> Result<ExitCode, Box<dyn Error>> {
         ExitCode::SUCCESS
     } else {
         ExitCode::from(PARTIAL)
+    })
+}
+
+fn print_json(history: &History) -> crate::Result {
+    #[derive(Serialize)]
+    struct Output<'a> {
+        /// Most recent first.
+        runs: Vec<JsonRun<'a>>,
+        leftovers: Vec<JsonLeftover<'a>>,
+        unreadable: Vec<String>,
+    }
+
+    #[derive(Serialize)]
+    struct JsonRun<'a> {
+        journal: String,
+        /// Seconds since the Unix epoch.
+        at: u64,
+        command: &'static str,
+        items: usize,
+        outcomes: &'a [Outcome],
+        entry_outcomes: &'a [EntryOutcome],
+        /// It was cut short, such as by a crash.
+        cut_short: bool,
+    }
+
+    #[derive(Serialize)]
+    struct JsonLeftover<'a> {
+        original: String,
+        tombstone: String,
+        kind: EntryKind,
+        rule: &'a RuleId,
+    }
+
+    let lossy = |path: &Path| path.to_string_lossy().into_owned();
+    write_json(&Output {
+        runs: history
+            .runs
+            .iter()
+            .rev()
+            .map(|run| JsonRun {
+                journal: lossy(&run.journal),
+                at: run.at,
+                command: command(run.action),
+                items: run.items,
+                outcomes: &run.outcomes,
+                entry_outcomes: &run.entry_outcomes,
+                cut_short: !run.finished,
+            })
+            .collect(),
+        leftovers: history
+            .leftovers
+            .iter()
+            .map(|leftover| JsonLeftover {
+                original: lossy(&leftover.original),
+                tombstone: lossy(&leftover.tombstone),
+                kind: leftover.kind,
+                rule: &leftover.rule,
+            })
+            .collect(),
+        unreadable: history.unreadable.iter().map(|path| lossy(path)).collect(),
     })
 }
 

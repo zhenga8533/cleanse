@@ -10,7 +10,8 @@ use serde::Serialize;
 
 use crate::format;
 use crate::scan::{
-    JsonAdvice, Reporter, advice, advised, items, json_advice, print_advice, print_scanned,
+    Categories, JsonAdvice, Reporter, advice, advised, items, json_advice, print_advice,
+    print_scanned,
 };
 
 #[derive(Debug, clap::Args)]
@@ -26,6 +27,16 @@ pub struct Args {
     /// Print the results as JSON.
     #[arg(long)]
     json: bool,
+    // Only what's counted as removable. Folder sizes still count everything.
+    #[command(flatten)]
+    categories: Categories,
+}
+
+/// An analysis, and the candidates it counts as removable: those in the chosen categories.
+/// Items in the tree are labeled from all of the scan's candidates.
+struct View<'a> {
+    analysis: &'a Analysis,
+    counted: Vec<Candidate>,
 }
 
 pub fn run(engine: &Engine, args: &Args) -> crate::Result {
@@ -42,10 +53,16 @@ pub fn run(engine: &Engine, args: &Args) -> crate::Result {
     );
     reporter.clear();
     let analysis = analysis?;
+    let mut counted = analysis.scan.candidates.clone();
+    args.categories.keep(&mut counted);
+    let view = View {
+        analysis: &analysis,
+        counted,
+    };
     if args.json {
-        print_json(engine, &analysis, args)
+        print_json(engine, &view, args)
     } else {
-        print_human(engine, &analysis, args);
+        print_human(engine, &view, args);
         Ok(())
     }
 }
@@ -140,20 +157,21 @@ impl Removable {
     }
 }
 
-fn print_human(engine: &Engine, analysis: &Analysis, args: &Args) {
+fn print_human(engine: &Engine, view: &View<'_>, args: &Args) {
+    let analysis = view.analysis;
     let tree = &analysis.tree;
     print_scanned(&analysis.scan);
 
     println!("\n{:>10}  {:>10}  Folder", "Size", "Removable");
     for &root in tree.roots() {
-        print_node(engine, analysis, root, 0, args);
+        print_node(engine, view, root, 0, args);
     }
     let incomplete = tree.roots().iter().any(|&root| tree.node(root).incomplete);
     if incomplete {
         println!("\n* Part of it couldn't be read or measured, so it takes more than shown.");
     }
 
-    let removable = Removable::of(&analysis.scan.candidates);
+    let removable = Removable::of(&view.counted);
     if removable.items == 0 {
         println!("\nNothing here can be removed.");
     } else {
@@ -176,10 +194,7 @@ fn print_human(engine: &Engine, analysis: &Analysis, args: &Args) {
             );
         }
     }
-    print_advice(&advised(
-        engine.rules(),
-        &largest_first(&analysis.scan.candidates),
-    ));
+    print_advice(&advised(engine.rules(), &largest_first(&view.counted)));
     if !analysis.scan.unreadable.is_empty() {
         println!(
             "\n{} couldn't be read, so what's inside isn't counted.",
@@ -192,7 +207,8 @@ fn print_human(engine: &Engine, analysis: &Analysis, args: &Args) {
     println!("\nNothing was removed. Run `cleanse clean` to choose what to remove.");
 }
 
-fn print_node(engine: &Engine, analysis: &Analysis, id: NodeId, depth: usize, args: &Args) {
+fn print_node(engine: &Engine, view: &View<'_>, id: NodeId, depth: usize, args: &Args) {
+    let analysis = view.analysis;
     let tree = &analysis.tree;
     let node = tree.node(id);
     let path = tree.path(id);
@@ -222,7 +238,7 @@ fn print_node(engine: &Engine, analysis: &Analysis, id: NodeId, depth: usize, ar
     }
     print_row(
         node.usage.on_disk,
-        removable(&analysis.scan.candidates, &path, false),
+        removable(&view.counted, &path, false),
         depth,
         &label,
     );
@@ -233,10 +249,10 @@ fn print_node(engine: &Engine, analysis: &Analysis, id: NodeId, depth: usize, ar
     let (entries, hidden, hidden_size) = largest(tree, id, args.top);
     for entry in entries {
         match entry {
-            Entry::Node(child) => print_node(engine, analysis, child, depth + 1, args),
+            Entry::Node(child) => print_node(engine, view, child, depth + 1, args),
             Entry::Files { count, on_disk } => print_row(
                 on_disk,
-                removable(&analysis.scan.candidates, &path, true),
+                removable(&view.counted, &path, true),
                 depth + 1,
                 &files(count),
             ),
@@ -314,7 +330,8 @@ struct JsonMore {
     on_disk: u64,
 }
 
-fn json_folder(analysis: &Analysis, id: NodeId, depth: usize, args: &Args) -> JsonFolder {
+fn json_folder(view: &View<'_>, id: NodeId, depth: usize, args: &Args) -> JsonFolder {
+    let analysis = view.analysis;
     let tree = &analysis.tree;
     let node = tree.node(id);
     let path = tree.path(id);
@@ -347,7 +364,7 @@ fn json_folder(analysis: &Analysis, id: NodeId, depth: usize, args: &Args) -> Js
             on_disk: node.usage.on_disk,
         },
         files: node.files,
-        removable: removable(&analysis.scan.candidates, &path, false),
+        removable: removable(&view.counted, &path, false),
         incomplete: node.incomplete,
         own: JsonUsage {
             logical: node.own_usage.logical,
@@ -356,13 +373,13 @@ fn json_folder(analysis: &Analysis, id: NodeId, depth: usize, args: &Args) -> Js
         own_files: node.own_files,
         children: children
             .into_iter()
-            .map(|child| json_folder(analysis, child, depth + 1, args))
+            .map(|child| json_folder(view, child, depth + 1, args))
             .collect(),
         more,
     }
 }
 
-fn print_json(engine: &Engine, analysis: &Analysis, args: &Args) -> crate::Result {
+fn print_json(engine: &Engine, view: &View<'_>, args: &Args) -> crate::Result {
     #[derive(Serialize)]
     struct Output<'a> {
         roots: Vec<String>,
@@ -376,6 +393,7 @@ fn print_json(engine: &Engine, analysis: &Analysis, args: &Args) -> crate::Resul
         advice: Vec<JsonAdvice<'a>>,
     }
 
+    let analysis = view.analysis;
     let scan = &analysis.scan;
     let lossy = |paths: &[PathBuf]| -> Vec<String> {
         paths
@@ -393,10 +411,10 @@ fn print_json(engine: &Engine, analysis: &Analysis, args: &Args) -> crate::Resul
             .tree
             .roots()
             .iter()
-            .map(|&root| json_folder(analysis, root, 0, args))
+            .map(|&root| json_folder(view, root, 0, args))
             .collect(),
-        removable: Removable::of(&scan.candidates),
-        advice: json_advice(&advised(engine.rules(), &largest_first(&scan.candidates))),
+        removable: Removable::of(&view.counted),
+        advice: json_advice(&advised(engine.rules(), &largest_first(&view.counted))),
     };
     serde_json::to_writer_pretty(io::stdout().lock(), &output)?;
     println!();

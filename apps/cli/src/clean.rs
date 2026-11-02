@@ -8,10 +8,11 @@ use std::sync::atomic::AtomicBool;
 use cleanse_engine::{Applied, ApplyError, Engine, Probe, Scan};
 use cleanse_model::{Candidate, Disposal, Outcome, Plan, PlanItem, Risk, Size};
 use inquire::{Confirm, InquireError, MultiSelect};
+use serde::Serialize;
 
 use crate::exit::{ABORTED, PARTIAL, USAGE};
 use crate::scan::{self, Reporter, items};
-use crate::{can_ask, format, now};
+use crate::{can_ask, format, now, write_json};
 
 /// How many items the selection list shows at once.
 const PAGE_SIZE: usize = 15;
@@ -30,6 +31,11 @@ pub struct Args {
     /// List what --yes would delete, and delete nothing.
     #[arg(long, conflicts_with = "yes")]
     dry_run: bool,
+    /// Print what --dry-run lists as JSON.
+    #[arg(long, requires = "dry_run")]
+    json: bool,
+    #[command(flatten)]
+    categories: scan::Categories,
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -61,7 +67,12 @@ pub fn run(engine: &Engine, args: &Args) -> Result<ExitCode, Box<dyn Error>> {
         return Err(ApplyError::Elevated.into());
     }
 
-    let scan = scan::scan(engine, &args.paths)?;
+    let scan = scan::scan(engine, &args.paths, &args.categories)?;
+    if args.json {
+        let max = args.max_risk.map_or(Risk::Regenerable, Risk::from);
+        print_dry_run(&scan, &preselected(&removable(&scan), max))?;
+        return Ok(ExitCode::SUCCESS);
+    }
     scan::print_scanned(&scan);
     let removable = removable(&scan);
     if removable.is_empty() {
@@ -231,6 +242,30 @@ pub(crate) fn confirm(selected: &[PlanItem]) -> Result<bool, InquireError> {
 pub(crate) fn aborted() -> ExitCode {
     println!("Nothing was removed.");
     ExitCode::from(ABORTED)
+}
+
+/// What `--yes` would delete, largest first, as JSON.
+fn print_dry_run(scan: &Scan, selected: &[&Candidate]) -> crate::Result {
+    #[derive(Serialize)]
+    struct Output<'a> {
+        roots: Vec<String>,
+        /// The scan was cancelled, so the results are partial.
+        cancelled: bool,
+        /// What `--yes` would delete.
+        items: &'a [&'a Candidate],
+        size: Size,
+    }
+
+    write_json(&Output {
+        roots: scan
+            .roots
+            .iter()
+            .map(|root| root.to_string_lossy().into_owned())
+            .collect(),
+        cancelled: scan.cancelled,
+        items: selected,
+        size: format::total(selected),
+    })
 }
 
 fn list(candidates: &[&Candidate]) {

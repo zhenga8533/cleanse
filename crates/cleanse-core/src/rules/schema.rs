@@ -2,10 +2,10 @@ use std::collections::BTreeMap;
 
 use cleanse_model::{Category, EntryKind, Risk, RuleId};
 use cleanse_platform::process_name;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// One cleanup rule, as written in a rule file.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Rule {
     pub id: RuleId,
@@ -33,13 +33,14 @@ pub struct Rule {
     /// Cleanse never removes their matches itself.
     #[serde(default)]
     pub advise: Option<String>,
-    /// Small directory trees, and exactly what this rule must match in each.
-    #[serde(default, rename = "test")]
+    /// Small directory trees, and exactly what this rule must match in each. They're for
+    /// checking the rule, so they're left out of it as data.
+    #[serde(default, rename = "test", skip_serializing)]
     pub tests: Vec<RuleTest>,
 }
 
 /// An app, and how to tell that it's running.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Owner {
     /// Its name, like "Claude Code".
@@ -48,7 +49,7 @@ pub struct Owner {
     pub processes: Vec<String>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Target {
     /// A directory inside a project, recognized by its name plus evidence about the project.
@@ -81,7 +82,7 @@ pub enum Target {
 }
 
 /// What a known location names.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Entry {
     #[default]
@@ -102,7 +103,7 @@ impl Entry {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Location {
     pub os: Os,
@@ -115,7 +116,7 @@ pub struct Location {
 
 /// The standard folder a [`Location`] is relative to. See
 /// [`cleanse_platform::KnownFolders`] for what each one is on each OS.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Base {
     Home,
@@ -134,7 +135,7 @@ impl Base {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Os {
     Windows,

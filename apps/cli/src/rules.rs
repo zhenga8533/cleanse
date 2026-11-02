@@ -1,11 +1,14 @@
 use cleanse_engine::{Engine, Entry, Os, Rule, Target};
 
-use crate::format;
+use crate::{format, write_json};
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
     #[command(subcommand)]
     command: Option<RulesCommand>,
+    /// Print the rules as JSON, as rule files write them.
+    #[arg(long, global = true)]
+    json: bool,
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -21,6 +24,7 @@ enum RulesCommand {
 
 pub fn run(engine: &Engine, args: &Args) -> crate::Result {
     match &args.command {
+        None | Some(RulesCommand::List) if args.json => write_json(engine.rules().rules()),
         None | Some(RulesCommand::List) => {
             list(engine.rules().rules());
             Ok(())
@@ -32,6 +36,9 @@ pub fn run(engine: &Engine, args: &Args) -> crate::Result {
                 .iter()
                 .find(|rule| rule.id.0 == *id)
                 .ok_or_else(|| format!("there's no rule `{id}`; `cleanse rules` lists them"))?;
+            if args.json {
+                return write_json(rule);
+            }
             show(rule, engine.config().large_file_size);
             Ok(())
         }

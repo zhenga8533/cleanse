@@ -51,6 +51,13 @@ All notable changes to Cleanse are documented here. The format is based on
   `--json` has them as `advice`. Rules name such a command with `advise`, which Cleanse only
   shows and never runs. A store or cache moved with `PNPM_HOME`, `GOPATH`, or `GOMODCACHE` isn't
   found yet.
+- `--json` on `history`, `rules` (and `rules show`), `doctor`, and `clean --dry-run`, so every
+  command that reports something can give it as data. Rules come out with the same fields their
+  files have, without their tests.
+- `--category` on `scan`, `clean`, and `analyze` keeps only items in the categories given, like
+  `--category temp,logs`. In `analyze`, folder sizes still count everything, and only what can be
+  removed is limited.
+- `cleanse completions <shell>` prints completions for Bash, Zsh, Fish, PowerShell, or Elvish.
 
 ### Fixed
 

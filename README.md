@@ -28,9 +28,18 @@ cleanse restore ID                # put a quarantined item back
 cleanse history                   # what Cleanse has removed, restored, and purged
 cleanse rules                     # every rule; `cleanse rules show <id>` for one
 cleanse doctor                    # folders, rules, and capabilities on this system
+cleanse scan --category temp,logs # only some categories; also for `clean` and `analyze`
 ```
 
-Add `--json` to `scan` or `explain` for machine-readable output.
+Add `--json` for machine-readable output to `scan`, `analyze`, `explain`, `clean --dry-run`,
+`quarantine`, `history`, `rules`, and `doctor`.
+
+`cleanse completions <shell>` prints completions for Bash, Zsh, Fish, PowerShell, or Elvish. For
+example, add this to your PowerShell profile:
+
+```powershell
+cleanse completions powershell | Out-String | Invoke-Expression
+```
 
 ### Settings
 
