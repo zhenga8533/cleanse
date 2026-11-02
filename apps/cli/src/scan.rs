@@ -6,8 +6,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use cleanse_engine::{Engine, Progress, Scan, save_plan};
-use cleanse_model::{Candidate, PlanItem, Risk, RuleId, SavedPlan};
+use cleanse_engine::{Engine, Progress, RuleSet, Scan, save_plan};
+use cleanse_model::{Candidate, Concern, PlanItem, Risk, RuleId, SavedPlan, Size};
 use serde::Serialize;
 
 use crate::{format, now};
@@ -36,7 +36,7 @@ const LARGEST: usize = 10;
 pub fn run(engine: &Engine, args: &Args) -> crate::Result {
     let scan = scan(engine, &args.paths)?;
     if args.json {
-        print_json(&scan)?;
+        print_json(engine, &scan)?;
     } else {
         print_human(engine, &scan, args);
     }
@@ -183,11 +183,14 @@ fn print_human(engine: &Engine, scan: &Scan, args: &Args) {
     };
     let removable = tier(&[Risk::Safe, Risk::Regenerable]);
     let review = tier(&[Risk::Review]);
-    let kept = tier(&[Risk::Protected]);
+    let mut kept = tier(&[Risk::Protected]);
+    let advised = advised(engine.rules(), &by_size);
+    kept.retain(|candidate| advice(engine.rules(), candidate).is_none());
 
     let limit = if args.all { usize::MAX } else { LARGEST };
     print_section(engine, "Can be removed", &removable, limit);
     print_review(engine, &review, limit, now());
+    print_advice(&advised);
     if args.show_protected {
         print_section(engine, "Kept", &kept, usize::MAX);
     } else if !kept.is_empty() {
@@ -313,6 +316,72 @@ fn by_rule<'c>(engine: &Engine, candidates: &[&'c Candidate]) -> Vec<(String, Ve
     rules
 }
 
+/// The command that cleans `candidate` better than removing it would, from its rule. An item a
+/// safety check keeps for another reason, such as a folder excluded in the settings, has none,
+/// and is listed as kept with that reason instead.
+pub(crate) fn advice<'r>(rules: &'r RuleSet, candidate: &Candidate) -> Option<&'r str> {
+    if candidate.concerns().iter().any(Concern::blocks) {
+        return None;
+    }
+    rules.get(&candidate.found.rule)?.advise.as_deref()
+}
+
+/// The candidates with [`advice`], in the order given, each with its command.
+pub(crate) fn advised<'c, 'r>(
+    rules: &'r RuleSet,
+    candidates: &[&'c Candidate],
+) -> Vec<(&'c Candidate, &'r str)> {
+    candidates
+        .iter()
+        .filter_map(|&candidate| Some((candidate, advice(rules, candidate)?)))
+        .collect()
+}
+
+/// Prints what Cleanse leaves to other tools, and the command for each.
+pub(crate) fn print_advice(advised: &[(&Candidate, &str)]) {
+    if advised.is_empty() {
+        return;
+    }
+    let total: u64 = advised
+        .iter()
+        .map(|(candidate, _)| candidate.found.size.on_disk)
+        .sum();
+    println!(
+        "\nBest cleaned by their own tools: {}, {}",
+        items(advised.len()),
+        format::bytes(total)
+    );
+    for (candidate, command) in advised {
+        println!(
+            "  {:>10}  {}",
+            format::bytes(candidate.found.size.on_disk),
+            candidate.found.path.display()
+        );
+        println!("{:14}Run `{command}`", "");
+    }
+}
+
+/// [`advised`] items, as `--json` gives them.
+#[derive(Serialize)]
+pub(crate) struct JsonAdvice<'a> {
+    path: String,
+    rule: &'a RuleId,
+    size: Size,
+    command: &'a str,
+}
+
+pub(crate) fn json_advice<'a>(advised: &[(&'a Candidate, &'a str)]) -> Vec<JsonAdvice<'a>> {
+    advised
+        .iter()
+        .map(|&(candidate, command)| JsonAdvice {
+            path: candidate.found.path.to_string_lossy().into_owned(),
+            rule: &candidate.found.rule,
+            size: candidate.found.size,
+            command,
+        })
+        .collect()
+}
+
 fn print_hidden(indent: &str, hidden: usize) {
     if hidden > 0 {
         let noun = if hidden == 1 { "item" } else { "items" };
@@ -330,7 +399,7 @@ pub(crate) fn items(count: usize) -> String {
     }
 }
 
-fn print_json(scan: &Scan) -> crate::Result {
+fn print_json(engine: &Engine, scan: &Scan) -> crate::Result {
     #[derive(Serialize)]
     struct Output<'a> {
         roots: Vec<String>,
@@ -339,6 +408,8 @@ fn print_json(scan: &Scan) -> crate::Result {
         cancelled: bool,
         unreadable: Vec<String>,
         candidates: &'a [Candidate],
+        /// The candidates their own tools clean better, with the command for each.
+        advice: Vec<JsonAdvice<'a>>,
     }
 
     let lossy = |paths: &[PathBuf]| -> Vec<String> {
@@ -354,9 +425,66 @@ fn print_json(scan: &Scan) -> crate::Result {
         cancelled: scan.cancelled,
         unreadable: lossy(&scan.unreadable),
         candidates: &scan.candidates,
+        advice: json_advice(&advised(
+            engine.rules(),
+            &scan.candidates.iter().collect::<Vec<_>>(),
+        )),
     };
     let stdout = io::stdout().lock();
     serde_json::to_writer_pretty(stdout, &output)?;
     println!();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use cleanse_engine::RuleSet;
+    use cleanse_model::{
+        Candidate, CandidateId, Category, Concern, EntryKind, FileIdentity, Match, Risk, RuleId,
+        Size,
+    };
+
+    use super::advised;
+
+    fn candidate(rule: &str, risk: Risk, concerns: Vec<Concern>) -> Candidate {
+        let found = Match {
+            path: PathBuf::from(rule),
+            kind: EntryKind::Dir,
+            rule: RuleId(rule.into()),
+            category: Category::PackageCaches,
+            declared_risk: risk,
+            size: Size::default(),
+            files: 0,
+            modified: None,
+            evidence: Vec::new(),
+        };
+        let identity = FileIdentity { volume: 1, file: 1 };
+        Candidate::assess(CandidateId(0), found, Some(identity), concerns)
+    }
+
+    #[test]
+    fn advises_only_what_nothing_else_keeps() {
+        let rules = RuleSet::builtin().unwrap();
+        let store = candidate("pnpm.store", Risk::Protected, vec![]);
+        let shared = candidate(
+            "go.module_cache",
+            Risk::Protected,
+            vec![Concern::SharedData],
+        );
+        let excluded = candidate(
+            "go.module_cache",
+            Risk::Protected,
+            vec![Concern::ProtectedLocation {
+                what: "a folder excluded in your settings".into(),
+            }],
+        );
+        let removable = candidate("javascript.node_modules", Risk::Regenerable, vec![]);
+
+        let advised = advised(&rules, &[&store, &shared, &excluded, &removable]);
+
+        let commands: Vec<&str> = advised.iter().map(|(_, command)| *command).collect();
+        assert_eq!(commands, ["pnpm store prune", "go clean -modcache"]);
+    }
 }

@@ -1,8 +1,7 @@
 # Rules
 
-> Status: project artifacts, known locations, large files, and Git checks are implemented,
-> including rules for AI agents' and browsers' folders. Advice for tools with their own cleanup
-> commands comes next in M3.
+> Status: project artifacts, known locations, large files, advice, and Git checks are
+> implemented, including rules for AI agents' and browsers' folders.
 
 Rules describe what Cleanse can recognize. They're TOML files in
 [`crates/cleanse-core/rules/`](https://github.com/zhenga8533/cleanse/tree/main/crates/cleanse-core/rules),
@@ -125,6 +124,25 @@ every other rule, so a file another rule recognizes stays under that rule. There
 in, and it must be `review`, since nothing about a large file says whether it's still needed. See
 the [safety model](safety-model.md#review-items) for where it doesn't look.
 
+## Advice
+
+Some tools have their own command for cleaning what they keep, and it does better than deleting
+would. pnpm's store is hard-linked into projects, so deleting it frees little, but
+`pnpm store prune` removes just the packages no project uses. Go makes its module cache
+read-only, so `go clean -modcache` is the way to remove it. A rule for one of these is
+`protected`, so Cleanse never removes its matches, and names the command:
+
+```toml
+risk = "protected"
+advise = "pnpm store prune"
+```
+
+`scan` and `analyze` list these items with the command, and `--json` has them as `advice`.
+Cleanse only shows the command and never runs it ([ADR 0003](adr/0003-declarative-rules.md)).
+Only `protected` rules can have `advise`, and it must be one line. An item a safety check keeps
+for another reason, such as a folder excluded in the settings, is listed as kept with that
+reason instead.
+
 ## An owner
 
 ```toml
@@ -165,6 +183,7 @@ the computer started can't be read, the matches are kept.
 | `regenerate` | Optional: how to get it back, when that takes a deliberate step |
 | `owner` | Optional: the app that writes what the rule matches; see [an owner](#an-owner) |
 | `idle_days` | Optional: how many days a match must go unchanged; see [waiting until a match is idle](#waiting-until-a-match-is-idle) |
+| `advise` | Optional, `protected` rules only: the command that cleans the match instead; see [advice](#advice) |
 
 Paths in rules are `/`-separated and relative. Cleanse rejects a rule file with `.` or `..`
 segments, absolute paths, backslashes, colons (drive letters and NTFS alternate data streams),

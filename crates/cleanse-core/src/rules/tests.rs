@@ -611,6 +611,32 @@ fn large_files_are_measured_on_disk() {
 }
 
 #[test]
+fn only_protected_rules_advise_a_command_on_one_line() {
+    let rule = |risk: &str, advise: &str| {
+        VALID
+            .replace(r#"risk = "safe""#, &format!("risk = \"{risk}\""))
+            .replace(
+                "[rule.match]",
+                &format!("advise = {advise:?}\n\n[rule.match]"),
+            )
+    };
+
+    assert!(load(&rule("protected", "tool clean")).is_ok());
+    let removable = load(&rule("regenerable", "tool clean")).unwrap_err();
+    assert!(
+        removable.contains("only for `protected` rules"),
+        "{removable}"
+    );
+    for wrong in [" ", "tool clean\nrm -rf ~"] {
+        let error = load(&rule("protected", wrong)).unwrap_err();
+        assert!(
+            error.contains("a command on one line"),
+            "{wrong:?}: {error}"
+        );
+    }
+}
+
+#[test]
 fn a_large_file_rule_is_review_and_there_is_only_one() {
     let rule = |id: &str, extra: &str| {
         format!(

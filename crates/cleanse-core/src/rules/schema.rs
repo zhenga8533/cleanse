@@ -28,6 +28,11 @@ pub struct Rule {
     /// the temp folder.
     #[serde(default)]
     pub idle_days: Option<u32>,
+    /// The command that cleans what this rule matches the way its own tool intends, for the
+    /// person to run. Cleanse only shows it (ADR 0003). Only `protected` rules have one, so
+    /// Cleanse never removes their matches itself.
+    #[serde(default)]
+    pub advise: Option<String>,
     /// Small directory trees, and exactly what this rule must match in each.
     #[serde(default, rename = "test")]
     pub tests: Vec<RuleTest>,
@@ -237,6 +242,9 @@ impl Rule {
         if self.idle_days == Some(0) {
             return Err("`idle_days` must be at least 1".into());
         }
+        if let Some(command) = &self.advise {
+            validate_advise(self.risk, command)?;
+        }
         if let Some(owner) = &self.owner {
             if owner.app.trim().is_empty() {
                 return Err("`owner.app` is empty".into());
@@ -270,6 +278,20 @@ impl Rule {
         }
         Ok(())
     }
+}
+
+/// A command to show for a rule whose matches Cleanse never removes itself.
+fn validate_advise(risk: Risk, command: &str) -> Result<(), String> {
+    if risk != Risk::Protected {
+        return Err(
+            "`advise` is only for `protected` rules, whose matches the command cleans instead"
+                .into(),
+        );
+    }
+    if command.trim().is_empty() || command.contains(['\n', '\r']) {
+        return Err("`advise` must be a command on one line".into());
+    }
+    Ok(())
 }
 
 /// Lowercase letters, digits, `_`, and `-`, in at least two `.`-separated parts, like

@@ -45,6 +45,12 @@ All notable changes to Cleanse are documented here. The format is based on
   of each unless `--all` is given. Items in `--json` have a `modified` time, in seconds since the
   Unix epoch.
 - Windows' paging, hibernation, and swap files are protected.
+- Advice for what a tool cleans better itself. pnpm's store and Go's module cache are kept, and
+  `scan` and `analyze` list them with the command to run: `pnpm store prune`, which removes only
+  the packages no project uses, and `go clean -modcache`, since Go makes its cache read-only.
+  `--json` has them as `advice`. Rules name such a command with `advise`, which Cleanse only
+  shows and never runs. A store or cache moved with `PNPM_HOME`, `GOPATH`, or `GOMODCACHE` isn't
+  found yet.
 
 ### Fixed
 

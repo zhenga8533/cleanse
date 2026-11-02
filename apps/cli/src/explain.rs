@@ -64,6 +64,9 @@ pub fn run(engine: &Engine, args: &Args) -> crate::Result {
             if let Some(regenerate) = &rule.regenerate {
                 println!("  Comes back:  {regenerate}");
             }
+            if let Some(command) = &rule.advise {
+                println!("  Clean with:  {command}");
+            }
             println!(
                 "  Size:        {} in {} files",
                 format::size(&found.size),
