@@ -21,6 +21,12 @@ roots ─▶ Scan ─▶ Detect ─▶ Evaluate ─▶ Plan ─▶ [user approva
 5. **Execute** re-checks every item against the live filesystem and the current rules
    immediately before acting, then deletes, quarantines, or trashes it and records the outcome.
 
+`cleanse analyze` runs the same scan and also builds a tree of folder sizes. The walk adds up
+the files directly in each folder it reads, without a lock or lookup per file. The items rules
+match aren't walked, so their measured sizes become leaves. Totals are summed from the deepest
+folders up. How much can be removed under a folder comes from the candidates, which are sorted by
+path, so it isn't stored in the tree. A plain `scan` doesn't build the tree.
+
 ## Crates
 
 | Crate | Responsibility | May change the filesystem? |

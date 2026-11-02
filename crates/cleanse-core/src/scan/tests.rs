@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime};
 
 use cleanse_model::EntryKind;
 
-use super::{Descend, WalkReport, measure, walk};
+use super::{Descend, DirFiles, WalkReport, distinct_roots, measure, walk, walk_with};
 
 /// Walks `root`, returning every entry relative to it, sorted. Directory sizes are zeroed
 /// because they differ between filesystems.
@@ -335,4 +335,100 @@ fn reports_unreadable_directories_by_path_and_keeps_going() {
     assert!(!seen.iter().any(|(path, ..)| path.ends_with("hidden.txt")));
     assert_eq!(report.errors.len(), 1, "{:?}", report.errors);
     assert_eq!(report.errors[0].path, locked);
+}
+
+/// Walks `root` and returns each folder it listed with its files' totals, relative to `root`.
+fn listed(root: &Path) -> Vec<(PathBuf, DirFiles)> {
+    let listed = Mutex::new(Vec::new());
+    walk_with(
+        root,
+        |_| Descend::Yes,
+        |dir, files| {
+            let relative = dir.strip_prefix(root).unwrap().to_path_buf();
+            listed.lock().unwrap().push((relative, files));
+        },
+    )
+    .unwrap();
+    let mut listed = listed.into_inner().unwrap();
+    listed.sort_by(|a, b| a.0.cmp(&b.0));
+    listed
+}
+
+#[test]
+fn adds_up_the_files_directly_in_each_folder() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(root.path().join("a.txt"), "ab").unwrap();
+    fs::create_dir_all(root.path().join("sub/deeper")).unwrap();
+    fs::write(root.path().join("sub/b.txt"), "cde").unwrap();
+    fs::write(root.path().join("sub/c.txt"), "f").unwrap();
+
+    let listed = listed(root.path());
+
+    let totals: Vec<(PathBuf, u64, u64)> = listed
+        .iter()
+        .map(|(dir, files)| (dir.clone(), files.files, files.logical))
+        .collect();
+    assert_eq!(
+        totals,
+        [
+            (PathBuf::new(), 1, 2),
+            (PathBuf::from("sub"), 2, 4),
+            (PathBuf::from_iter(["sub", "deeper"]), 0, 0),
+        ]
+    );
+    assert!(listed.iter().all(|(_, files)| !files.incomplete));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_folder_that_cant_be_listed_has_no_totals() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = tempfile::tempdir().unwrap();
+    let locked = root.path().join("locked");
+    fs::create_dir(&locked).unwrap();
+    fs::write(locked.join("hidden.txt"), "x").unwrap();
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+    // Root can read anything, so there's nothing to test when running as root.
+    let running_as_root = fs::read_dir(&locked).is_ok();
+
+    let listed = listed(root.path());
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+    if running_as_root {
+        return;
+    }
+
+    let dirs: Vec<&PathBuf> = listed.iter().map(|(dir, _)| dir).collect();
+    assert_eq!(dirs, [&PathBuf::new()]);
+}
+
+#[test]
+fn roots_inside_others_or_repeated_are_walked_once() {
+    let root = tempfile::tempdir().unwrap();
+    let outer = std::path::absolute(root.path()).unwrap();
+    let inner = outer.join("inner");
+    let other = tempfile::tempdir().unwrap();
+    let other = std::path::absolute(other.path()).unwrap();
+    let mut trailing = other.clone().into_os_string();
+    trailing.push(std::path::MAIN_SEPARATOR_STR);
+
+    let roots = distinct_roots(&[
+        inner.clone(),
+        outer.clone(),
+        PathBuf::from(trailing),
+        other.clone(),
+    ])
+    .unwrap();
+
+    assert_eq!(roots, [outer, other]);
+}
+
+#[cfg(any(windows, target_os = "macos"))]
+#[test]
+fn roots_differing_only_in_case_are_the_same_folder() {
+    let root = tempfile::tempdir().unwrap();
+    let root = std::path::absolute(root.path()).unwrap();
+    let shouted = PathBuf::from(root.to_string_lossy().to_uppercase());
+
+    assert_eq!(distinct_roots(&[root.clone(), shouted]).unwrap(), [root]);
 }

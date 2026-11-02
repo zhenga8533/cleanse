@@ -10,7 +10,10 @@ use cleanse_model::{Outcome, Plan, PlanItem, Risk};
 
 use cleanse_model::{Concern, RuleId};
 
-use super::{Config, Engine, Explanation, KnownFolders, Probe, Progress, RuleSet, System};
+use super::{
+    Config, Engine, Explanation, KnownFolders, NodeKind, Probe, Progress, RuleSet, System,
+    removable_under,
+};
 
 /// Writes a file dated a day ago, so it doesn't count as recent activity.
 fn write_old(path: &Path, contents: &str) {
@@ -109,6 +112,61 @@ fn a_missing_root_is_an_error_naming_it() {
         .unwrap_err();
 
     assert!(error.to_string().contains("missing"), "{error}");
+}
+
+#[test]
+fn analyzes_where_space_goes_under_the_roots() {
+    let root = tempfile::tempdir().unwrap();
+    project(root.path());
+    let engine = Engine::new().unwrap();
+
+    let analysis = engine
+        .analyze(
+            &[root.path().to_path_buf()],
+            &|_| {},
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+
+    let tree = &analysis.tree;
+    let [top] = tree.roots() else {
+        panic!("{:?}", tree.roots())
+    };
+    assert_eq!(tree.path(*top), std::path::absolute(root.path()).unwrap());
+    let web = tree.children(*top)[0];
+    // package.json, then node_modules measured as a whole, then src.
+    assert_eq!(tree.node(web).usage.logical, 2 + 4 + 1);
+    assert_eq!(tree.node(web).files, 3);
+    let largest = tree.node(tree.children(web)[0]);
+    assert_eq!(largest.name.to_string_lossy(), "node_modules");
+    assert_eq!(largest.kind, NodeKind::Item);
+    let removable: Vec<_> = removable_under(&analysis.scan.candidates, &tree.path(web)).collect();
+    assert_eq!(removable.len(), 1);
+    assert!(!tree.partial && !tree.node(*top).incomplete);
+}
+
+#[test]
+fn a_folder_given_twice_or_inside_another_is_scanned_once() {
+    let root = tempfile::tempdir().unwrap();
+    project(root.path());
+    let engine = Engine::new().unwrap();
+    let mut trailing = root.path().as_os_str().to_owned();
+    trailing.push(std::path::MAIN_SEPARATOR_STR);
+
+    let scan = engine
+        .scan(
+            &[
+                root.path().join("web"),
+                root.path().to_path_buf(),
+                trailing.into(),
+            ],
+            &|_| {},
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+
+    assert_eq!(scan.roots, [std::path::absolute(root.path()).unwrap()]);
+    assert_eq!(scan.candidates.len(), 1, "{:#?}", scan.candidates);
 }
 
 #[test]

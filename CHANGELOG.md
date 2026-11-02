@@ -26,11 +26,16 @@ All notable changes to Cleanse are documented here. The format is based on
   started, when every program that could still need it was stopped. Rules can wait for a match
   to go idle like this with `idle_days`, name files and folders alike with `entry = "any"`, and
   match everything directly in the temp folder with `path = "*"`.
+- `cleanse analyze [PATHS]` shows where space goes: each folder's size, largest first, down to
+  `--depth` levels and `--top` entries per folder, with how much under each can be removed. It
+  then breaks down what can be removed by tier and category. `--json` gives the same as data.
 
 ### Fixed
 
 - On Windows, the temp folder is now found by its long names, even when `%TEMP%` uses 8.3 short
   names such as `C:\Users\RUNNER~1`, so locations under it match.
+- Scanning a folder twice, such as `C:\Users\me` and `c:\users\me`, or a folder and one inside
+  it, no longer lists items twice.
 
 ## [0.2.0] - 2026-11-01
 

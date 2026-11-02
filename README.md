@@ -17,6 +17,7 @@ removes anything you haven't approved.
 ```sh
 cleanse scan ~/code               # what could be removed, grouped by rule, largest first
 cleanse scan --show-protected     # also what's kept and why (defaults to your home folder)
+cleanse analyze ~/code            # where space goes, and how much under each folder can be removed
 cleanse explain ~/code/app/node_modules
 cleanse clean ~/code              # choose what to delete, then confirm; each item is re-checked first
 cleanse clean --dry-run ~/code    # what `clean --yes --max-risk regenerable` would delete

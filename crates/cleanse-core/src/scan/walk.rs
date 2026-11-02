@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use cleanse_model::EntryKind;
+use cleanse_platform::listed_facts;
 
 /// One filesystem entry found below a walk's root.
 #[derive(Debug)]
@@ -33,6 +34,16 @@ pub struct WalkReport {
     pub other_filesystems: Vec<PathBuf>,
 }
 
+/// The files directly in one directory a walk read, added up.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DirFiles {
+    pub files: u64,
+    pub logical: u64,
+    pub on_disk: u64,
+    /// Some of its entries couldn't be read.
+    pub incomplete: bool,
+}
+
 #[derive(Debug)]
 pub struct WalkError {
     /// The entry or directory that couldn't be read.
@@ -51,8 +62,19 @@ pub fn walk<F>(root: &Path, visit: F) -> io::Result<WalkReport>
 where
     F: Fn(&Entry<'_>) -> Descend + Sync,
 {
+    walk_with(root, visit, |_, _| {})
+}
+
+/// Like [`walk`], and also calls `listed` once for each directory it read, with the files
+/// directly in it added up. A directory that couldn't be read at all is only in the report.
+pub fn walk_with<F, L>(root: &Path, visit: F, listed: L) -> io::Result<WalkReport>
+where
+    F: Fn(&Entry<'_>) -> Descend + Sync,
+    L: Fn(PathBuf, DirFiles) + Sync,
+{
     let state = State {
         visit,
+        listed,
         filesystem: Filesystem::of(&root_metadata(root)?),
         report: Mutex::default(),
     };
@@ -80,13 +102,14 @@ fn root_metadata(root: &Path) -> io::Result<Metadata> {
     }
 }
 
-struct State<F> {
+struct State<F, L> {
     visit: F,
+    listed: L,
     filesystem: Filesystem,
     report: Mutex<WalkReport>,
 }
 
-impl<F> State<F> {
+impl<F, L> State<F, L> {
     fn report(&self) -> MutexGuard<'_, WalkReport> {
         self.report.lock().unwrap_or_else(PoisonError::into_inner)
     }
@@ -117,18 +140,21 @@ impl Filesystem {
     }
 }
 
-fn read_dir<'scope, F>(scope: &rayon::Scope<'scope>, dir: PathBuf, state: &'scope State<F>)
+fn read_dir<'scope, F, L>(scope: &rayon::Scope<'scope>, dir: PathBuf, state: &'scope State<F, L>)
 where
     F: Fn(&Entry<'_>) -> Descend + Sync,
+    L: Fn(PathBuf, DirFiles) + Sync,
 {
     let entries = match fs::read_dir(&dir) {
         Ok(entries) => entries,
         Err(error) => return state.error(dir, error),
     };
+    let mut files = DirFiles::default();
     for entry in entries {
         let entry = match entry {
             Ok(entry) => entry,
             Err(error) => {
+                files.incomplete = true;
                 state.error(dir.clone(), error);
                 continue;
             }
@@ -139,11 +165,17 @@ where
         let metadata = match entry.metadata() {
             Ok(metadata) => metadata,
             Err(error) => {
+                files.incomplete = true;
                 state.error(path, error);
                 continue;
             }
         };
         let kind = EntryKind::from(metadata.file_type());
+        if kind == EntryKind::File {
+            files.files += 1;
+            files.logical += metadata.len();
+            files.on_disk += listed_facts(&metadata).on_disk;
+        }
         let descend = (state.visit)(&Entry {
             path: &path,
             kind,
@@ -158,4 +190,5 @@ where
             }
         }
     }
+    (state.listed)(dir, files);
 }

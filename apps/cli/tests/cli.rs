@@ -121,6 +121,44 @@ fn scan_json_has_the_candidates_and_their_risk() {
 }
 
 #[test]
+fn analyze_shows_where_space_goes_and_what_can_be_removed() {
+    let root = fixture();
+
+    let report = stdout(&cleanse(&["analyze", arg(root.path())]));
+
+    assert!(report.contains("Removable  Folder"), "{report}");
+    assert!(
+        report.contains("node_modules (Node.js dependencies, Regenerable)"),
+        "{report}"
+    );
+    assert!(report.contains("Can be removed: 1 item"), "{report}");
+    assert!(report.contains("Nothing was removed"), "{report}");
+}
+
+#[test]
+fn analyze_json_has_the_folder_tree() {
+    let root = fixture();
+
+    let output = stdout(&cleanse(&["analyze", "--json", arg(root.path())]));
+    let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+
+    let web = &json["folders"][0]["children"][0];
+    assert!(web["path"].as_str().unwrap().ends_with("web"), "{web}");
+    // package.json, node_modules/left-pad/index.js, and src/index.js.
+    assert_eq!(web["size"]["logical"], 2 + 4 + 1);
+    assert_eq!(web["removable"], web["children"][0]["size"]["on_disk"]);
+    assert_eq!(web["children"][0]["kind"], "item");
+    assert_eq!(web["children"][0]["rule"], "javascript.node_modules");
+    assert_eq!(json["removable"]["items"], 1);
+    assert!(
+        json["removable"]["by_risk"]["regenerable"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+}
+
+#[test]
 fn scan_of_a_missing_folder_fails_and_says_which() {
     let root = tempfile::tempdir().unwrap();
     let missing = root.path().join("missing");
