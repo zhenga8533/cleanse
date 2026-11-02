@@ -194,3 +194,76 @@ matches = ["cache/Homebrew"]
 [[rule.test]]
 tree = ["projects/Homebrew/x"]
 matches = []
+
+# Cleanse leaves these two to their own tools, so they're Protected and show the command instead.
+
+# https://pnpm.io/settings/store: the store is ~/AppData/Local/pnpm/store on Windows,
+# ~/Library/pnpm/store on macOS, and ~/.local/share/pnpm/store on Linux, or
+# $XDG_DATA_HOME/pnpm/store, which `data_local` follows. `PNPM_HOME` and `storeDir` can move it,
+# which isn't followed yet. Projects' node_modules hard-link their files to the store, so deleting
+# it frees little. `pnpm store prune` removes only the packages no project uses, and pnpm says
+# it has no side effects on projects (https://pnpm.io/cli/store).
+[[rule]]
+id = "pnpm.store"
+name = "pnpm store"
+category = "package_caches"
+risk = "protected"
+explain = "Every package pnpm has installed, which projects' node_modules folders link to. Deleting it frees little while projects link to its files, so pnpm's own command removes just the packages no project uses."
+advise = "pnpm store prune"
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "windows", base = "data_local", path = "pnpm/store" },
+    { os = "macos", base = "home", path = "Library/pnpm/store" },
+    { os = "linux", base = "data_local", path = "pnpm/store" },
+]
+
+[[rule.test]]
+os = "windows"
+tree = ["data_local/pnpm/store/v10/files/00/x"]
+matches = ["data_local/pnpm/store"]
+
+[[rule.test]]
+os = "macos"
+tree = ["home/Library/pnpm/store/v10/files/00/x"]
+matches = ["home/Library/pnpm/store"]
+
+[[rule.test]]
+os = "linux"
+tree = ["data_local/pnpm/store/v10/files/00/x"]
+matches = ["data_local/pnpm/store"]
+
+[[rule.test]]
+# A project's own virtual store is part of its node_modules.
+tree = ["projects/web/node_modules/.pnpm/x", "projects/pnpm/store/x"]
+matches = []
+
+# https://go.dev/ref/mod#module-cache: the module cache is $GOPATH/pkg/mod, and GOPATH is `go` in
+# the home folder unless set. `GOMODCACHE` or `GOPATH` can move it, which isn't followed yet. Go
+# makes the files in it read-only, so deleting it directly fails, and its documentation points to
+# `go clean -modcache` instead.
+[[rule]]
+id = "go.module_cache"
+name = "Go module cache"
+category = "package_caches"
+risk = "protected"
+explain = "Source code of the Go modules your builds downloaded. Go makes its files read-only, so Go's own command is the way to remove it, and builds download what they need again."
+advise = "go clean -modcache"
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "windows", base = "home", path = "go/pkg/mod" },
+    { os = "macos", base = "home", path = "go/pkg/mod" },
+    { os = "linux", base = "home", path = "go/pkg/mod" },
+]
+
+[[rule.test]]
+tree = ["home/go/pkg/mod/cache/download/x", "home/go/bin/gopls"]
+matches = ["home/go/pkg/mod"]
+
+[[rule.test]]
+# Installed tools, and the same folders in a project, aren't the cache.
+tree = ["home/go/bin/gopls", "projects/go/pkg/mod/x"]
+matches = []

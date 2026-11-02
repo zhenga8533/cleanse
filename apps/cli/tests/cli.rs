@@ -225,7 +225,7 @@ fn rules_lists_and_shows_rules() {
 fn doctor_reports_rules_and_folders() {
     let report = stdout(&cleanse(&["doctor"]));
 
-    assert!(report.contains("Rules: 52 built in"), "{report}");
+    assert!(report.contains("Rules: 54 built in"), "{report}");
     assert!(report.contains("Home"), "{report}");
 }
 

@@ -9,7 +9,9 @@ use cleanse_model::{Candidate, Category, EntryKind, Risk, Size};
 use serde::Serialize;
 
 use crate::format;
-use crate::scan::{Reporter, items, print_scanned};
+use crate::scan::{
+    JsonAdvice, Reporter, advice, advised, items, json_advice, print_advice, print_scanned,
+};
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
@@ -41,7 +43,7 @@ pub fn run(engine: &Engine, args: &Args) -> crate::Result {
     reporter.clear();
     let analysis = analysis?;
     if args.json {
-        print_json(&analysis, args)
+        print_json(engine, &analysis, args)
     } else {
         print_human(engine, &analysis, args);
         Ok(())
@@ -174,6 +176,10 @@ fn print_human(engine: &Engine, analysis: &Analysis, args: &Args) {
             );
         }
     }
+    print_advice(&advised(
+        engine.rules(),
+        &largest_first(&analysis.scan.candidates),
+    ));
     if !analysis.scan.unreadable.is_empty() {
         println!(
             "\n{} couldn't be read, so what's inside isn't counted.",
@@ -203,7 +209,10 @@ fn print_node(engine: &Engine, analysis: &Analysis, id: NodeId, depth: usize, ar
                     .rules()
                     .get(&candidate.found.rule)
                     .map_or(candidate.found.rule.0.as_str(), |rule| &rule.name);
-                label = format!("{label} ({rule}, {})", candidate.risk());
+                label = match advice(engine.rules(), candidate) {
+                    Some(command) => format!("{label} ({rule}, clean with `{command}`)"),
+                    None => format!("{label} ({rule}, {})", candidate.risk()),
+                };
             }
         }
         NodeKind::OtherFilesystem => label = format!("{label} (another filesystem, not measured)"),
@@ -243,6 +252,12 @@ fn print_node(engine: &Engine, analysis: &Analysis, id: NodeId, depth: usize, ar
             indent = (depth + 1) * 2
         );
     }
+}
+
+fn largest_first(candidates: &[Candidate]) -> Vec<&Candidate> {
+    let mut sorted: Vec<&Candidate> = candidates.iter().collect();
+    sorted.sort_by_key(|candidate| Reverse(candidate.found.size.on_disk));
+    sorted
 }
 
 fn print_row(on_disk: u64, removable: u64, depth: usize, label: &str) {
@@ -347,9 +362,9 @@ fn json_folder(analysis: &Analysis, id: NodeId, depth: usize, args: &Args) -> Js
     }
 }
 
-fn print_json(analysis: &Analysis, args: &Args) -> crate::Result {
+fn print_json(engine: &Engine, analysis: &Analysis, args: &Args) -> crate::Result {
     #[derive(Serialize)]
-    struct Output {
+    struct Output<'a> {
         roots: Vec<String>,
         entries: u64,
         elapsed_seconds: f64,
@@ -357,6 +372,8 @@ fn print_json(analysis: &Analysis, args: &Args) -> crate::Result {
         unreadable: Vec<String>,
         folders: Vec<JsonFolder>,
         removable: Removable,
+        /// What's best cleaned by its own tool, largest first, with the command for each.
+        advice: Vec<JsonAdvice<'a>>,
     }
 
     let scan = &analysis.scan;
@@ -379,6 +396,7 @@ fn print_json(analysis: &Analysis, args: &Args) -> crate::Result {
             .map(|&root| json_folder(analysis, root, 0, args))
             .collect(),
         removable: Removable::of(&scan.candidates),
+        advice: json_advice(&advised(engine.rules(), &largest_first(&scan.candidates))),
     };
     serde_json::to_writer_pretty(io::stdout().lock(), &output)?;
     println!();

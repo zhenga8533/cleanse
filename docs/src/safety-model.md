@@ -21,7 +21,7 @@ principles:
 | **Safe** | The owning app recreates it silently | Temp files, logs, HTTP caches | Delete |
 | **Regenerable** | Recreatable at a cost: time, bandwidth, a command | `node_modules`, `target/`, virtualenvs, model caches | Delete |
 | **Review** | Might matter; needs a person to decide | Large files, old downloads, stale worktrees, agent checkpoints | Quarantine; never preselected |
-| **Protected** | Shown for transparency, never actionable | Agent transcripts, credentials, git-tracked files | None |
+| **Protected** | Shown for transparency, never actionable | Agent transcripts, credentials, git-tracked files, caches a tool cleans itself | None, or the tool's own command to run |
 
 ## Safety gates
 

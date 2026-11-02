@@ -59,6 +59,9 @@ fn show(rule: &Rule, large_file_size: u64) {
     if let Some(regenerate) = &rule.regenerate {
         println!("  Comes back:  {regenerate}");
     }
+    if let Some(command) = &rule.advise {
+        println!("  Clean with:  {command}");
+    }
     match &rule.target {
         Target::ProjectArtifact {
             names,

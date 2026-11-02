@@ -318,6 +318,40 @@ fn large_files_where_nothing_may_be_removed_arent_listed() {
 }
 
 #[test]
+fn what_a_tool_cleans_itself_is_kept_and_cant_be_approved() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("home");
+    write_old(&home.join("go/pkg/mod/cache/download/x.zip"), "zip");
+    let folders = KnownFolders {
+        home: Some(home.clone()),
+        temp: root.path().join("temp"),
+        ..KnownFolders::default()
+    };
+    let engine = Engine {
+        system: System::new().unwrap().with_known_folders(folders),
+        ..Engine::new().unwrap()
+    };
+
+    let scan = engine
+        .scan(
+            &[root.path().to_path_buf()],
+            &|_| {},
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+
+    let [candidate] = &scan.candidates[..] else {
+        panic!("{:#?}", scan.candidates)
+    };
+    assert_eq!(candidate.found.rule.0, "go.module_cache");
+    assert_eq!(candidate.risk(), Risk::Protected, "{candidate:#?}");
+    assert_eq!(PlanItem::approve(candidate), None);
+    assert_eq!(removable_under(&scan.candidates, root.path()).count(), 0);
+    let rule = engine.rules().get(&candidate.found.rule).unwrap();
+    assert_eq!(rule.advise.as_deref(), Some("go clean -modcache"));
+}
+
+#[test]
 fn excluded_folders_are_kept_and_turned_off_rules_match_nothing() {
     let root = tempfile::tempdir().unwrap();
     project(root.path());
