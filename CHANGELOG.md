@@ -29,6 +29,22 @@ All notable changes to Cleanse are documented here. The format is based on
 - `cleanse analyze [PATHS]` shows where space goes: each folder's size, largest first, down to
   `--depth` levels and `--top` entries per folder, with how much under each can be removed. It
   then breaks down what can be removed by tier and category. `--json` gives the same as data.
+- Large files. Any file taking 1 GiB or more on disk is offered as a Review item, never selected
+  by default and quarantined rather than deleted. `large_file_size` in the settings changes the
+  size, down to 64 MiB. Folders apps keep their data in are skipped, as is anything with a name
+  starting with `.` in its path, and large files where nothing may be removed, such as in a
+  folder you excluded, aren't listed. One named like a database, a key, or Outlook's mail (`.pst`)
+  is kept. Since quarantine needs the same drive, large files on other drives can't be removed
+  yet.
+- A rule for installers and disk images directly in Downloads: `.exe`, `.msi`, `.msix`, and
+  `.iso` on Windows, `.dmg`, `.pkg`, and `.iso` on macOS, and `.deb`, `.rpm`, `.AppImage`, and
+  `.iso` on Linux. They're Review items too. Rules can match by pattern directly in Downloads with
+  `base = "downloads"`.
+- `scan` and `clean` show how long ago each Review item was modified, to help decide, and
+  `explain` shows it for everything. `scan` lists Review items under their rules, the largest 10
+  of each unless `--all` is given. Items in `--json` have a `modified` time, in seconds since the
+  Unix epoch.
+- Windows' paging, hibernation, and swap files are protected.
 
 ### Fixed
 

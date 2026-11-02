@@ -9,8 +9,9 @@ use cleanse_platform::listed_facts;
 
 use super::{Descend, walk};
 
-/// File names that suggest credentials or keys. An ambiguous build folder holding one may be
-/// more than build output. Compared case-insensitively; a leading `*` matches any start.
+/// File names that suggest credentials, keys, or databases. An ambiguous build folder holding
+/// one may be more than build output, and a large file named like one may be someone's only
+/// copy. Compared case-insensitively; a leading `*` matches any start.
 const SECRET_NAMES: &[&str] = &[
     ".env",
     "*.pem",
@@ -26,6 +27,8 @@ const SECRET_NAMES: &[&str] = &[
     "*.sqlite",
     "*.sqlite3",
     "*.db",
+    // Outlook's own copy of mail, which can be the only one.
+    "*.pst",
 ];
 
 /// Virtual machine and container disks: losing one loses an entire system, so they're never

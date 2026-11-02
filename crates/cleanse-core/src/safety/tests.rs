@@ -195,6 +195,13 @@ fn drive_roots_bundles_and_drive_system_folders_are_protected() {
         policy.check(&fake_path(&["$Recycle.Bin", "x"]), None, &[]),
         Some("Windows system files")
     );
+    for file in ["pagefile.sys", "HIBERFIL.SYS", "swapfile.sys"] {
+        assert_eq!(
+            policy.check(&root.join(file), None, &[]),
+            Some("Windows system files"),
+            "{file}"
+        );
+    }
     assert_eq!(
         policy.check(&fake_path(&["repo", ".git", "lfs", "tmp"]), None, &[]),
         Some("a Git repository's internal data")
@@ -370,6 +377,41 @@ fn tracked_files_and_possible_secrets_block_ambiguous_folders() {
         }]
     );
     assert_eq!(candidates[1].concerns(), [Concern::TrackedByGit]);
+}
+
+#[test]
+fn large_files_named_like_secrets_or_mail_are_kept() {
+    let root = tempfile::tempdir().unwrap();
+    let documents = root.path().join("home/Documents");
+    let big = "x".repeat(100_000);
+    write(&documents.join("Outlook.pst"), &big);
+    write(&documents.join("raw.mov"), &big);
+    let folders = fake_folders(root.path());
+    let rules = RuleSet::builtin().unwrap();
+    let (found, _) = Matcher::new(rules.rules(), &folders, Os::current())
+        .with_large_files(64 * 1024)
+        .find(root.path())
+        .unwrap();
+    let probe = system();
+    let policy = ProtectedPolicy::for_system(&folders, &probe, &[]);
+    let now = SystemTime::now() + Duration::from_hours(1);
+    let assessor = Assessor::new(&probe, policy, &[root.path().to_path_buf()], now).unwrap();
+
+    let candidates: Vec<Candidate> = found
+        .iter()
+        .map(|detection| assessor.assess(CandidateId(0), detection))
+        .collect();
+
+    assert_eq!(candidates.len(), 2, "{candidates:#?}");
+    assert_eq!(
+        candidates[0].concerns(),
+        [Concern::PossibleSecrets {
+            example: "outlook.pst".into()
+        }]
+    );
+    assert_eq!(candidates[1].risk(), Risk::Review, "{:#?}", candidates[1]);
+    assert_eq!(candidates[1].found.category, Category::LargeFiles);
+    assert!(candidates[1].found.modified.is_some());
 }
 
 #[test]
@@ -1220,7 +1262,9 @@ fn browser_home(root: &Path) -> Vec<PathBuf> {
                 Base::Cache => &folders.cache,
                 Base::Config => &folders.config,
                 Base::DataLocal => &folders.data_local,
-                Base::Temp => panic!("{} keeps a cache in the temp folder", rule.id),
+                Base::Temp | Base::Downloads => {
+                    panic!("{} keeps a cache in a folder everyone shares", rule.id)
+                }
             };
             let cache = base.as_ref().unwrap().join(location.path.replace('*', "1"));
             write(&cache.join("x"), "x");

@@ -16,7 +16,7 @@ use std::fmt;
 use cleanse_model::RuleId;
 use serde::Deserialize;
 
-pub use matcher::{Detection, Matcher};
+pub use matcher::{Detection, Listed, Matcher};
 pub(crate) use matcher::{base_folder, wildcard_match};
 pub use schema::{Base, Entry, Location, Os, Rule, RuleTest, Target};
 
@@ -30,12 +30,17 @@ const BUILTIN: &[(&str, &str)] = &[
         include_str!("../rules/crash-dumps.toml"),
     ),
     ("dotnet.toml", include_str!("../rules/dotnet.toml")),
+    ("downloads.toml", include_str!("../rules/downloads.toml")),
     (
         "game-engines.toml",
         include_str!("../rules/game-engines.toml"),
     ),
     ("java.toml", include_str!("../rules/java.toml")),
     ("javascript.toml", include_str!("../rules/javascript.toml")),
+    (
+        "large-files.toml",
+        include_str!("../rules/large-files.toml"),
+    ),
     ("logs.toml", include_str!("../rules/logs.toml")),
     ("native.toml", include_str!("../rules/native.toml")),
     (
@@ -77,7 +82,7 @@ impl RuleSet {
             rule: Vec<Rule>,
         }
 
-        let mut rules = Vec::new();
+        let mut rules: Vec<Rule> = Vec::new();
         let mut ids = HashSet::new();
         let mut locations = HashSet::new();
         for (file, contents) in sources {
@@ -93,6 +98,14 @@ impl RuleSet {
                 rule.validate().map_err(fail)?;
                 if !ids.insert(rule.id.clone()) {
                     return Err(fail("another rule already uses this id".into()));
+                }
+                // Every large file would match both, so which one it's under would be arbitrary.
+                if matches!(rule.target, Target::LargeFile {})
+                    && rules
+                        .iter()
+                        .any(|other| matches!(other.target, Target::LargeFile {}))
+                {
+                    return Err(fail("another rule is already a `large_file` rule".into()));
                 }
                 if let Target::KnownLocation {
                     locations: specs, ..

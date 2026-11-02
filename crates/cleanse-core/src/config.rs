@@ -1,4 +1,5 @@
-//! The settings file, `config.toml`: folders to leave alone and rules to turn off.
+//! The settings file, `config.toml`: folders to leave alone, rules to turn off, and how large a
+//! large file is.
 
 use std::error::Error;
 use std::fmt;
@@ -10,14 +11,35 @@ use cleanse_model::RuleId;
 use cleanse_platform::KnownFolders;
 use serde::Deserialize;
 
-/// What the settings file says. A missing file, or a missing setting, means none.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+const MIB: u64 = 1 << 20;
+
+/// What counts as a large file unless the settings say otherwise.
+pub const DEFAULT_LARGE_FILE_SIZE: u64 = 1024 * MIB;
+
+/// The smallest `large_file_size` accepted. Much smaller, and ordinary photos and documents
+/// would all count as large.
+pub const MIN_LARGE_FILE_SIZE: u64 = 64 * MIB;
+
+/// What the settings file says. A missing file, or a missing setting, means the default.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
     /// Folders Cleanse leaves alone: they, everything inside them, and anything containing them
     /// are protected.
     pub exclude: Vec<PathBuf>,
     /// Rules that never match anything.
     pub disabled_rules: Vec<RuleId>,
+    /// Files taking at least this many bytes on disk are large files.
+    pub large_file_size: u64,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            exclude: Vec::new(),
+            disabled_rules: Vec::new(),
+            large_file_size: DEFAULT_LARGE_FILE_SIZE,
+        }
+    }
 }
 
 /// A settings file that couldn't be read or doesn't make sense.
@@ -66,6 +88,8 @@ impl Config {
             exclude: Vec<String>,
             #[serde(default)]
             disabled_rules: Vec<RuleId>,
+            #[serde(default)]
+            large_file_size: Option<String>,
         }
 
         let file: File = toml::from_str(text).map_err(|error| error.to_string())?;
@@ -76,8 +100,40 @@ impl Config {
                 .map(|path| expand(path, home))
                 .collect::<Result<_, _>>()?,
             disabled_rules: file.disabled_rules,
+            large_file_size: match &file.large_file_size {
+                Some(size) => parse_size(size)?,
+                None => DEFAULT_LARGE_FILE_SIZE,
+            },
         })
     }
+}
+
+/// A whole number of MiB, GiB, or TiB, like `1 GiB`, of at least [`MIN_LARGE_FILE_SIZE`].
+fn parse_size(raw: &str) -> Result<u64, String> {
+    let invalid = || {
+        format!(
+            "`{raw}` in `large_file_size` isn't a size. Give a whole number of MiB, GiB, or TiB, \
+             like \"1 GiB\"."
+        )
+    };
+    let raw = raw.trim();
+    let digits = raw.find(|c: char| !c.is_ascii_digit()).unwrap_or(raw.len());
+    let (number, unit) = raw.split_at(digits);
+    let number: u64 = number.parse().map_err(|_| invalid())?;
+    let unit = match unit.trim() {
+        unit if unit.eq_ignore_ascii_case("MiB") => MIB,
+        unit if unit.eq_ignore_ascii_case("GiB") => 1024 * MIB,
+        unit if unit.eq_ignore_ascii_case("TiB") => 1024 * 1024 * MIB,
+        _ => return Err(invalid()),
+    };
+    let size = number.checked_mul(unit).ok_or_else(invalid)?;
+    if size < MIN_LARGE_FILE_SIZE {
+        return Err(format!(
+            "`large_file_size` must be at least {} MiB, or too many ordinary files would count",
+            MIN_LARGE_FILE_SIZE / MIB
+        ));
+    }
+    Ok(size)
 }
 
 /// A relative path would depend on where Cleanse happens to be started, so only absolute paths
@@ -151,6 +207,22 @@ mod tests {
 
         assert!(relative.contains("isn't a full path"), "{relative}");
         assert!(unknown.contains("excludes"), "{unknown}");
+    }
+
+    #[test]
+    fn reads_the_large_file_size_in_binary_units() {
+        let size = |text: &str| Config::parse(text, None).map(|config| config.large_file_size);
+
+        assert_eq!(size(""), Ok(DEFAULT_LARGE_FILE_SIZE));
+        assert_eq!(size("large_file_size = \"1 GiB\""), Ok(1 << 30));
+        assert_eq!(size("large_file_size = \"512mib\""), Ok(512 << 20));
+        assert_eq!(size("large_file_size = \" 2 TiB \""), Ok(2 << 40));
+        for wrong in ["1.5 GiB", "1 GB", "GiB", "-1 GiB", "99999999999 TiB"] {
+            let error = size(&format!("large_file_size = \"{wrong}\"")).unwrap_err();
+            assert!(error.contains("isn't a size"), "{wrong}: {error}");
+        }
+        let small = size("large_file_size = \"10 MiB\"").unwrap_err();
+        assert!(small.contains("at least 64 MiB"), "{small}");
     }
 
     #[test]

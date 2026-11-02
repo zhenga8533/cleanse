@@ -188,6 +188,7 @@ fn candidate(parts: &[&str], risk: Risk, concerns: Vec<Concern>) -> Candidate {
             declared_risk: risk,
             size: Size::default(),
             files: 0,
+            modified: None,
             evidence: Vec::new(),
         },
         Some(FileIdentity { volume: 1, file: 1 }),

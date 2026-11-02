@@ -1,5 +1,7 @@
 use cleanse_engine::{Engine, Entry, Os, Rule, Target};
 
+use crate::format;
+
 #[derive(Debug, clap::Args)]
 pub struct Args {
     #[command(subcommand)]
@@ -30,7 +32,7 @@ pub fn run(engine: &Engine, args: &Args) -> crate::Result {
                 .iter()
                 .find(|rule| rule.id.0 == *id)
                 .ok_or_else(|| format!("there's no rule `{id}`; `cleanse rules` lists them"))?;
-            show(rule);
+            show(rule, engine.config().large_file_size);
             Ok(())
         }
     }
@@ -49,7 +51,7 @@ fn list(rules: &[Rule]) {
     }
 }
 
-fn show(rule: &Rule) {
+fn show(rule: &Rule, large_file_size: u64) {
     println!("{} ({})", rule.name, rule.id);
     println!("  Category:    {}", rule.category);
     println!("  Tier:        {}", rule.risk);
@@ -91,6 +93,14 @@ fn show(rule: &Rule) {
             } else {
                 println!("  Matches:     {what}{}", here.join(", "));
             }
+        }
+        Target::LargeFile {} => {
+            println!(
+                "  Matches:     files taking {} or more on disk (large_file_size in your \
+                 settings),",
+                format::bytes(large_file_size)
+            );
+            println!("               outside the folders apps keep their data in");
         }
     }
     if let Some(owner) = &rule.owner {

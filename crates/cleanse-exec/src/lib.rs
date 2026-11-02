@@ -14,13 +14,15 @@ mod tests;
 
 use std::error::Error;
 use std::fmt;
+use std::fs;
 use std::io;
 use std::mem;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 
-use cleanse_core::rules::{Matcher, Os, RuleSet};
+use cleanse_core::config::Config;
+use cleanse_core::rules::{Listed, Matcher, Os, RuleSet};
 use cleanse_core::safety::{Assessor, ProtectedPolicy};
 use cleanse_core::scan::measure;
 use cleanse_model::{
@@ -41,7 +43,7 @@ pub use quarantine::Listing;
 pub struct Executor<'a> {
     rules: &'a RuleSet,
     probe: &'a dyn Probe,
-    excluded: &'a [PathBuf],
+    config: &'a Config,
     data_dir: PathBuf,
 }
 
@@ -100,19 +102,19 @@ impl fmt::Display for ApplyError {
 impl Error for ApplyError {}
 
 impl<'a> Executor<'a> {
-    /// `excluded` are the folders the user's settings exclude. `data_dir` is Cleanse's data
-    /// folder: each run writes its journal to a new file in its `journal` folder, and
-    /// quarantined items go in its `quarantine` folder.
+    /// `config` is the user's settings, which items are checked against as the scan was.
+    /// `data_dir` is Cleanse's data folder: each run writes its journal to a new file in its
+    /// `journal` folder, and quarantined items go in its `quarantine` folder.
     pub fn new(
         rules: &'a RuleSet,
         probe: &'a dyn Probe,
-        excluded: &'a [PathBuf],
+        config: &'a Config,
         data_dir: PathBuf,
     ) -> Self {
         Self {
             rules,
             probe,
-            excluded,
+            config,
             data_dir,
         }
     }
@@ -148,8 +150,9 @@ impl<'a> Executor<'a> {
             return Err(ApplyError::Elevated);
         }
         let folders = self.probe.known_folders();
-        let matcher = Matcher::new(self.rules.rules(), folders, Os::current());
-        let policy = ProtectedPolicy::for_system(folders, self.probe, self.excluded);
+        let matcher = Matcher::new(self.rules.rules(), folders, Os::current())
+            .with_large_files(self.config.large_file_size);
+        let policy = ProtectedPolicy::for_system(folders, self.probe, &self.config.exclude);
         // Files modified after this count as modified moments ago, however long the run takes.
         let assessor = Assessor::new(self.probe, policy, &plan.roots, SystemTime::now())
             .map_err(ApplyError::Io)?;
@@ -396,8 +399,14 @@ impl<'a> Executor<'a> {
         if facts.kind != item.kind || facts.identity != item.identity {
             return Err(skipped(SkipReason::Replaced));
         }
+        // Read the way the scan's walk read it, so a large file is measured the same way.
+        let listed = fs::symlink_metadata(&item.path)
+            .map(|metadata| Listed::of(&metadata))
+            .map_err(|error| Outcome::Failed {
+                error: format!("Couldn't check it: {error}"),
+            })?;
         let Some(detection) = matcher
-            .match_entry(&item.path, item.kind)
+            .match_entry(&item.path, listed)
             .filter(|detection| detection.rule.id == item.rule)
         else {
             return Err(skipped(SkipReason::NoLongerMatches));

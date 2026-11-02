@@ -18,11 +18,11 @@ use std::time::{Duration, Instant, SystemTime};
 
 use cleanse_core::analyze::Leaf;
 use cleanse_core::config::ConfigError;
-use cleanse_core::rules::{Detection, Matcher};
+use cleanse_core::rules::{Detection, Listed, Matcher};
 use cleanse_core::safety::{Assessor, ProtectedPolicy};
 use cleanse_core::scan::{Descend, DirFiles, distinct_roots, walk_with};
 use cleanse_exec::Executor;
-use cleanse_model::{Candidate, CandidateId, EntryKind, Plan, QuarantineEntry};
+use cleanse_model::{Candidate, CandidateId, Plan, QuarantineEntry};
 use rayon::prelude::*;
 
 pub use cleanse_core::analyze::{Node, NodeId, NodeKind, SizeTree, Usage, removable_under};
@@ -240,11 +240,7 @@ impl Engine {
     {
         let started = Instant::now();
         let roots = distinct_roots(roots)?;
-        let matcher = Matcher::new(
-            self.rules.rules(),
-            self.system.known_folders(),
-            Os::current(),
-        );
+        let matcher = self.matcher();
 
         let entries = AtomicU64::new(0);
         // Sorted by path, which `removable_under` relies on.
@@ -260,7 +256,7 @@ impl Engine {
                 if seen.is_multiple_of(PROGRESS_INTERVAL) {
                     progress(Progress::Walking { entries: seen });
                 }
-                match matcher.match_entry(entry.path, entry.kind) {
+                match matcher.match_entry(entry.path, Listed::of(entry.metadata)) {
                     Some(detection) => {
                         found
                             .lock()
@@ -281,16 +277,23 @@ impl Engine {
             other_filesystems.extend(report.other_filesystems);
         }
 
-        let detections: Vec<Detection<'_>> = found
-            .into_inner()
-            .unwrap_or_else(PoisonError::into_inner)
-            .into_values()
-            .collect();
         let policy = ProtectedPolicy::for_system(
             self.system.known_folders(),
             &self.system,
             &self.config.exclude,
         );
+        // A large file is only a match because of its size, so one where nothing may be removed,
+        // like Windows' own folders or a folder excluded in the settings, isn't worth listing as
+        // kept.
+        let detections: Vec<Detection<'_>> = found
+            .into_inner()
+            .unwrap_or_else(PoisonError::into_inner)
+            .into_values()
+            .filter(|detection| {
+                !matches!(detection.rule.target, Target::LargeFile {})
+                    || policy.check(&detection.path, None, &[]).is_none()
+            })
+            .collect();
         let assessor = Assessor::new(&self.system, policy, &roots, SystemTime::now())?;
         let done = AtomicUsize::new(0);
         let total = detections.len();
@@ -326,12 +329,12 @@ impl Engine {
         let path = path::absolute(path)?;
         fs::symlink_metadata(&path)?;
         let folders = self.system.known_folders();
-        let matcher = Matcher::new(self.rules.rules(), folders, Os::current());
+        let matcher = self.matcher();
         let policy = ProtectedPolicy::for_system(folders, &self.system, &self.config.exclude);
 
         let detection = path.ancestors().find_map(|ancestor| {
             let metadata = fs::symlink_metadata(ancestor).ok()?;
-            matcher.match_entry(ancestor, EntryKind::from(metadata.file_type()))
+            matcher.match_entry(ancestor, Listed::of(&metadata))
         });
         let Some(detection) = detection else {
             let identity = self.system.inspect(&path).ok().map(|facts| facts.identity);
@@ -409,8 +412,17 @@ impl Engine {
         Ok(Executor::new(
             &self.rules,
             &self.system,
-            &self.config.exclude,
+            &self.config,
             data_dir,
         ))
+    }
+
+    fn matcher(&self) -> Matcher<'_> {
+        Matcher::new(
+            self.rules.rules(),
+            self.system.known_folders(),
+            Os::current(),
+        )
+        .with_large_files(self.config.large_file_size)
     }
 }

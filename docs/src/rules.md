@@ -1,7 +1,8 @@
 # Rules
 
-> Status: project artifacts, known locations, and Git checks are implemented, including rules
-> for AI agents' and browsers' folders. Insights come in M3.
+> Status: project artifacts, known locations, large files, and Git checks are implemented,
+> including rules for AI agents' and browsers' folders. Advice for tools with their own cleanup
+> commands comes next in M3.
 
 Rules describe what Cleanse can recognize. They're TOML files in
 [`crates/cleanse-core/rules/`](https://github.com/zhenga8533/cleanse/tree/main/crates/cleanse-core/rules),
@@ -78,12 +79,14 @@ The location must be exactly this path under one of the user's standard folders:
 | `config` | `%APPDATA%` | `~/Library/Application Support` | `~/.config` |
 | `data_local` | `%LOCALAPPDATA%` | `~/Library/Application Support` | `~/.local/share` |
 | `temp` | `%TEMP%` | `$TMPDIR` | `/tmp` |
+| `downloads` | Downloads, usually `%USERPROFILE%\Downloads` | `~/Downloads` | `XDG_DOWNLOAD_DIR`, unless it's the home folder |
 
 In names after the first, `*` matches any run of characters, for folders whose names vary, like
 a browser's profiles: `Google/Chrome/User Data/Profile */Cache` matches `Profile 1/Cache` but not
 `Profile 1/Extensions/Cache`. The first name can't contain `*`, so a location stays inside one
-app's folder. The exception is `temp`, which every app shares for files it only needs for a
-while, so `path = "*"` there is each item directly in the temp folder.
+app's folder. The exceptions are `temp` and `downloads`, which hold whatever anyone put there, so
+`path = "*"` under `temp` is each item directly in the temp folder, and `path = "*.dmg"` under
+`downloads` is each disk image directly in Downloads.
 
 Locations name folders unless the rule says `entry = "file"`, which makes them name files
 instead, or `entry = "any"`, which makes them name both. Each match is a separate item:
@@ -108,6 +111,19 @@ A location inside a protected folder, such as an AI agent's or a browser's, matc
 removable unless the protected policy in `cleanse-core/src/safety/policy.rs` lists it as an
 exception. Exceptions are added only for folders the app's own documentation or source code
 shows are disposable, and the rule file or the policy says where that is.
+
+## Large files
+
+```toml
+[rule.match]
+kind = "large_file"
+```
+
+A `large_file` rule matches any file that takes at least `large_file_size` from the settings on
+disk (1 GiB unless changed), outside the folders apps keep their data in. It's checked after
+every other rule, so a file another rule recognizes stays under that rule. There's one, built
+in, and it must be `review`, since nothing about a large file says whether it's still needed. See
+the [safety model](safety-model.md#review-items) for where it doesn't look.
 
 ## An owner
 
@@ -160,7 +176,17 @@ Every rule needs at least one test that matches something and one that matches n
 fails otherwise. A test builds `tree` in an empty directory (a trailing `/` makes a directory;
 anything else is an empty file), runs only that rule over it, and expects exactly `matches`.
 Known locations resolve under folders named after their base (`home/`, `cache/`, `config/`,
-`data_local/`, `temp/`), and a test can be limited to one OS with `os = "windows"`.
+`data_local/`, `temp/`, `downloads/`), and a test can be limited to one OS with `os = "windows"`.
+
+For rules that look at size, `sizes` creates files with that many bytes in them. Tests count
+files taking 64 KiB or more on disk as large:
+
+```toml
+[[rule.test]]
+tree = []
+sizes = { "home/Videos/raw.mov" = 100_000, "home/small.mp4" = 10_000 }
+matches = ["home/Videos/raw.mov"]
+```
 
 For rules that depend on Git, `git = true` makes the test's root a repository, `files` creates
 files with contents (such as a `.gitignore`), and `tracked` lists files to add to the index:

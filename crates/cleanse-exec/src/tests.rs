@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, SystemTime};
 
+use cleanse_core::config::Config;
 use cleanse_core::rules::{Matcher, Os, RuleSet};
 use cleanse_core::safety::{Assessor, ProtectedPolicy};
 use cleanse_model::{
@@ -48,7 +49,11 @@ struct Fixture {
     data: TempDir,
     rules: RuleSet,
     system: System,
+    config: Config,
 }
+
+/// What the large file fixture counts as large, far below what the settings allow.
+const LARGE: u64 = 64 * 1024;
 
 impl Fixture {
     fn new() -> Self {
@@ -64,7 +69,39 @@ impl Fixture {
             data: tempfile::tempdir().unwrap(),
             rules: RuleSet::builtin().unwrap(),
             system: System::new().unwrap().elevated(false),
+            config: Config::default(),
         }
+    }
+
+    /// A large video in a home folder under a temporary folder, with the built-in rules.
+    fn large_file() -> Self {
+        let root = tempfile::tempdir().unwrap();
+        let contents = "x".repeat(usize::try_from(2 * LARGE).unwrap());
+        write_old(&root.path().join("home/Videos/raw.mov"), &contents);
+        let home = root.path().join("home");
+        let folders = KnownFolders {
+            data_local: Some(home.join("AppData").join("Local")),
+            home: Some(home),
+            temp: root.path().join("temp"),
+            ..KnownFolders::default()
+        };
+        Self {
+            root,
+            data: tempfile::tempdir().unwrap(),
+            rules: RuleSet::builtin().unwrap(),
+            system: System::new()
+                .unwrap()
+                .elevated(false)
+                .with_known_folders(folders),
+            config: Config {
+                large_file_size: LARGE,
+                ..Config::default()
+            },
+        }
+    }
+
+    fn video(&self) -> PathBuf {
+        self.path("home/Videos/raw.mov")
     }
 
     /// A crash dump in an app data folder under a temporary folder, and a rule recognizing the
@@ -106,6 +143,7 @@ locations = [{}, {}, {}]
                 .unwrap()
                 .elevated(false)
                 .with_known_folders(folders),
+            config: Config::default(),
         }
     }
 
@@ -135,7 +173,8 @@ locations = [{}, {}, {}]
     /// would.
     fn plan(&self) -> Plan {
         let folders = self.system.known_folders();
-        let matcher = Matcher::new(self.rules.rules(), folders, Os::current());
+        let matcher = Matcher::new(self.rules.rules(), folders, Os::current())
+            .with_large_files(self.config.large_file_size);
         let (found, _) = matcher.find(self.root.path()).unwrap();
         let policy = ProtectedPolicy::for_system(folders, &self.system, &[]);
         let roots = vec![self.root.path().to_path_buf()];
@@ -153,7 +192,7 @@ locations = [{}, {}, {}]
         Executor::new(
             &self.rules,
             &self.system,
-            &[],
+            &self.config,
             self.data.path().to_path_buf(),
         )
     }
@@ -405,11 +444,13 @@ fn refuses_to_run_elevated() {
     let plan = fixture.plan();
     let elevated = System::new().unwrap().elevated(true);
 
-    let result = Executor::new(&fixture.rules, &elevated, &[], fixture.data.path().into()).apply(
-        &plan,
-        &|_| {},
-        &AtomicBool::new(false),
-    );
+    let result = Executor::new(
+        &fixture.rules,
+        &elevated,
+        &Config::default(),
+        fixture.data.path().into(),
+    )
+    .apply(&plan, &|_| {}, &AtomicBool::new(false));
 
     assert!(matches!(result, Err(ApplyError::Elevated)), "{result:?}");
     fixture.assert_web_untouched();
@@ -422,11 +463,13 @@ fn removes_nothing_without_a_journal() {
     let not_a_folder = fixture.data.path().join("file");
     fs::write(&not_a_folder, "").unwrap();
 
-    let result = Executor::new(&fixture.rules, &fixture.system, &[], not_a_folder).apply(
-        &plan,
-        &|_| {},
-        &AtomicBool::new(false),
-    );
+    let result = Executor::new(
+        &fixture.rules,
+        &fixture.system,
+        &Config::default(),
+        not_a_folder,
+    )
+    .apply(&plan, &|_| {}, &AtomicBool::new(false));
 
     assert!(matches!(result, Err(ApplyError::Journal(_))), "{result:?}");
     fixture.assert_web_untouched();
@@ -568,7 +611,12 @@ fn restoring_and_purging_refuse_to_run_elevated() {
     let fixture = Fixture::new();
     let entry = fixture.quarantine_one();
     let elevated = System::new().unwrap().elevated(true);
-    let executor = Executor::new(&fixture.rules, &elevated, &[], fixture.data.path().into());
+    let executor = Executor::new(
+        &fixture.rules,
+        &elevated,
+        &fixture.config,
+        fixture.data.path().into(),
+    );
 
     assert!(matches!(
         executor.restore(std::slice::from_ref(&entry)),
@@ -638,7 +686,10 @@ fn records_that_name_other_folders_arent_listed() {
 fn leaves_an_item_excluded_after_approval() {
     let fixture = Fixture::new();
     let plan = fixture.plan();
-    let excluded = [fixture.path("web")];
+    let excluded = Config {
+        exclude: vec![fixture.path("web")],
+        ..Config::default()
+    };
 
     let outcomes = Executor::new(
         &fixture.rules,
@@ -793,8 +844,13 @@ fn finishing_refuses_to_run_elevated() {
     let leftover = interrupt_removal(&fixture, identity);
     let elevated = System::new().unwrap().elevated(true);
 
-    let result = Executor::new(&fixture.rules, &elevated, &[], fixture.data.path().into())
-        .finish(std::slice::from_ref(&leftover));
+    let result = Executor::new(
+        &fixture.rules,
+        &elevated,
+        &Config::default(),
+        fixture.data.path().into(),
+    )
+    .finish(std::slice::from_ref(&leftover));
 
     assert!(matches!(result, Err(ApplyError::Elevated)), "{result:?}");
     assert!(leftover.tombstone.exists());
@@ -1051,6 +1107,53 @@ fn finds_and_finishes_a_file_removal_that_was_cut_short() {
         "{applied:?}"
     );
     fixture.assert_dumps_hold(false);
+}
+
+#[test]
+fn quarantines_a_large_file_and_restores_it() {
+    let fixture = Fixture::large_file();
+    let plan = fixture.plan();
+    assert_eq!(plan.items[0].rule.0, "files.large");
+    assert_eq!(plan.items[0].risk, cleanse_model::Risk::Review);
+    assert_eq!(plan.items[0].disposal, Disposal::Quarantine);
+
+    let outcomes = fixture.apply(&plan);
+
+    assert!(
+        matches!(&outcomes[..], [Outcome::Quarantined { .. }]),
+        "{outcomes:?}"
+    );
+    assert!(!fixture.video().exists());
+    let listing = fixture.executor().quarantined().unwrap();
+
+    let handled = fixture.executor().restore(&listing.entries).unwrap();
+
+    assert_eq!(handled.outcomes, [EntryOutcome::Restored]);
+    assert_eq!(fs::metadata(fixture.video()).unwrap().len(), 2 * LARGE);
+}
+
+#[test]
+fn leaves_a_large_file_that_is_no_longer_large() {
+    let fixture = Fixture::large_file();
+    let plan = fixture.plan();
+    write_old(&fixture.video(), "x");
+
+    let outcomes = fixture.apply(&plan);
+
+    assert_eq!(outcomes, [skipped(SkipReason::NoLongerMatches)]);
+    assert!(fixture.video().exists());
+}
+
+#[test]
+fn checks_large_files_against_the_size_in_the_settings() {
+    let mut fixture = Fixture::large_file();
+    let plan = fixture.plan();
+    fixture.config.large_file_size = 4 * LARGE;
+
+    let outcomes = fixture.apply(&plan);
+
+    assert_eq!(outcomes, [skipped(SkipReason::NoLongerMatches)]);
+    assert!(fixture.video().exists());
 }
 
 /// The built-in rule for `node_modules`, but in the Review tier.

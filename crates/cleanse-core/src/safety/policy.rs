@@ -91,6 +91,10 @@ const BUNDLE_EXTENSIONS: &[&str] = &["app", "photoslibrary", "xcarchive"];
 /// mounted on other systems.
 const DRIVE_SYSTEM_FOLDERS: &[&str] = &["$recycle.bin", "system volume information"];
 
+/// Windows' paging, hibernation, and swap files. They're at the root of a drive, and like the
+/// folders above, they're recognized by name wherever a drive is mounted.
+const DRIVE_SYSTEM_FILES: &[&str] = &["pagefile.sys", "hiberfil.sys", "swapfile.sys"];
+
 /// Electron apps keep their code in `resources/app` (`Contents/Resources/app` on macOS), with a
 /// `package.json` and `node_modules` that look like a project's. Apps can be installed or
 /// unpacked anywhere, especially on Linux, so the layout is recognized wherever it appears.
@@ -177,11 +181,18 @@ impl ProtectedPolicy {
             return Some("a drive's root folder");
         }
         let path_key = key(path);
-        if path_key.iter().any(|part| {
-            DRIVE_SYSTEM_FOLDERS
+        let is_system_file = path_key.last().is_some_and(|name| {
+            DRIVE_SYSTEM_FILES
                 .iter()
-                .any(|folder| part.eq_ignore_ascii_case(folder))
-        }) {
+                .any(|file| name.eq_ignore_ascii_case(file))
+        });
+        if is_system_file
+            || path_key.iter().any(|part| {
+                DRIVE_SYSTEM_FOLDERS
+                    .iter()
+                    .any(|folder| part.eq_ignore_ascii_case(folder))
+            })
+        {
             return Some("Windows system files");
         }
         if path_key.windows(2).any(|pair| {

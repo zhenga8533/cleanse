@@ -2,6 +2,8 @@ use std::path::Path;
 
 use cleanse_engine::{Engine, Probe};
 
+use crate::format;
+
 pub fn run(engine: &Engine) {
     let system = engine.system();
     let folders = system.known_folders();
@@ -37,6 +39,10 @@ pub fn run(engine: &Engine) {
     for folder in &config.exclude {
         println!("  excluded     {}", folder.display());
     }
+    println!(
+        "Large files: {} or more on disk",
+        format::bytes(config.large_file_size)
+    );
     println!("Folders:");
     let folder = |name: &str, path: Option<&Path>| match path {
         Some(path) => println!("  {name:<12} {}", path.display()),

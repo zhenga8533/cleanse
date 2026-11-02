@@ -2,6 +2,8 @@ use std::time::Duration;
 
 use cleanse_model::{Candidate, Size};
 
+use crate::SECONDS_PER_DAY;
+
 /// Bytes in binary units, like `3.4 GiB`.
 pub fn bytes(bytes: u64) -> String {
     const UNITS: [&str; 6] = ["KiB", "MiB", "GiB", "TiB", "PiB", "EiB"];
@@ -41,6 +43,12 @@ pub fn ago(days: u64) -> String {
         1 => "yesterday".to_owned(),
         days => format!("{days} days ago"),
     }
+}
+
+/// When something was last modified, from seconds since the Unix epoch, like
+/// `modified 12 days ago`.
+pub fn modified(at: u64, now: u64) -> String {
+    format!("modified {}", ago(now.saturating_sub(at) / SECONDS_PER_DAY))
 }
 
 pub fn seconds(duration: Duration) -> String {
@@ -84,6 +92,13 @@ mod tests {
         assert_eq!(ago(0), "today");
         assert_eq!(ago(1), "yesterday");
         assert_eq!(ago(12), "12 days ago");
+        let now = 100 * SECONDS_PER_DAY;
+        assert_eq!(
+            modified(now - 3 * SECONDS_PER_DAY - 5, now),
+            "modified 3 days ago"
+        );
+        // A clock set back, or a file dated in the future.
+        assert_eq!(modified(now + 60, now), "modified today");
     }
 
     #[test]

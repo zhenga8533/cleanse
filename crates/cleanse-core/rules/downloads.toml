@@ -1,0 +1,65 @@
+# Installers and disk images saved in the Downloads folder. Once a program is installed, its
+# installer usually isn't needed, and it can be downloaded again. But only the person knows
+# whether they keep one on purpose, such as a version that's no longer offered, and some of these
+# are programs that run where they are, like an AppImage or a portable `.exe`. So they're Review:
+# never selected by default, quarantined rather than deleted, and shown with how long ago they
+# were modified to help decide.
+#
+# Only files directly in Downloads match, not in folders inside it. Archives such as `.zip` aren't
+# included, since one can be the only copy of what's in it, and virtual machine disks are always
+# protected.
+[[rule]]
+id = "downloads.installers"
+name = "Installers in Downloads"
+category = "downloads"
+risk = "review"
+explain = "An installer or disk image in your Downloads folder. It's usually not needed once its program is installed, and it can be downloaded again, but keep any you still run from here or can't get again."
+
+[rule.match]
+kind = "known_location"
+entry = "file"
+locations = [
+    { os = "windows", base = "downloads", path = "*.exe" },
+    { os = "windows", base = "downloads", path = "*.msi" },
+    { os = "windows", base = "downloads", path = "*.msix" },
+    { os = "windows", base = "downloads", path = "*.iso" },
+    { os = "macos", base = "downloads", path = "*.dmg" },
+    { os = "macos", base = "downloads", path = "*.pkg" },
+    { os = "macos", base = "downloads", path = "*.iso" },
+    { os = "linux", base = "downloads", path = "*.deb" },
+    { os = "linux", base = "downloads", path = "*.rpm" },
+    { os = "linux", base = "downloads", path = "*.AppImage" },
+    { os = "linux", base = "downloads", path = "*.iso" },
+]
+
+[[rule.test]]
+os = "windows"
+tree = [
+    "downloads/VSCodeUserSetup-x64.exe",
+    "downloads/node-v22.msi",
+    "downloads/Ubuntu.ISO",
+    "downloads/report.pdf",
+    "downloads/tools/putty.exe",
+]
+matches = ["downloads/node-v22.msi", "downloads/Ubuntu.ISO", "downloads/VSCodeUserSetup-x64.exe"]
+
+[[rule.test]]
+os = "macos"
+tree = ["downloads/Docker.dmg", "downloads/Xcode.pkg", "downloads/photo.jpg"]
+matches = ["downloads/Docker.dmg", "downloads/Xcode.pkg"]
+
+[[rule.test]]
+os = "linux"
+tree = ["downloads/code.deb", "downloads/Obsidian.AppImage", "downloads/notes.md"]
+matches = ["downloads/code.deb", "downloads/Obsidian.AppImage"]
+
+[[rule.test]]
+tree = [
+    "downloads/setup.exe/x",
+    "downloads/archive.zip",
+    "downloads/old/installer.dmg",
+    "home/setup.exe",
+    "home/Installer.dmg",
+    "home/code.deb",
+]
+matches = []
