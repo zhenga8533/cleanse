@@ -6,6 +6,15 @@ All notable changes to Cleanse are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-02
+
+Files, disk analysis, and judgment calls. Cleanse now removes files as well as folders, which
+brings rules for temp files, developer tools' logs, and crash dumps. `cleanse analyze` shows where
+space goes and how much of it can be removed. Large files and installers in Downloads are offered
+for your review, with how long ago each was modified, and tools with their own cleanup commands,
+like pnpm and Go, get pointed to them instead. Every command that reports something can give it
+as JSON, and shells can complete the command line.
+
 ### Added
 
 - Cleanse can remove files as well as folders. A known location in a rule can name files with
@@ -135,6 +144,7 @@ and Linux. It never removes anything; cleanup arrives in 0.2.
   cloud-synced folders, folders containing possible secrets or virtual machine disks, and
   anything that couldn't be fully read.
 
-[Unreleased]: https://github.com/zhenga8533/cleanse/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/zhenga8533/cleanse/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/zhenga8533/cleanse/releases/tag/v0.3.0
 [0.2.0]: https://github.com/zhenga8533/cleanse/releases/tag/v0.2.0
 [0.1.0]: https://github.com/zhenga8533/cleanse/releases/tag/v0.1.0
