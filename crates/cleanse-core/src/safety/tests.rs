@@ -15,7 +15,7 @@ use cleanse_platform::{FakeProbe, FileFacts, KnownFolders, Probe, System};
 use proptest::prelude::*;
 
 use super::{Assessor, Protected, ProtectedPolicy, Reach};
-use crate::rules::{Base, Matcher, Os, RuleSet, Target};
+use crate::rules::{Base, Matcher, Os, RuleSet, Target, base_folder};
 
 fn write(path: &Path, contents: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -819,6 +819,71 @@ fn claude_home(root: &Path) -> Vec<PathBuf> {
     write(&home.join(".claude/plugins/p/package.json"), "{}");
     write(&home.join(".claude/plugins/p/node_modules/a/index.js"), "x");
     folders
+}
+
+/// Makes an item for every location of these rules on this OS, filling in each `*`, and returns
+/// their paths.
+fn fill_locations(folders: &KnownFolders, ids: &[&str]) -> Vec<PathBuf> {
+    let rules = RuleSet::builtin().unwrap();
+    let mut items = Vec::new();
+    for id in ids {
+        let rule = rules.get(&cleanse_model::RuleId((*id).into())).unwrap();
+        let Target::KnownLocation { locations, entry } = &rule.target else {
+            panic!("{id} isn't a known location");
+        };
+        for location in locations
+            .iter()
+            .filter(|location| location.os == Os::current())
+        {
+            let mut path = base_folder(folders, location.base).unwrap().to_path_buf();
+            path.extend(location.path.replace('*', "x").split('/'));
+            if *entry == EntryKind::File {
+                write(&path, "x");
+            } else {
+                write(&path.join("x.log"), "x");
+            }
+            items.push(path);
+        }
+    }
+    items
+}
+
+#[test]
+fn developer_tool_logs_are_safe_items_nothing_protects() {
+    let root = tempfile::tempdir().unwrap();
+    let logs = fill_locations(
+        &fake_folders(root.path()),
+        &[
+            "npm.logs",
+            "vscode.logs",
+            "jetbrains.logs",
+            "gradle.daemon_logs",
+        ],
+    );
+
+    let candidates = assess_all(root.path(), &Running::programs(&[]));
+
+    assert_eq!(candidates.len(), logs.len(), "{candidates:#?}");
+    for log in &logs {
+        let candidate = candidates
+            .iter()
+            .find(|candidate| &candidate.found.path == log)
+            .unwrap_or_else(|| panic!("{} wasn't matched", log.display()));
+        assert_eq!(candidate.risk(), Risk::Safe, "{candidate:#?}");
+        assert!(candidate.concerns().is_empty(), "{candidate:#?}");
+    }
+
+    let candidates = assess_all(root.path(), &Running::programs(&["code"]));
+    let vscode = candidates
+        .iter()
+        .find(|candidate| candidate.found.rule.0 == "vscode.logs")
+        .unwrap();
+    assert_eq!(
+        vscode.concerns(),
+        [Concern::OwnerRunning {
+            app: "VS Code".into()
+        }]
+    );
 }
 
 #[test]

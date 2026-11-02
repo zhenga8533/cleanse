@@ -1,0 +1,168 @@
+# Logs developer tools write for troubleshooting. Each tool writes new ones as it runs, so they're
+# Safe. Only locations the tool's own documentation or source code gives are listed, and each
+# rule says where.
+#
+# Most of these tools don't run as a program of their own name (npm runs as `node`, the Gradle
+# daemon as `java`, and each JetBrains IDE has its own launcher), so only VS Code's logs are kept
+# while it's running. The others rely on the safety checks: a log modified in the last few
+# minutes is kept as in use, and on Windows a log a program has open can't be removed.
+
+# https://docs.npmjs.com/cli/v11/using-npm/config: the cache is `%LocalAppData%\npm-cache` on
+# Windows and `~/.npm` elsewhere, `logs-dir` is `_logs` inside it, and `logs-max` is 10.
+[[rule]]
+id = "npm.logs"
+name = "npm debug logs"
+category = "logs"
+risk = "safe"
+explain = "Debug logs npm writes for each command, which it points to when a command fails. npm keeps the 10 most recent, and writes new ones as it runs."
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "windows", base = "data_local", path = "npm-cache/_logs" },
+    { os = "macos", base = "home", path = ".npm/_logs" },
+    { os = "linux", base = "home", path = ".npm/_logs" },
+]
+
+[[rule.test]]
+os = "windows"
+tree = [
+    "data_local/npm-cache/_logs/2026-11-01T12_00_00_000Z-debug-0.log",
+    "data_local/npm-cache/_cacache/index-v5/x",
+]
+matches = ["data_local/npm-cache/_logs"]
+
+[[rule.test]]
+os = "macos"
+tree = ["home/.npm/_logs/2026-11-01T12_00_00_000Z-debug-0.log", "home/.npm/_cacache/index-v5/x"]
+matches = ["home/.npm/_logs"]
+
+[[rule.test]]
+os = "linux"
+tree = ["home/.npm/_logs/2026-11-01T12_00_00_000Z-debug-0.log", "home/.npm/_cacache/index-v5/x"]
+matches = ["home/.npm/_logs"]
+
+[[rule.test]]
+tree = ["home/projects/app/_logs/x.log", "home/.npm/_cacache/_logs/x.log"]
+matches = []
+
+# VS Code keeps a folder of logs per session in `logs` inside its user data folder
+# (`logsHome` in src/vs/platform/environment/common/environmentService.ts), which is `Code` in
+# the settings folder on every OS. Its program is named after `nameShort`, `Code`, on macOS
+# (`darwinExecutable` in build/lib/electron.ts), and `code` elsewhere.
+[[rule]]
+id = "vscode.logs"
+name = "VS Code logs"
+category = "logs"
+risk = "safe"
+explain = "Logs VS Code writes for each session, for troubleshooting. VS Code starts a new folder of them each time it opens."
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "windows", base = "config", path = "Code/logs" },
+    { os = "macos", base = "config", path = "Code/logs" },
+    { os = "linux", base = "config", path = "Code/logs" },
+]
+
+[rule.owner]
+app = "VS Code"
+processes = ["code"]
+
+[[rule.test]]
+tree = ["config/Code/logs/20261101T120000/main.log", "config/Code/User/settings.json"]
+matches = ["config/Code/logs"]
+
+[[rule.test]]
+tree = ["config/Code/User/logs/x.log", "home/projects/Code/logs/x.log"]
+matches = []
+
+# https://www.jetbrains.com/help/idea/directories-used-by-the-ide-to-store-settings-caches-plugins-and-logs.html
+# Each IDE and version, like `IntelliJIdea2025.2`, has its own logs folder: `log` in its system
+# folder on Windows and Linux, and a folder of its own in `~/Library/Logs/JetBrains` on macOS.
+[[rule]]
+id = "jetbrains.logs"
+name = "JetBrains IDE logs"
+category = "logs"
+risk = "safe"
+explain = "Logs JetBrains IDEs such as IntelliJ IDEA and PyCharm write, a folder for each IDE and version, for troubleshooting. The IDE writes new ones as it runs."
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "windows", base = "data_local", path = "JetBrains/*/log" },
+    { os = "macos", base = "home", path = "Library/Logs/JetBrains/*" },
+    { os = "linux", base = "cache", path = "JetBrains/*/log" },
+]
+
+[[rule.test]]
+os = "windows"
+tree = [
+    "data_local/JetBrains/IntelliJIdea2025.2/log/idea.log",
+    "data_local/JetBrains/IntelliJIdea2025.2/caches/x",
+    "data_local/JetBrains/PyCharm2025.1/log/idea.log",
+]
+matches = ["data_local/JetBrains/IntelliJIdea2025.2/log", "data_local/JetBrains/PyCharm2025.1/log"]
+
+[[rule.test]]
+os = "macos"
+tree = [
+    "home/Library/Logs/JetBrains/IntelliJIdea2025.2/idea.log",
+    "home/Library/Logs/JetBrains/notes.txt",
+    "cache/JetBrains/IntelliJIdea2025.2/caches/x",
+]
+matches = ["home/Library/Logs/JetBrains/IntelliJIdea2025.2"]
+
+[[rule.test]]
+os = "linux"
+tree = [
+    "cache/JetBrains/IntelliJIdea2025.2/log/idea.log",
+    "cache/JetBrains/IntelliJIdea2025.2/caches/x",
+]
+matches = ["cache/JetBrains/IntelliJIdea2025.2/log"]
+
+[[rule.test]]
+tree = [
+    "data_local/JetBrains/IntelliJIdea2025.2/caches/log/x",
+    "cache/JetBrains/IntelliJIdea2025.2/caches/log/x",
+    "home/projects/JetBrains/app/log/x",
+]
+matches = []
+
+# https://docs.gradle.org/current/userguide/gradle_daemon.html: each daemon writes
+# `daemon-<pid>.out.log` in `daemon/<gradle-version>` in the Gradle user home, `~/.gradle`, and
+# Gradle deletes them after 14 days.
+[[rule]]
+id = "gradle.daemon_logs"
+name = "Gradle daemon logs"
+category = "logs"
+risk = "safe"
+explain = "Logs each Gradle daemon writes while it runs builds. A new daemon starts a new log, and Gradle deletes old ones itself after 14 days."
+
+[rule.match]
+kind = "known_location"
+entry = "file"
+locations = [
+    { os = "windows", base = "home", path = ".gradle/daemon/*/daemon-*.out.log" },
+    { os = "macos", base = "home", path = ".gradle/daemon/*/daemon-*.out.log" },
+    { os = "linux", base = "home", path = ".gradle/daemon/*/daemon-*.out.log" },
+]
+
+[[rule.test]]
+tree = [
+    "home/.gradle/daemon/9.4.0/daemon-1234.out.log",
+    "home/.gradle/daemon/9.4.0/registry.bin",
+    "home/.gradle/daemon/8.10/daemon-99.out.log",
+]
+matches = [
+    "home/.gradle/daemon/8.10/daemon-99.out.log",
+    "home/.gradle/daemon/9.4.0/daemon-1234.out.log",
+]
+
+[[rule.test]]
+tree = [
+    "home/.gradle/daemon/9.4.0/daemon-1234.out.log/x",
+    "home/.gradle/caches/daemon-1.out.log",
+    "home/projects/app/.gradle/daemon/9.4.0/daemon-1.out.log",
+]
+matches = []
