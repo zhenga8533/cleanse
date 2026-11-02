@@ -6,8 +6,9 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
+use clap::builder::{PossibleValuesParser, TypedValueParser};
 use cleanse_engine::{Engine, Progress, RuleSet, Scan, save_plan};
-use cleanse_model::{Candidate, Concern, PlanItem, Risk, RuleId, SavedPlan, Size};
+use cleanse_model::{Candidate, Category, Concern, PlanItem, Risk, RuleId, SavedPlan, Size};
 use serde::Serialize;
 
 use crate::{format, now};
@@ -28,13 +29,43 @@ pub struct Args {
     /// Save what can be removed to a plan file, to review and then remove with `cleanse apply`.
     #[arg(long, value_name = "FILE")]
     save: Option<PathBuf>,
+    #[command(flatten)]
+    categories: Categories,
+}
+
+/// `--category`, shared by the commands that scan.
+#[derive(Debug, clap::Args)]
+pub(crate) struct Categories {
+    /// Only items in these categories, separated by commas, like `temp,logs`.
+    #[arg(
+        long = "category",
+        value_name = "CATEGORY",
+        value_delimiter = ',',
+        value_parser = PossibleValuesParser::new(Category::ALL.map(Category::id))
+            .try_map(|id| {
+                Category::ALL
+                    .into_iter()
+                    .find(|category| category.id() == id)
+                    .ok_or_else(|| format!("`{id}` isn't a category"))
+            }),
+    )]
+    categories: Vec<Category>,
+}
+
+impl Categories {
+    /// Leaves only the candidates in the chosen categories, or all of them if none were chosen.
+    pub(crate) fn keep(&self, candidates: &mut Vec<Candidate>) {
+        if !self.categories.is_empty() {
+            candidates.retain(|candidate| self.categories.contains(&candidate.found.category));
+        }
+    }
 }
 
 /// How many of the largest removable items the summary lists.
 const LARGEST: usize = 10;
 
 pub fn run(engine: &Engine, args: &Args) -> crate::Result {
-    let scan = scan(engine, &args.paths)?;
+    let scan = scan(engine, &args.paths, &args.categories)?;
     if args.json {
         print_json(engine, &scan)?;
     } else {
@@ -86,8 +117,13 @@ fn save(scan: &Scan, path: &Path, json: bool) -> crate::Result {
     Ok(())
 }
 
-/// Scans `paths`, or the home folder if there are none, showing progress.
-pub(crate) fn scan(engine: &Engine, paths: &[PathBuf]) -> io::Result<Scan> {
+/// Scans `paths`, or the home folder if there are none, showing progress, and keeps the
+/// candidates in `categories`.
+pub(crate) fn scan(
+    engine: &Engine,
+    paths: &[PathBuf],
+    categories: &Categories,
+) -> io::Result<Scan> {
     let roots = if paths.is_empty() {
         engine.default_roots()
     } else {
@@ -100,7 +136,9 @@ pub(crate) fn scan(engine: &Engine, paths: &[PathBuf]) -> io::Result<Scan> {
         &AtomicBool::new(false),
     );
     reporter.clear();
-    scan
+    let mut scan = scan?;
+    categories.keep(&mut scan.candidates);
+    Ok(scan)
 }
 
 /// Shows progress on one line of stderr, at most a few times a second, and only when stderr is

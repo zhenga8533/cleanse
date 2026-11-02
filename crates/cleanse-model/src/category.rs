@@ -32,6 +32,42 @@ pub enum Category {
     LargeFiles,
 }
 
+impl Category {
+    /// Every category, in the order they're declared.
+    pub const ALL: [Self; 12] = [
+        Self::Dependencies,
+        Self::BuildOutput,
+        Self::PackageCaches,
+        Self::ToolCaches,
+        Self::AiAgents,
+        Self::AiModels,
+        Self::Git,
+        Self::Temp,
+        Self::Logs,
+        Self::BrowserCaches,
+        Self::Downloads,
+        Self::LargeFiles,
+    ];
+
+    /// The name rule files and JSON use, like `build_output`.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Dependencies => "dependencies",
+            Self::BuildOutput => "build_output",
+            Self::PackageCaches => "package_caches",
+            Self::ToolCaches => "tool_caches",
+            Self::AiAgents => "ai_agents",
+            Self::AiModels => "ai_models",
+            Self::Git => "git",
+            Self::Temp => "temp",
+            Self::Logs => "logs",
+            Self::BrowserCaches => "browser_caches",
+            Self::Downloads => "downloads",
+            Self::LargeFiles => "large_files",
+        }
+    }
+}
+
 impl fmt::Display for Category {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
@@ -48,5 +84,22 @@ impl fmt::Display for Category {
             Self::Downloads => "Downloads",
             Self::LargeFiles => "Large files",
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use super::*;
+
+    #[test]
+    fn every_category_is_listed_once_under_its_serialized_name() {
+        let distinct: HashSet<Category> = Category::ALL.into_iter().collect();
+
+        assert_eq!(distinct.len(), Category::ALL.len());
+        for category in Category::ALL {
+            assert_eq!(serde_json::to_value(category).unwrap(), category.id());
+        }
     }
 }

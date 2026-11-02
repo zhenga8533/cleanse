@@ -221,12 +221,109 @@ fn rules_lists_and_shows_rules() {
     assert!(!missing.status.success());
 }
 
+fn json(output: &Output) -> serde_json::Value {
+    serde_json::from_str(&stdout(output)).unwrap()
+}
+
+#[test]
+fn rules_json_has_each_rule_as_its_file_writes_it() {
+    let list = json(&cleanse(&["rules", "--json"]));
+    let show = json(&cleanse(&["rules", "show", "go.module_cache", "--json"]));
+
+    let rules = list.as_array().unwrap();
+    assert_eq!(rules.len(), 54);
+    assert!(
+        rules
+            .iter()
+            .any(|rule| rule["id"] == "javascript.node_modules")
+    );
+    assert_eq!(show["risk"], "protected");
+    assert_eq!(show["advise"], "go clean -modcache");
+    assert_eq!(show["match"]["kind"], "known_location");
+    assert!(show.get("test").is_none(), "{show}");
+}
+
 #[test]
 fn doctor_reports_rules_and_folders() {
     let report = stdout(&cleanse(&["doctor"]));
+    let json = json(&cleanse(&["doctor", "--json"]));
 
     assert!(report.contains("Rules: 54 built in"), "{report}");
     assert!(report.contains("Home"), "{report}");
+    assert_eq!(json["rules"], 54);
+    assert_eq!(json["version"], env!("CARGO_PKG_VERSION"));
+    assert!(json["settings"]["large_file_size"].as_u64().unwrap() > 0);
+    assert!(json["folders"]["temp"].is_string());
+}
+
+#[test]
+fn history_json_lists_runs_and_leftovers() {
+    let history = json(&cleanse(&["history", "--json"]));
+
+    assert!(history["runs"].is_array(), "{history}");
+    assert!(history["leftovers"].is_array(), "{history}");
+}
+
+#[test]
+fn scan_can_keep_only_some_categories() {
+    let root = fixture();
+
+    let dependencies = json(&cleanse(&[
+        "scan",
+        "--json",
+        "--category",
+        "temp,dependencies",
+        arg(root.path()),
+    ]));
+    let logs = json(&cleanse(&[
+        "scan",
+        "--json",
+        "--category",
+        "logs",
+        arg(root.path()),
+    ]));
+    let unknown = cleanse(&["scan", "--category", "node_modules", arg(root.path())]);
+
+    assert_eq!(dependencies["candidates"].as_array().unwrap().len(), 1);
+    assert_eq!(logs["candidates"].as_array().unwrap().len(), 0);
+    assert!(!unknown.status.success());
+    assert!(
+        stderr(&unknown).contains("large_files"),
+        "{}",
+        stderr(&unknown)
+    );
+}
+
+#[test]
+fn analyze_counts_only_the_chosen_categories_as_removable() {
+    let root = fixture();
+
+    let output = json(&cleanse(&[
+        "analyze",
+        "--json",
+        "--category",
+        "logs",
+        arg(root.path()),
+    ]));
+
+    assert_eq!(output["removable"]["items"], 0);
+    let web = &output["folders"][0]["children"][0];
+    assert_eq!(web["size"]["logical"], 2 + 4 + 1);
+    assert_eq!(web["removable"], 0);
+}
+
+#[test]
+fn completions_are_scripts_for_each_shell() {
+    for shell in ["bash", "powershell", "zsh", "fish"] {
+        let script = stdout(&cleanse(&["completions", shell]));
+
+        assert!(script.contains("cleanse"), "{shell}: {script}");
+        assert!(script.contains("category"), "{shell}");
+    }
+    // Bash's also completes the categories themselves; PowerShell's completes only options.
+    let bash = stdout(&cleanse(&["completions", "bash"]));
+    assert!(bash.contains("large_files"), "{bash}");
+    assert!(!cleanse(&["completions", "cmd"]).status.success());
 }
 
 #[test]
@@ -263,6 +360,26 @@ fn clean_dry_run_lists_what_would_be_deleted_and_removes_nothing() {
 
     assert!(report.contains("node_modules"), "{report}");
     assert!(report.contains("--yes would delete 1 item"), "{report}");
+    assert!(node_modules_intact(root.path()));
+}
+
+#[test]
+fn clean_dry_run_json_has_what_would_be_deleted() {
+    let root = fixture();
+
+    let output = json(&cleanse(&[
+        "clean",
+        "--dry-run",
+        "--json",
+        arg(root.path()),
+    ]));
+    let without_dry_run = cleanse(&["clean", "--json", arg(root.path())]);
+
+    let items = output["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["rule"], "javascript.node_modules");
+    assert_eq!(output["size"]["logical"], 4);
+    assert!(!without_dry_run.status.success());
     assert!(node_modules_intact(root.path()));
 }
 
