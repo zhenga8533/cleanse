@@ -1,4 +1,4 @@
-//! What Git knows about directories inside a repository.
+//! What Git knows about files and directories inside a repository.
 //!
 //! Repositories are read with gix and never by running `git`, because a repository's config can
 //! make `git` run commands (`core.fsmonitor`, for example) and scanned repositories aren't
@@ -15,15 +15,16 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
+use cleanse_model::EntryKind;
 use gix::index::entry::Mode;
 use gix::worktree::stack::state::ignore::Source;
 
-/// What Git says about a directory.
+/// What Git says about a file or directory.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GitStatus {
-    /// No repository contains the directory.
+    /// No repository contains the item.
     NotInRepository,
-    /// A repository contains the directory but couldn't be read, so nothing is known about it.
+    /// A repository contains the item but couldn't be read, so nothing is known about it.
     Unreadable {
         repository: PathBuf,
         error: String,
@@ -33,9 +34,9 @@ pub enum GitStatus {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GitFacts {
-    /// The repository's ignore rules exclude the directory or one of its parents.
+    /// The repository's ignore rules exclude the item or one of its parents.
     pub ignored: bool,
-    /// The index has files, or a submodule, inside the directory.
+    /// The index has the item, if it's a file, or files or a submodule inside it.
     pub has_tracked_files: bool,
 }
 
@@ -50,17 +51,17 @@ impl GitInfo {
         Self::default()
     }
 
-    /// `dir` must be absolute.
-    pub fn status(&self, dir: &Path) -> GitStatus {
-        let Some(root) = repository_root(dir) else {
+    /// `path` must be absolute, and `kind` what's there.
+    pub fn status(&self, path: &Path, kind: EntryKind) -> GitStatus {
+        let Some(root) = repository_root(path) else {
             return GitStatus::NotInRepository;
         };
-        let relative = dir
+        let relative = path
             .strip_prefix(&root)
-            .expect("the repository root is an ancestor of the directory");
+            .expect("the repository root is an ancestor of the item");
         let repository = self.open(&root);
         let facts = match &*repository {
-            Ok(repository) => repository.facts(relative),
+            Ok(repository) => repository.facts(relative, kind),
             Err(error) => Err(error.clone()),
         };
         match facts {
@@ -85,11 +86,11 @@ impl GitInfo {
     }
 }
 
-/// The closest ancestor of `dir` with a `.git` directory or file. `dir` itself doesn't count:
+/// The closest ancestor of `path` with a `.git` directory or file. `path` itself doesn't count:
 /// a `.git` inside it makes it a separate repository, which says nothing about how the
 /// repository around it treats it.
-fn repository_root(dir: &Path) -> Option<PathBuf> {
-    dir.ancestors()
+fn repository_root(path: &Path) -> Option<PathBuf> {
+    path.ancestors()
         .skip(1)
         .find(|ancestor| fs::symlink_metadata(ancestor.join(".git")).is_ok())
         .map(Path::to_path_buf)
@@ -101,8 +102,9 @@ fn repository_root(dir: &Path) -> Option<PathBuf> {
 struct Repository {
     root: PathBuf,
     index: gix::index::File,
-    /// Every directory holding tracked files, as `/`-separated paths relative to the worktree.
-    tracked_dirs: HashSet<Vec<u8>>,
+    /// Every tracked file, and every directory holding tracked files, as `/`-separated paths
+    /// relative to the worktree.
+    tracked: HashSet<Vec<u8>>,
 }
 
 impl Repository {
@@ -111,26 +113,33 @@ impl Repository {
             .index_or_empty()
             .map_err(|error| error.to_string())?)
         .clone();
-        let tracked_dirs = tracked_dirs(&index);
+        let tracked = tracked(&index);
         Ok(Self {
             root: root.to_path_buf(),
             index,
-            tracked_dirs,
+            tracked,
         })
     }
 
-    fn facts(&self, relative: &Path) -> Result<GitFacts, String> {
+    fn facts(&self, relative: &Path, kind: EntryKind) -> Result<GitFacts, String> {
         let repo = open_repository(&self.root)?;
         let mut excludes = repo
             .excludes(&self.index, None, Source::WorktreeThenIdMappingIfNotSkipped)
             .map_err(|error| error.to_string())?;
-        // Checking each parent too: everything inside an ignored directory is ignored.
+        // Checking each parent too: everything inside an ignored directory is ignored. Patterns
+        // ending in `/` match only directories, so the item itself is checked as what it is.
         let mut prefix = PathBuf::new();
         let mut ignored = false;
-        for component in relative.components() {
+        let mut components = relative.components().peekable();
+        while let Some(component) = components.next() {
             prefix.push(component);
+            let mode = if components.peek().is_none() && kind == EntryKind::File {
+                Mode::FILE
+            } else {
+                Mode::DIR
+            };
             let platform = excludes
-                .at_path(&prefix, Some(Mode::DIR))
+                .at_path(&prefix, Some(mode))
                 .map_err(|error| error.to_string())?;
             if platform.is_excluded() {
                 ignored = true;
@@ -139,7 +148,7 @@ impl Repository {
         }
         Ok(GitFacts {
             ignored,
-            has_tracked_files: self.tracked_dirs.contains(&*fold_case(&path_key(relative))),
+            has_tracked_files: self.tracked.contains(&*fold_case(&path_key(relative))),
         })
     }
 }
@@ -148,21 +157,20 @@ fn open_repository(root: &Path) -> Result<gix::Repository, String> {
     gix::open_opts(root, gix::open::Options::isolated()).map_err(|error| error.to_string())
 }
 
-fn tracked_dirs(index: &gix::index::State) -> HashSet<Vec<u8>> {
-    let mut dirs: HashSet<Vec<u8>> = HashSet::new();
+/// Every tracked path, and the directories holding them. A submodule's path is a directory
+/// whose contents another repository tracks, which counts the same.
+fn tracked(index: &gix::index::State) -> HashSet<Vec<u8>> {
+    let mut tracked: HashSet<Vec<u8>> = HashSet::new();
     for entry in index.entries() {
         let path = fold_case(entry.path(index));
         for (end, byte) in path.iter().enumerate() {
-            if *byte == b'/' && !dirs.contains(&path[..end]) {
-                dirs.insert(path[..end].to_vec());
+            if *byte == b'/' && !tracked.contains(&path[..end]) {
+                tracked.insert(path[..end].to_vec());
             }
         }
-        // A submodule is a directory whose contents another repository tracks.
-        if entry.mode == Mode::COMMIT {
-            dirs.insert(path.into_owned());
-        }
+        tracked.insert(path.into_owned());
     }
-    dirs
+    tracked
 }
 
 /// The index's form of a worktree-relative path: names joined with `/`.

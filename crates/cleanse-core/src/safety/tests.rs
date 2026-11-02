@@ -585,6 +585,25 @@ fn a_file_replaced_by_a_folder_cant_be_verified() {
     );
 }
 
+#[test]
+fn a_file_git_tracks_is_protected() {
+    let root = tempfile::tempdir().unwrap();
+    let home = fake_folders(root.path()).home.unwrap();
+    let dump = dumps(root.path()).join("crash.dmp");
+    write(&dump, "abcd");
+    git(&home, &["init", "-q"]);
+    git(&home, &["add", "--", "AppData/Local/Dumps/crash.dmp"]);
+
+    let candidates = assess_with(
+        &dump_rules(),
+        root.path(),
+        &system(),
+        SystemTime::now() + Duration::from_hours(1),
+    );
+
+    assert_eq!(only(&candidates).concerns(), [Concern::TrackedByGit]);
+}
+
 /// Real cloud placeholders and swapped-in links can't be staged reliably, so the probe reports
 /// them instead.
 fn probe_reporting(root: &Path, path: &Path, facts: FileFacts) -> FakeProbe {
