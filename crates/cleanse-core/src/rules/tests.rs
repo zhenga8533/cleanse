@@ -3,7 +3,7 @@
     reason = "tests build fixture trees and repositories, using the git command line"
 )]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -12,18 +12,37 @@ use cleanse_model::{Evidence, RuleId};
 use cleanse_platform::KnownFolders;
 
 use super::matcher::wildcard_match;
-use super::{BUILTIN, Matcher, Os, Rule, RuleSet, RuleTest};
+use super::{BUILTIN, Listed, Matcher, Os, Rule, RuleSet, RuleTest};
 
 /// Known folders for fixtures: each base is a folder named after it under the test's root.
 fn fixture_folders(root: &Path) -> KnownFolders {
     KnownFolders {
         home: Some(root.join("home")),
+        downloads: Some(root.join("downloads")),
         cache: Some(root.join("cache")),
         config: Some(root.join("config")),
         data_local: Some(root.join("data_local")),
         temp: root.join("temp"),
         ..KnownFolders::default()
     }
+}
+
+/// What fixtures count as a large file: far below what the settings allow, so tests stay small,
+/// but above the 4 KiB a small file takes on disk on most filesystems.
+const FIXTURE_LARGE_FILE_SIZE: u64 = 64 * 1024;
+
+/// A test's root. Its name doesn't start with `.`, as temporary folders' names usually do, since
+/// large files aren't looked for below such a name.
+fn fixture_root() -> tempfile::TempDir {
+    tempfile::Builder::new()
+        .prefix("cleanse-")
+        .tempdir()
+        .unwrap()
+}
+
+fn fixture_matcher<'r>(rules: impl IntoIterator<Item = &'r Rule>, root: &Path) -> Matcher<'r> {
+    Matcher::new(rules, &fixture_folders(root), Os::current())
+        .with_large_files(FIXTURE_LARGE_FILE_SIZE)
 }
 
 fn build_tree(root: &Path, tree: &[String]) {
@@ -70,7 +89,8 @@ fn tree_only(tree: &[&str]) -> RuleTest {
     RuleTest {
         os: None,
         tree: tree.iter().map(|path| (*path).to_owned()).collect(),
-        files: std::collections::BTreeMap::new(),
+        files: BTreeMap::new(),
+        sizes: BTreeMap::new(),
         git: false,
         tracked: Vec::new(),
         matches: Vec::new(),
@@ -80,12 +100,15 @@ fn tree_only(tree: &[&str]) -> RuleTest {
 /// Runs one rule, alone, against a fixture, returning what it matched as `/`-separated paths
 /// relative to the fixture's root.
 fn run_fixture(rule: &Rule, test: &RuleTest) -> BTreeSet<String> {
-    let root = tempfile::tempdir().unwrap();
+    let root = fixture_root();
     build_tree(root.path(), &test.tree);
     for (path, contents) in &test.files {
         let path = relative(root.path(), path);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, contents).unwrap();
+    }
+    for (path, &size) in &test.sizes {
+        write_bytes(root.path(), path, usize::try_from(size).unwrap());
     }
     if test.git {
         git(root.path(), &["init", "-q"]);
@@ -95,7 +118,7 @@ fn run_fixture(rule: &Rule, test: &RuleTest) -> BTreeSet<String> {
             git(root.path(), &add);
         }
     }
-    let matcher = Matcher::new([rule], &fixture_folders(root.path()), Os::current());
+    let matcher = fixture_matcher([rule], root.path());
 
     let (found, report) = matcher.find(root.path()).unwrap();
 
@@ -440,7 +463,7 @@ fn cleanses_own_tombstones_never_match() {
 }
 
 #[test]
-fn only_temp_locations_can_start_with_a_wildcard() {
+fn only_temp_and_downloads_locations_can_start_with_a_wildcard() {
     let rule = |base: &str| {
         format!(
             r#"
@@ -460,8 +483,164 @@ locations = [{{ os = "windows", base = "{base}", path = "*" }}]
     };
 
     assert!(load(&rule("temp")).is_ok());
+    assert!(load(&rule("downloads")).is_ok());
     let error = load(&rule("cache")).unwrap_err();
     assert!(error.contains("only after the first name"), "{error}");
+}
+
+/// A rule naming files that match `path` directly in `base`, on every OS.
+fn shared_folder_rule(base: &str, path: &str) -> RuleSet {
+    load(&format!(
+        r#"
+[[rule]]
+id = "test.files"
+name = "Files"
+category = "downloads"
+risk = "review"
+explain = "Because."
+
+[rule.match]
+kind = "known_location"
+entry = "file"
+locations = [
+    {{ os = "windows", base = "{base}", path = "{path}" }},
+    {{ os = "macos", base = "{base}", path = "{path}" }},
+    {{ os = "linux", base = "{base}", path = "{path}" }},
+]
+"#
+    ))
+    .unwrap()
+}
+
+#[test]
+fn downloads_that_are_the_home_folder_itself_arent_a_folder_of_downloads() {
+    let rules = shared_folder_rule("downloads", "*.exe");
+    let root = fixture_root();
+    build_tree(root.path(), &["home/setup.exe".to_owned()]);
+    let mut folders = fixture_folders(root.path());
+    folders.downloads.clone_from(&folders.home);
+
+    let (found, _) = Matcher::new(rules.rules(), &folders, Os::current())
+        .find(root.path())
+        .unwrap();
+
+    assert!(found.is_empty(), "{found:?}");
+}
+
+/// The built-in rule for large files, and a rule for `.dmp` files directly in the home folder.
+fn large_and_dump_rules() -> RuleSet {
+    let large = builtin()
+        .get(&RuleId("files.large".into()))
+        .unwrap()
+        .clone();
+    let dumps = shared_folder_rule("home", "Dumps/*.dmp").rules()[0].clone();
+    RuleSet {
+        rules: vec![large, dumps],
+    }
+}
+
+/// Writes real bytes, since a sparse file would take no space on disk.
+fn write_bytes(root: &Path, path: &str, size: usize) {
+    let path = relative(root, path);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, vec![b'x'; size]).unwrap();
+}
+
+#[test]
+fn a_file_another_rule_knows_stays_under_that_rule() {
+    let rules = large_and_dump_rules();
+    let root = fixture_root();
+    write_bytes(root.path(), "home/Dumps/crash.dmp", 100_000);
+    write_bytes(root.path(), "home/Videos/crash.dmp", 100_000);
+
+    let (found, _) = fixture_matcher(rules.rules(), root.path())
+        .find(root.path())
+        .unwrap();
+
+    let matched: Vec<(&str, PathBuf)> = found
+        .iter()
+        .map(|detection| {
+            let parent = detection.path.parent().unwrap();
+            (
+                detection.rule.id.0.as_str(),
+                parent.strip_prefix(root.path()).unwrap().to_owned(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        matched,
+        [
+            ("test.files", Path::new("home").join("Dumps")),
+            ("files.large", Path::new("home").join("Videos")),
+        ]
+    );
+}
+
+#[test]
+fn large_files_match_nothing_until_given_a_size() {
+    let rules = large_and_dump_rules();
+    let root = fixture_root();
+    write_bytes(root.path(), "projects/video.mov", 100_000);
+
+    let (found, _) = Matcher::new(rules.rules(), &fixture_folders(root.path()), Os::current())
+        .find(root.path())
+        .unwrap();
+
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn large_files_are_measured_on_disk() {
+    let rules = large_and_dump_rules();
+    let root = fixture_root();
+    write_bytes(root.path(), "projects/video.mov", 100_000);
+    let matcher = fixture_matcher(rules.rules(), root.path());
+    let video = root.path().join("projects/video.mov");
+    let listed = |on_disk| Listed {
+        kind: cleanse_model::EntryKind::File,
+        on_disk,
+    };
+
+    assert!(
+        matcher
+            .match_entry(&video, listed(FIXTURE_LARGE_FILE_SIZE))
+            .is_some()
+    );
+    // A cloud file whose data isn't on this device takes nothing, however long it is.
+    assert!(matcher.match_entry(&video, listed(0)).is_none());
+}
+
+#[test]
+fn a_large_file_rule_is_review_and_there_is_only_one() {
+    let rule = |id: &str, extra: &str| {
+        format!(
+            r#"
+[[rule]]
+id = "{id}"
+name = "Large"
+category = "large_files"
+risk = "review"
+explain = "Because."
+{extra}
+
+[rule.match]
+kind = "large_file"
+"#
+        )
+    };
+
+    assert!(load(&rule("test.large", "")).is_ok());
+    let safe = load(&rule("test.large", "").replace("review", "safe")).unwrap_err();
+    assert!(safe.contains("must be `review`"), "{safe}");
+    let idle = load(&rule("test.large", "idle_days = 7")).unwrap_err();
+    assert!(idle.contains("can't have `owner` or `idle_days`"), "{idle}");
+    let two = load(&format!(
+        "{}{}",
+        rule("one.large", ""),
+        rule("two.large", "")
+    ))
+    .unwrap_err();
+    assert!(two.contains("already a `large_file` rule"), "{two}");
 }
 
 #[test]

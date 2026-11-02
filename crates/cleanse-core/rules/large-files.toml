@@ -1,0 +1,49 @@
+# A large file is only a match because of its size: nothing says what it is or whether anyone
+# still needs it. So it's Review, never selected by default and quarantined rather than deleted,
+# and how long ago it was modified is shown only to help decide.
+#
+# What counts as large is `large_file_size` in the settings, 1 GiB unless changed, measured as
+# space on disk, so cloud files that aren't downloaded never count. Folders apps keep their data
+# in are skipped: the app data, cache, settings, and temp folders (all of `AppData` on Windows,
+# `~/Library` on macOS, and `~/snap` on Linux), and anything with a name starting with `.` in its
+# path, as tools name their files and folders, not counting the folders the home folder is in.
+# Rules for those folders say what's safe there. Large files where nothing may be removed, such
+# as in the system's folders or a folder excluded in the settings, aren't listed at all, and a
+# file another rule recognizes, like a crash dump, stays under that rule.
+[[rule]]
+id = "files.large"
+name = "Large files"
+category = "large_files"
+risk = "review"
+explain = "A large file outside the folders apps keep their data in. Cleanse can't tell what it is or whether you still need it, so it's only a suggestion: quarantined if you choose it, so you can restore it."
+
+[rule.match]
+kind = "large_file"
+
+[[rule.test]]
+tree = ["home/notes.txt"]
+sizes = { "home/Videos/raw.mov" = 100_000, "projects/disk.iso" = 100_000, "home/small.mp4" = 10_000 }
+matches = ["home/Videos/raw.mov", "projects/disk.iso"]
+
+[[rule.test]]
+sizes = { "cache/app/blob" = 100_000, "config/app/blob" = 100_000, "data_local/app/blob" = 100_000, "temp/blob" = 100_000, "home/.docker/disk" = 100_000, "home/code/.venv/lib/big.so" = 100_000, "home/.big" = 100_000 }
+tree = []
+matches = []
+
+[[rule.test]]
+os = "windows"
+sizes = { "home/AppData/LocalLow/app/blob" = 100_000 }
+tree = []
+matches = []
+
+[[rule.test]]
+os = "macos"
+sizes = { "home/Library/Containers/app/blob" = 100_000 }
+tree = []
+matches = []
+
+[[rule.test]]
+os = "linux"
+sizes = { "home/snap/app/common/blob" = 100_000 }
+tree = []
+matches = []

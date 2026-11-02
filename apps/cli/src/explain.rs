@@ -5,7 +5,7 @@ use cleanse_engine::{Engine, Explanation};
 use cleanse_model::Risk;
 use serde_json::json;
 
-use crate::format;
+use crate::{SECONDS_PER_DAY, format, now};
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
@@ -69,6 +69,12 @@ pub fn run(engine: &Engine, args: &Args) -> crate::Result {
                 format::size(&found.size),
                 format::count(found.files)
             );
+            if let Some(at) = found.modified {
+                println!(
+                    "  Modified:    {}",
+                    format::ago(now().saturating_sub(at) / SECONDS_PER_DAY)
+                );
+            }
             let evidence: Vec<String> = found.evidence.iter().map(ToString::to_string).collect();
             if !evidence.is_empty() {
                 println!("  Evidence:    {}", evidence.join("; "));

@@ -33,8 +33,9 @@ blocks, including any new kind of concern until it's deliberately classified.
 
 1. **Protected policy.** System directories, volume roots, the home folder and its top-level
    folders, SSH and GPG keys, credential stores, `.git` internals, browser profiles (only their
-   caches are eligible), AI agent history, settings and credentials, VM and WSL disk images, and
-   the inside of macOS bundles. No candidate may be, or contain, a protected path. Paths are
+   caches are eligible), AI agent history, settings and credentials, VM and WSL disk images,
+   Windows' paging, hibernation, and swap files, and the inside of macOS bundles. No candidate
+   may be, or contain, a protected path. Paths are
    compared by file identity as well as case-folded text, which defeats 8.3 short names, case
    and Unicode differences, and firmlinks. Rules can't override this policy. Folders excluded in
    the settings file are protected the same way, with everything inside them. Inside an AI
@@ -50,8 +51,9 @@ blocks, including any new kind of concern until it's deliberately classified.
    removing a link removes only the link. Scans don't cross into other filesystems.
 4. **Content.** Project artifacts must contain no git-tracked files. Folders with ambiguous names
    (`build/`, `dist/`, `out/`, `bin/`) also need ecosystem evidence and are blocked if they
-   contain files that look like secrets. Anything Cleanse couldn't fully read is blocked rather
-   than assumed empty.
+   contain files that look like secrets. A large file could be anything, so one named like a
+   secret, a database, or Outlook's mail (`.pst`) is blocked too. Anything Cleanse couldn't
+   fully read is blocked rather than assumed empty.
 5. **Activity.** Recently modified items, and items whose owning app, agent, or browser is
    running, are blocked as in use. A rule names its owner's programs; if the running programs
    can't be listed, its matches are blocked too. Where no app owns what a rule matches, as in
@@ -67,6 +69,23 @@ blocks, including any new kind of concern until it's deliberately classified.
 Every match is measured in one walk that doesn't follow links: its size, file count, newest
 modification time, and anything inside that couldn't be read, is another filesystem, looks like
 a secret, or is a virtual machine disk. A file modified in the last ten minutes counts as in use.
+
+### Review items
+
+Large files and installers in Downloads are Review items: nothing says what they are or whether
+anyone still needs them. `scan` and `clean` show how long ago each was modified, to help decide,
+but age is never a reason on its own, and they're never selected by default.
+
+A large file is only a match because of its size, so the rule is narrow about where it looks.
+Size means space on disk, so cloud files that aren't downloaded never count. Folders apps keep
+their data in are skipped, since rules for those folders say what's safe there: the app data,
+cache, settings, and temp folders (all of `AppData` on Windows, `~/Library` on macOS, `~/snap` on
+Linux), and anything with a name starting with `.` in its path, apart from the folders the home
+folder is in. Large files
+where nothing may be removed, such as in Windows' folders or a folder excluded in the settings,
+aren't listed at all,
+and a file another rule recognizes, such as a crash dump, stays under that rule. Before removal,
+a large file is measured again the same way, against the size in the settings then.
 
 ### Not covered yet
 
@@ -130,6 +149,7 @@ a secret, or is a virtual machine disk. A file modified in the last ten minutes 
 
 - **Trash**: items approved for it are skipped.
 - **Quarantine on other drives**: items on a different drive from Cleanse's data folder are
-  skipped rather than quarantined.
+  skipped rather than quarantined. Since every Review item is quarantined, large files on other
+  drives can be found but not removed until the trash is built.
 - **Free space**: the size reported for a deleted item is its measured size, not the measured
   change in free space.

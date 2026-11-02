@@ -1,13 +1,13 @@
 use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::ffi::OsStr;
-use std::fs;
+use std::fs::{self, Metadata};
 use std::io;
-use std::path::{self, Path, PathBuf};
+use std::path::{self, Component, Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
 use cleanse_model::{EntryKind, Evidence};
-use cleanse_platform::KnownFolders;
+use cleanse_platform::{KnownFolders, listed_facts};
 
 use super::{Base, Entry, Os, Rule, Target};
 use crate::TOMBSTONE_PREFIX;
@@ -15,6 +15,30 @@ use crate::git::{GitInfo, GitStatus};
 use crate::scan::{Descend, WalkReport, walk};
 
 const CACHEDIR_TAG: &str = "CACHEDIR.TAG";
+
+/// What a folder listing says about an entry: all a rule looks at besides its path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Listed {
+    pub kind: EntryKind,
+    /// Bytes on disk, as [`listed_facts`] gives them, for files. Cloud files whose data isn't on
+    /// this device take none.
+    pub on_disk: u64,
+}
+
+impl Listed {
+    /// Reads what a walk, `explain`, and the check before removal all go by, so they agree.
+    pub fn of(metadata: &Metadata) -> Self {
+        let kind = EntryKind::from(metadata.file_type());
+        Self {
+            kind,
+            on_disk: if kind == EntryKind::File {
+                listed_facts(metadata).on_disk
+            } else {
+                0
+            },
+        }
+    }
+}
 
 /// A file or directory that a rule recognized.
 #[derive(Clone, Debug)]
@@ -38,6 +62,7 @@ pub struct Matcher<'r> {
     /// location that names files. A walk sees far more files than folders, so a file at a depth
     /// or with a name none of them has is ruled out before its whole path is compared.
     file_locations: Vec<(usize, String)>,
+    large_files: Option<LargeFiles<'r>>,
     git: GitInfo,
 }
 
@@ -49,6 +74,19 @@ struct Pattern<'r> {
     rule: &'r Rule,
 }
 
+/// The `large_file` rule, and where it doesn't look.
+#[derive(Debug)]
+struct LargeFiles<'r> {
+    rule: &'r Rule,
+    /// Files taking fewer bytes on disk aren't large. Nothing is, until
+    /// [`Matcher::with_large_files`] says.
+    min: u64,
+    /// The folders apps keep their data in, compared like [`location_key`]. What's large in them
+    /// is the apps' own business, and rules for those folders say what's safe there.
+    app_data: Vec<PathBuf>,
+    home: Option<PathBuf>,
+}
+
 impl<'r> Matcher<'r> {
     /// Locations whose base folder isn't defined on this system are left out.
     pub fn new(rules: impl IntoIterator<Item = &'r Rule>, folders: &KnownFolders, os: Os) -> Self {
@@ -56,9 +94,18 @@ impl<'r> Matcher<'r> {
         let mut locations = HashMap::new();
         let mut patterns = Vec::new();
         let mut file_locations = Vec::new();
+        let mut large_files = None;
         for rule in rules {
             match &rule.target {
                 Target::ProjectArtifact { .. } => artifacts.push(rule),
+                Target::LargeFile {} => {
+                    large_files = Some(LargeFiles {
+                        rule,
+                        min: u64::MAX,
+                        app_data: app_data_folders(folders, os),
+                        home: folders.home.as_deref().map(location_key),
+                    });
+                }
                 Target::KnownLocation {
                     locations: specs,
                     entry,
@@ -90,20 +137,36 @@ impl<'r> Matcher<'r> {
             locations,
             patterns,
             file_locations,
+            large_files,
             git: GitInfo::new(),
         }
     }
 
-    /// Checks one file or directory of `kind`, as found by a walk. Known locations only match
-    /// absolute paths, and project artifacts are only directories. Links and Cleanse's own
-    /// tombstones never match.
+    /// Makes the `large_file` rule, if there is one, match files taking at least `min` bytes on
+    /// disk. Without this, it matches nothing.
+    #[must_use]
+    pub fn with_large_files(mut self, min: u64) -> Self {
+        if let Some(large_files) = &mut self.large_files {
+            large_files.min = min;
+        }
+        self
+    }
+
+    /// Checks one file or directory, as found by a walk. Known locations only match absolute
+    /// paths, and project artifacts are only directories. A file no other rule recognizes can
+    /// still be a large file. Links and Cleanse's own tombstones never match.
     ///
     /// Evidence that can't be read counts as missing, so a project that can't be inspected isn't
     /// matched. The walk reports the unreadable directories itself.
-    pub fn match_entry(&self, path: &Path, kind: EntryKind) -> Option<Detection<'r>> {
+    pub fn match_entry(&self, path: &Path, listed: Listed) -> Option<Detection<'r>> {
+        let kind = listed.kind;
+        let large = self
+            .large_files
+            .as_ref()
+            .filter(|large| kind == EntryKind::File && listed.on_disk >= large.min);
         match kind {
             EntryKind::Dir => {}
-            EntryKind::File if self.may_be_file_location(path) => {}
+            EntryKind::File if large.is_some() || self.may_be_file_location(path) => {}
             EntryKind::File | EntryKind::Link | EntryKind::Other => return None,
         }
         if path
@@ -119,7 +182,12 @@ impl<'r> Matcher<'r> {
             .get(&key)
             .copied()
             .filter(|rule| location_entry(rule).allows(kind))
-            .or_else(|| self.match_pattern(&key, kind));
+            .or_else(|| self.match_pattern(&key, kind))
+            .or_else(|| {
+                large
+                    .filter(|large| !large.in_app_data(&key))
+                    .map(|large| large.rule)
+            });
         if let Some(rule) = location {
             return Some(Detection {
                 rule,
@@ -213,7 +281,7 @@ impl<'r> Matcher<'r> {
         let root = path::absolute(root)?;
         let found = Mutex::new(Vec::new());
         let report = walk(&root, |entry| {
-            match self.match_entry(entry.path, entry.kind) {
+            match self.match_entry(entry.path, Listed::of(entry.metadata)) {
                 Some(detection) => {
                     found
                         .lock()
@@ -230,11 +298,61 @@ impl<'r> Matcher<'r> {
     }
 }
 
+impl LargeFiles<'_> {
+    /// Whether the file with this key is somewhere apps keep their data: in one of `app_data`,
+    /// or with a name starting with `.`, as tools name their files and folders, in its path.
+    /// Names above the home folder don't count, so a home folder anywhere works.
+    fn in_app_data(&self, key: &Path) -> bool {
+        if self.app_data.iter().any(|folder| key.starts_with(folder)) {
+            return true;
+        }
+        let below_home = self
+            .home
+            .as_deref()
+            .and_then(|home| key.strip_prefix(home).ok())
+            .unwrap_or(key);
+        below_home.components().any(|part| {
+            matches!(part, Component::Normal(name) if name.as_encoded_bytes().starts_with(b"."))
+        })
+    }
+}
+
+/// The folders apps keep their data in, compared like [`location_key`].
+fn app_data_folders(folders: &KnownFolders, os: Os) -> Vec<PathBuf> {
+    let home = |relative: &str| {
+        folders
+            .home
+            .as_deref()
+            .map(|home| join_relative(home, relative))
+    };
+    let own = match os {
+        // `Local`, `LocalLow`, and `Roaming`.
+        Os::Windows => home("AppData"),
+        Os::Macos => home("Library"),
+        // Snap packages keep each app's data here.
+        Os::Linux => home("snap"),
+    };
+    [
+        folders.cache.clone(),
+        folders.config.clone(),
+        folders.data_local.clone(),
+        Some(folders.temp.clone()),
+        own,
+    ]
+    .into_iter()
+    .flatten()
+    // An undefined folder can be left empty, which would contain every path.
+    .filter(|folder| folder.is_absolute())
+    .map(|folder| location_key(&folder))
+    .collect()
+}
+
 /// What a known location rule's locations name.
 fn location_entry(rule: &Rule) -> Entry {
     match &rule.target {
         Target::KnownLocation { entry, .. } => *entry,
         Target::ProjectArtifact { .. } => Entry::Dir,
+        Target::LargeFile {} => Entry::File,
     }
 }
 
@@ -245,6 +363,12 @@ pub(crate) fn base_folder(folders: &KnownFolders, base: Base) -> Option<&Path> {
         Base::Config => folders.config.as_deref(),
         Base::DataLocal => folders.data_local.as_deref(),
         Base::Temp => Some(&folders.temp),
+        // On Linux, `xdg-user-dirs-update` points a user folder that doesn't exist at the home
+        // folder, which isn't a folder of downloads.
+        Base::Downloads => folders
+            .downloads
+            .as_deref()
+            .filter(|downloads| folders.home.as_deref() != Some(*downloads)),
     }
 }
 

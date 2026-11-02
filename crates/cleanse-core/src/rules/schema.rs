@@ -69,6 +69,10 @@ pub enum Target {
         #[serde(default)]
         entry: Entry,
     },
+    /// Any file taking at least `large_file_size` from the settings on disk, outside the folders
+    /// apps keep their data in. It's checked after every other rule, so a file another rule
+    /// knows stays under that rule.
+    LargeFile {},
 }
 
 /// What a known location names.
@@ -99,8 +103,8 @@ pub struct Location {
     pub os: Os,
     pub base: Base,
     /// A `/`-separated path relative to `base`. In names after the first, `*` matches any run
-    /// of characters, for folders whose names vary, like a browser's profiles. Under `temp`, the
-    /// first name can have `*` too.
+    /// of characters, for folders whose names vary, like a browser's profiles. Under `temp` and
+    /// `downloads`, the first name can have `*` too.
     pub path: String,
 }
 
@@ -114,6 +118,15 @@ pub enum Base {
     Config,
     DataLocal,
     Temp,
+    Downloads,
+}
+
+impl Base {
+    /// Folders that hold whatever anyone put there, rather than one app's data, so a location
+    /// can match by pattern directly inside them.
+    fn is_shared(self) -> bool {
+        matches!(self, Self::Temp | Self::Downloads)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deserialize)]
@@ -144,11 +157,16 @@ pub struct RuleTest {
     pub os: Option<Os>,
     /// Paths to create, `/`-separated and relative to the test's root. A trailing `/` makes a
     /// directory; anything else is an empty file. Known locations live under folders named
-    /// after their base: `home/`, `cache/`, `config/`, `data_local/`, and `temp/`.
+    /// after their base: `home/`, `cache/`, `config/`, `data_local/`, `temp/`, and
+    /// `downloads/`.
     pub tree: Vec<String>,
     /// Files to create with the given contents, such as a `.gitignore`.
     #[serde(default)]
     pub files: BTreeMap<String, String>,
+    /// Files to create with this many bytes in them, for rules that look at size. Tests treat
+    /// files taking 64 KiB or more on disk as large.
+    #[serde(default)]
+    pub sizes: BTreeMap<String, u64>,
     /// Make the test's root a Git repository.
     #[serde(default)]
     pub git: bool,
@@ -206,6 +224,15 @@ impl Rule {
                     validate_location(location)?;
                 }
             }
+            // Nothing says what a large file is, so only the person can decide about one.
+            Target::LargeFile {} => {
+                if self.risk != Risk::Review {
+                    return Err("a `large_file` rule must be `review`".into());
+                }
+                if self.owner.is_some() || self.idle_days.is_some() {
+                    return Err("a `large_file` rule can't have `owner` or `idle_days`".into());
+                }
+            }
         }
         if self.idle_days == Some(0) {
             return Err("`idle_days` must be at least 1".into());
@@ -231,6 +258,7 @@ impl Rule {
                 .tree
                 .iter()
                 .chain(test.files.keys())
+                .chain(test.sizes.keys())
                 .chain(&test.tracked)
                 .chain(&test.matches);
             for path in paths {
@@ -284,13 +312,13 @@ fn validate_relative(path: &str) -> Result<(), String> {
 }
 
 /// Like [`validate_relative`], but names after the first may contain `*`. The first is literal,
-/// so a location always stays inside one app's folder, except under `temp`, which every app
-/// shares for files it only needs for a while.
+/// so a location always stays inside one app's folder, except under `temp` and `downloads`,
+/// which hold whatever anyone put there.
 fn validate_location(location: &Location) -> Result<(), String> {
     let path = &location.path;
     let mut names = path.split('/');
     let first_ok = names.next().is_some_and(|first| {
-        if location.base == Base::Temp {
+        if location.base.is_shared() {
             is_pattern_segment(first)
         } else {
             is_plain_segment(first)
@@ -299,7 +327,7 @@ fn validate_location(location: &Location) -> Result<(), String> {
     if !first_ok || !names.all(is_pattern_segment) {
         return Err(format!(
             "`{path}` must be a relative path made of `/`-separated names, without `.` or `..`, \
-             and with `*` only after the first name, except under `temp`"
+             and with `*` only after the first name, except under `temp` and `downloads`"
         ));
     }
     Ok(())

@@ -11,7 +11,7 @@ use inquire::{Confirm, InquireError, MultiSelect};
 
 use crate::exit::{ABORTED, PARTIAL, USAGE};
 use crate::scan::{self, Reporter, items};
-use crate::{can_ask, format};
+use crate::{can_ask, format, now};
 
 /// How many items the selection list shows at once.
 const PAGE_SIZE: usize = 15;
@@ -138,12 +138,16 @@ fn preselected<'c>(candidates: &[&'c Candidate], max: Risk) -> Vec<&'c Candidate
         .collect()
 }
 
-/// One line of the selection list.
-struct Choice<'c>(&'c Candidate);
+/// One line of the selection list. Review items say how long ago they were modified, at `now`,
+/// to help decide.
+struct Choice<'c> {
+    candidate: &'c Candidate,
+    now: u64,
+}
 
 impl fmt::Display for Choice<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let candidate = self.0;
+        let candidate = self.candidate;
         write!(
             f,
             "{:>10}  {:<11}  {}",
@@ -151,6 +155,11 @@ impl fmt::Display for Choice<'_> {
             candidate.risk().to_string(),
             candidate.found.path.display()
         )?;
+        if candidate.risk() == Risk::Review
+            && let Some(at) = candidate.found.modified
+        {
+            write!(f, "  {}", format::modified(at, self.now))?;
+        }
         if let Some(concern) = candidate.concerns().first() {
             write!(f, "  ! {concern}")?;
         }
@@ -170,16 +179,19 @@ fn choose<'c>(removable: &[&'c Candidate]) -> Result<Option<Vec<&'c Candidate>>,
         items(removable.len()),
         format::size(&format::total(removable))
     );
+    let now = now();
     let choices = removable
         .iter()
-        .map(|candidate| Choice(candidate))
+        .map(|candidate| Choice { candidate, now })
         .collect();
     let chosen = MultiSelect::new("Which items should be removed?", choices)
         .with_default(&defaults)
         .with_page_size(PAGE_SIZE)
         .prompt();
     match chosen {
-        Ok(chosen) => Ok(Some(chosen.into_iter().map(|choice| choice.0).collect())),
+        Ok(chosen) => Ok(Some(
+            chosen.into_iter().map(|choice| choice.candidate).collect(),
+        )),
         Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => Ok(None),
         Err(error) => Err(error),
     }
@@ -222,8 +234,9 @@ pub(crate) fn aborted() -> ExitCode {
 }
 
 fn list(candidates: &[&Candidate]) {
+    let now = now();
     for candidate in candidates {
-        println!("  {}", Choice(candidate));
+        println!("  {}", Choice { candidate, now });
     }
 }
 
@@ -302,6 +315,7 @@ mod tests {
             declared_risk: risk,
             size: Size::default(),
             files: 0,
+            modified: None,
             evidence: Vec::new(),
         };
         let identity = FileIdentity { volume: 1, file: 1 };

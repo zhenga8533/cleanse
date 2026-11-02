@@ -279,6 +279,45 @@ fn applies_what_was_approved_from_a_scan() {
 }
 
 #[test]
+fn large_files_where_nothing_may_be_removed_arent_listed() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("home");
+    let big = "x".repeat(100_000);
+    write_old(&home.join("Videos/raw.mov"), &big);
+    write_old(&home.join("archive/old.mov"), &big);
+    write_old(&home.join("Videos/small.mov"), "x");
+    let folders = KnownFolders {
+        home: Some(home.clone()),
+        temp: root.path().join("temp"),
+        ..KnownFolders::default()
+    };
+    let engine = Engine {
+        system: System::new().unwrap().with_known_folders(folders),
+        config: Config {
+            exclude: vec![home.join("archive")],
+            large_file_size: 64 * 1024,
+            ..Config::default()
+        },
+        ..Engine::new().unwrap()
+    };
+
+    let scan = engine
+        .scan(
+            &[root.path().to_path_buf()],
+            &|_| {},
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+
+    let [candidate] = &scan.candidates[..] else {
+        panic!("{:#?}", scan.candidates)
+    };
+    assert!(candidate.found.path.ends_with("raw.mov"), "{candidate:#?}");
+    assert_eq!(candidate.found.rule.0, "files.large");
+    assert_eq!(candidate.risk(), Risk::Review, "{candidate:#?}");
+}
+
+#[test]
 fn excluded_folders_are_kept_and_turned_off_rules_match_nothing() {
     let root = tempfile::tempdir().unwrap();
     project(root.path());

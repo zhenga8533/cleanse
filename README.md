@@ -43,6 +43,8 @@ on Linux). `cleanse doctor` shows where it is and what it says.
 exclude = ["~/work/vendor-snapshot", "D:/archive"]
 # Rule IDs from `cleanse rules`.
 disabled_rules = ["unity.library"]
+# Files this large or larger are offered for review: MiB, GiB, or TiB, at least 64 MiB.
+large_file_size = "1 GiB"
 ```
 
 ## What makes it different
@@ -82,7 +84,7 @@ disabled_rules = ["unity.library"]
 | Package-manager caches | npm, Yarn, pip, uv, Cargo, NuGet, Homebrew | Safe or Regenerable |
 | AI coding agents | Claude Code debug logs and legacy caches, Codex logs | Safe; history and config are Protected |
 | General | Temp files, app logs, crash dumps, browser caches (browser closed) | Safe |
-| Needs your judgment | Large files, old installers in Downloads, stale git worktrees | Review, never preselected |
+| Needs your judgment | Large files, installers in Downloads, stale git worktrees | Review, never preselected |
 
 Where a native tool is the right answer, Cleanse points you to it instead: `pnpm store prune`,
 `go clean -modcache`, compacting WSL and Docker disk images, and so on.

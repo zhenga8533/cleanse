@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{self, Path, PathBuf};
 use std::sync::{Mutex, OnceLock, PoisonError};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use cleanse_model::{Candidate, CandidateId, Concern, EntryKind, FileIdentity, Match};
 use cleanse_platform::Probe;
@@ -155,6 +155,10 @@ impl<'p> Assessor<'p> {
             declared_risk: rule.risk,
             size: measurement.size,
             files: measurement.files,
+            modified: measurement
+                .newest_modified
+                .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+                .map(|since| since.as_secs()),
             evidence: detection.evidence.clone(),
         };
         Candidate::assess(id, found, identity, concerns)
@@ -259,13 +263,14 @@ impl<'p> Assessor<'p> {
 }
 
 /// Rules that need Git to ignore a directory exist for names too common to trust on their
-/// own, so those matches also get checked for files that look like secrets.
+/// own, and a large file could be anything, so those matches also get checked for files that
+/// look like secrets.
 fn is_ambiguous(detection: &Detection<'_>) -> bool {
     matches!(
         detection.rule.target,
         Target::ProjectArtifact {
             require_git_ignored: true,
             ..
-        }
+        } | Target::LargeFile {}
     )
 }

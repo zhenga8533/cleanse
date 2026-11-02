@@ -19,7 +19,7 @@ pub struct Args {
     /// Print the results as JSON.
     #[arg(long)]
     json: bool,
-    /// List every item that can be removed, not just the largest.
+    /// List every item that can be removed or needs your review, not just the largest.
     #[arg(long)]
     all: bool,
     /// Also list everything that's kept, and why.
@@ -187,8 +187,7 @@ fn print_human(engine: &Engine, scan: &Scan, args: &Args) {
 
     let limit = if args.all { usize::MAX } else { LARGEST };
     print_section(engine, "Can be removed", &removable, limit);
-    // Every review item needs a decision, so they're always listed.
-    print_section(engine, "Needs your review", &review, usize::MAX);
+    print_review(engine, &review, limit, now());
     if args.show_protected {
         print_section(engine, "Kept", &kept, usize::MAX);
     } else if !kept.is_empty() {
@@ -225,21 +224,9 @@ fn print_section(engine: &Engine, title: &str, candidates: &[&Candidate], limit:
         format::size(&format::total(candidates))
     );
 
-    let mut by_rule: BTreeMap<&RuleId, Vec<&Candidate>> = BTreeMap::new();
-    for candidate in candidates {
-        by_rule
-            .entry(&candidate.found.rule)
-            .or_default()
-            .push(candidate);
-    }
-    if by_rule.len() > 1 {
-        let mut rules: Vec<_> = by_rule.into_iter().collect();
-        rules.sort_by_key(|(_, group)| Reverse(format::total(group).on_disk));
-        for (rule, group) in rules {
-            let name = engine
-                .rules()
-                .get(rule)
-                .map_or(rule.0.as_str(), |rule| &rule.name);
+    let rules = by_rule(engine, candidates);
+    if rules.len() > 1 {
+        for (name, group) in rules {
             println!(
                 "  {name:<36} {:>10}  {}",
                 format::bytes(format::total(&group).on_disk),
@@ -261,11 +248,76 @@ fn print_section(engine: &Engine, title: &str, candidates: &[&Candidate], limit:
             println!("{:>27}{concern}", "! ");
         }
     }
-    let hidden = candidates.len() - shown;
+    print_hidden("  ", candidates.len() - shown);
+}
+
+/// Prints the items that need a decision under their rules, largest first, with how long ago
+/// each was modified to help decide. Each rule lists up to `limit` items, so many of one kind,
+/// like installers, don't hide the others.
+fn print_review(engine: &Engine, candidates: &[&Candidate], limit: usize, now: u64) {
+    if candidates.is_empty() {
+        return;
+    }
+    println!(
+        "\nNeeds your review: {}, {}",
+        items(candidates.len()),
+        format::size(&format::total(candidates))
+    );
+    for (name, group) in by_rule(engine, candidates) {
+        println!(
+            "\n  {name}: {}, {}",
+            items(group.len()),
+            format::bytes(format::total(&group).on_disk)
+        );
+        let shown = group.len().min(limit);
+        for candidate in &group[..shown] {
+            let modified = candidate
+                .found
+                .modified
+                .map(|at| format!("  {}", format::modified(at, now)))
+                .unwrap_or_default();
+            println!(
+                "    {:>10}  {}{modified}",
+                format::bytes(candidate.found.size.on_disk),
+                candidate.found.path.display()
+            );
+            for concern in candidate.concerns() {
+                println!("{:>16}{concern}", "! ");
+            }
+        }
+        print_hidden("    ", group.len() - shown);
+    }
+}
+
+/// The candidates grouped by rule, with each rule's name, the largest group first. Each group
+/// keeps the candidates' order.
+fn by_rule<'c>(engine: &Engine, candidates: &[&'c Candidate]) -> Vec<(String, Vec<&'c Candidate>)> {
+    let mut by_rule: BTreeMap<&RuleId, Vec<&Candidate>> = BTreeMap::new();
+    for candidate in candidates {
+        by_rule
+            .entry(&candidate.found.rule)
+            .or_default()
+            .push(candidate);
+    }
+    let mut rules: Vec<_> = by_rule
+        .into_iter()
+        .map(|(rule, group)| {
+            let name = engine
+                .rules()
+                .get(rule)
+                .map_or_else(|| rule.0.clone(), |rule| rule.name.clone());
+            (name, group)
+        })
+        .collect();
+    rules.sort_by_key(|(_, group)| Reverse(format::total(group).on_disk));
+    rules
+}
+
+fn print_hidden(indent: &str, hidden: usize) {
     if hidden > 0 {
         let noun = if hidden == 1 { "item" } else { "items" };
         println!(
-            "  ...and {} smaller {noun}. Add --all to list every item.",
+            "{indent}...and {} smaller {noun}. Add --all to list every item.",
             format::count(hidden as u64)
         );
     }

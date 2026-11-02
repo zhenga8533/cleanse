@@ -233,6 +233,7 @@ mod tests {
             declared_risk,
             size: Size::default(),
             files: 0,
+            modified: None,
             evidence: Vec::new(),
         };
         Candidate::assess(CandidateId(0), found, identity, concerns)

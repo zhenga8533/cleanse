@@ -34,6 +34,9 @@ pub struct Match {
     pub size: Size,
     /// The number of files, counting the item itself if it is a file.
     pub files: u64,
+    /// When its most recently modified file was modified, in seconds since the Unix epoch, if
+    /// known. Context for a decision only: age alone is never a reason to remove anything.
+    pub modified: Option<u64>,
     /// Facts the rule found that support removing the item.
     pub evidence: Vec<Evidence>,
 }
@@ -138,7 +141,7 @@ pub enum Concern {
     /// The item is inside a Git repository that couldn't be read, so tracked files can't be
     /// ruled out.
     RepositoryUnreadable,
-    /// The item contains files that look like they hold secrets, such as `.env`.
+    /// The item is, or contains, a file that looks like it holds secrets, such as `.env`.
     PossibleSecrets { example: String },
     /// Part of the item couldn't be read, so its contents aren't fully known.
     Incomplete,
@@ -194,7 +197,10 @@ impl fmt::Display for Concern {
                 "Its Git repository couldn't be read, so tracked files can't be ruled out",
             ),
             Self::PossibleSecrets { example } => {
-                write!(f, "Contains files that may hold secrets, such as {example}")
+                write!(
+                    f,
+                    "It, or files inside it, may hold secrets, such as {example}"
+                )
             }
             Self::Incomplete => f.write_str("Part of it couldn't be read"),
             Self::RecentlyModified { minutes_ago: 0 } => {
@@ -274,6 +280,7 @@ mod tests {
                 guaranteed: 4096,
             },
             files: 3,
+            modified: Some(1_700_000_000),
             evidence: vec![Evidence::Marker {
                 file: "package.json".into(),
             }],
@@ -426,6 +433,7 @@ mod tests {
                 "declared_risk": "regenerable",
                 "size": { "logical": 1000, "on_disk": 4096, "guaranteed": 4096 },
                 "files": 3,
+                "modified": 1_700_000_000,
                 "evidence": [{ "kind": "marker", "file": "package.json" }],
                 "risk": "regenerable",
                 "concerns": [{ "kind": "uncommitted_changes" }],
