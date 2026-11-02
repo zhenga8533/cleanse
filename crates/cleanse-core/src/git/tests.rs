@@ -7,6 +7,8 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+use cleanse_model::EntryKind;
+
 use super::{GitFacts, GitInfo, GitStatus};
 
 fn git(dir: &Path, args: &[&str]) {
@@ -48,8 +50,40 @@ fn reports_ignored_and_tracked_directories() {
     let repo = repository();
     let git = GitInfo::new();
 
-    assert_eq!(git.status(&repo.path().join("dist")), facts(true, false));
-    assert_eq!(git.status(&repo.path().join("src")), facts(false, true));
+    assert_eq!(
+        git.status(&repo.path().join("dist"), EntryKind::Dir),
+        facts(true, false)
+    );
+    assert_eq!(
+        git.status(&repo.path().join("src"), EntryKind::Dir),
+        facts(false, true)
+    );
+}
+
+#[test]
+fn reports_tracked_and_untracked_files() {
+    let repo = repository();
+    let git = GitInfo::new();
+
+    assert_eq!(
+        git.status(&repo.path().join("src/main.js"), EntryKind::File),
+        facts(false, true)
+    );
+    assert_eq!(
+        git.status(&repo.path().join("dist/app.js"), EntryKind::File),
+        facts(true, false)
+    );
+}
+
+/// `dist/` in `.gitignore` matches only directories.
+#[test]
+fn a_file_named_like_an_ignored_directory_isnt_ignored() {
+    let repo = repository();
+    write(&repo.path().join("notes/dist"), "");
+
+    let status = GitInfo::new().status(&repo.path().join("notes/dist"), EntryKind::File);
+
+    assert_eq!(status, facts(false, false));
 }
 
 #[test]
@@ -57,7 +91,7 @@ fn a_directory_inside_an_ignored_one_is_ignored() {
     let repo = repository();
     fs::create_dir_all(repo.path().join("dist/assets")).unwrap();
 
-    let status = GitInfo::new().status(&repo.path().join("dist/assets"));
+    let status = GitInfo::new().status(&repo.path().join("dist/assets"), EntryKind::Dir);
 
     assert_eq!(status, facts(true, false));
 }
@@ -67,7 +101,7 @@ fn ignored_files_that_were_committed_anyway_still_count_as_tracked() {
     let repo = repository();
     git(repo.path(), &["add", "--force", "--", "dist/app.js"]);
 
-    let status = GitInfo::new().status(&repo.path().join("dist"));
+    let status = GitInfo::new().status(&repo.path().join("dist"), EntryKind::Dir);
 
     assert_eq!(status, facts(true, true));
 }
@@ -77,7 +111,7 @@ fn ignored_files_that_were_committed_anyway_still_count_as_tracked() {
 fn tracked_directories_match_regardless_of_case() {
     let repo = repository();
 
-    let status = GitInfo::new().status(&repo.path().join("SRC"));
+    let status = GitInfo::new().status(&repo.path().join("SRC"), EntryKind::Dir);
 
     assert_eq!(status, facts(false, true));
 }
@@ -87,7 +121,7 @@ fn outside_a_repository_there_is_nothing_to_report() {
     let dir = tempfile::tempdir().unwrap();
     fs::create_dir(dir.path().join("dist")).unwrap();
 
-    let status = GitInfo::new().status(&dir.path().join("dist"));
+    let status = GitInfo::new().status(&dir.path().join("dist"), EntryKind::Dir);
 
     assert_eq!(status, GitStatus::NotInRepository);
 }
@@ -98,7 +132,7 @@ fn a_nested_repository_is_judged_by_the_one_around_it() {
     let nested = repo.path().join("dist");
     git(&nested, &["init", "-q"]);
 
-    let status = GitInfo::new().status(&nested);
+    let status = GitInfo::new().status(&nested, EntryKind::Dir);
 
     assert_eq!(status, facts(true, false));
 }
@@ -109,7 +143,7 @@ fn a_repository_that_cant_be_read_is_reported_as_such() {
     write(&dir.path().join(".git"), "this is not a repository\n");
     fs::create_dir(dir.path().join("dist")).unwrap();
 
-    let status = GitInfo::new().status(&dir.path().join("dist"));
+    let status = GitInfo::new().status(&dir.path().join("dist"), EntryKind::Dir);
 
     assert!(
         matches!(&status, GitStatus::Unreadable { repository, .. } if repository == dir.path()),

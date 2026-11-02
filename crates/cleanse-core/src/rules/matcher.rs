@@ -126,7 +126,7 @@ impl<'r> Matcher<'r> {
                 path: path.to_path_buf(),
                 kind,
                 evidence: Vec::new(),
-                git: self.git.status(path),
+                git: self.git.status(path, kind),
             });
         }
         if kind != EntryKind::Dir {
@@ -152,7 +152,7 @@ impl<'r> Matcher<'r> {
                 return None;
             }
             let mut evidence = artifact_evidence(path, parent, markers, contains)?;
-            let git = git.get_or_init(|| self.git.status(path));
+            let git = git.get_or_init(|| self.git.status(path, kind));
             let ignored = matches!(git, GitStatus::Known(facts) if facts.ignored);
             if *require_git_ignored && !ignored {
                 return None;
