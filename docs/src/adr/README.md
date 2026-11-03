@@ -15,3 +15,4 @@ record supersedes an earlier one instead.
 | [0007](0007-directory-walker.md) | A std-based parallel directory walker | Accepted |
 | [0008](0008-read-git-with-gix.md) | Read Git repositories with gix, never by running git | Accepted |
 | [0009](0009-desktop-web-view.md) | The desktop app's web view can only name what the engine showed it | Accepted |
+| [0010](0010-elevated-system-cleanup.md) | System cleanup runs elevated, apart from everything else | Accepted |
