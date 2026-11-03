@@ -6,6 +6,48 @@ All notable changes to Cleanse are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-03
+
+The desktop app. Cleanse now comes as an app for Windows, macOS, and Linux as well as a command
+line, and it does everything the command line does. You can scan and clean with a confirmation,
+see where space goes in a treemap, restore or purge what's in quarantine, and look through the
+history, settings, and rules. As with the command line, nothing is removed without your approval,
+and each item is checked again right before it's removed. The app's window can call only
+Cleanse's own commands, and none of them takes a path to remove.
+
+### Added
+
+- The desktop app, with installers on each release:
+  - an MSI for Windows;
+  - a universal disk image for macOS, for Apple silicon and Intel;
+  - an AppImage and a deb for Linux, which need glibc 2.35 or later and WebKitGTK 4.1.
+
+  Each has a `.sha256` checksum and build provenance. They aren't signed with a publisher's
+  certificate yet, so Windows and macOS ask you to confirm the first time you open the app, and
+  the README says how. The macOS app is ad-hoc signed, so Apple silicon opens it once you approve
+  it.
+- **Scan:**
+  - Scan your home folder, or folders you choose with the system's folder picker, with live
+    progress and a way to cancel.
+  - Results come in the command line's sections, grouped by rule, and each item opens to what
+    `cleanse explain` says about it.
+  - A cleanup starts from what `cleanse clean` would select, and says what will be deleted and
+    what quarantined before anything happens. Afterwards it reports what was skipped and why.
+  - Cleaning, restoring, purging, and finishing are off while the app runs as an administrator
+    or root.
+- **Disk usage:** a folder's largest entries in a sortable table, with how much under each can be
+  removed, and a treemap of the same folder, opened folder by folder. A filter limits what counts
+  as removable to the categories you choose, as `--category` does.
+- **Quarantine:** what cleanups set aside, to restore, or to purge after a confirmation.
+- **History:** past runs, described as `cleanse history` describes them. Removals that didn't
+  finish can be completed with a button.
+- **Settings:** what `cleanse doctor` reports, and every rule in detail, as `cleanse rules show`
+  gives it.
+- **Security:** the app's window can call only Cleanse's own commands, and nothing from Tauri or
+  any plugin. It shows only the app's own content, and names everything by an ID the engine gave
+  out, so it can never name a path to remove
+  ([ADR 0009](https://github.com/zhenga8533/cleanse/blob/main/docs/src/adr/0009-desktop-web-view.md)).
+
 ## [0.3.0] - 2026-11-02
 
 Files, disk analysis, and judgment calls. Cleanse now removes files as well as folders, which
@@ -144,7 +186,8 @@ and Linux. It never removes anything; cleanup arrives in 0.2.
   cloud-synced folders, folders containing possible secrets or virtual machine disks, and
   anything that couldn't be fully read.
 
-[Unreleased]: https://github.com/zhenga8533/cleanse/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/zhenga8533/cleanse/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/zhenga8533/cleanse/releases/tag/v0.5.0
 [0.3.0]: https://github.com/zhenga8533/cleanse/releases/tag/v0.3.0
 [0.2.0]: https://github.com/zhenga8533/cleanse/releases/tag/v0.2.0
 [0.1.0]: https://github.com/zhenga8533/cleanse/releases/tag/v0.1.0

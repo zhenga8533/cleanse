@@ -7,11 +7,12 @@ mind. It looks for regenerable build output, package-manager caches, AI coding a
 and everyday junk; tells you why each item is safe to remove and how it comes back; and never
 removes anything you haven't approved.
 
-> **Status: pre-alpha.** The command line is complete: `cleanse scan` and `cleanse analyze` find
-> what could be removed and where space goes, `cleanse explain` says why, and `cleanse clean`
-> deletes what you approve, or quarantines it so `cleanse restore` can put it back.
-> [v0.3.0](https://github.com/zhenga8533/cleanse/releases/tag/v0.3.0) has prebuilt binaries and
-> installers. The desktop app comes next.
+> **Status: pre-alpha.** The command line and the desktop app are complete: `cleanse scan` and
+> `cleanse analyze` find what could be removed and where space goes, `cleanse explain` says why,
+> and `cleanse clean` deletes what you approve, or quarantines it so `cleanse restore` can put it
+> back. The [desktop app](#desktop-app) does the same in a window.
+> [v0.5.0](https://github.com/zhenga8533/cleanse/releases/tag/v0.5.0) has prebuilt binaries and
+> installers for both, not yet signed. Signed builds and system cleanup come next.
 
 ## Try it
 
@@ -131,8 +132,8 @@ Where a native tool is the right answer, Cleanse points you to it instead: `pnpm
 | M1 · v0.1 | Read-only engine and CLI: `scan`, `explain`, rules, safety checks |
 | M2 · v0.2 | Cleanup with quarantine, restore, a journal, and saved plans; AI agent and browser cache rules |
 | M3 · v0.3 | Removing files as well as folders, for temp files, logs, and crash dumps; disk analysis; large files and installers for review; advice for tools that clean themselves; CLI feature-complete |
-| M4 · v0.5 | Desktop app (Tauri + React) (current) |
-| M5 · v1.0 | Elevated system cleanup on Windows and Linux, signed builds, package managers |
+| M4 · v0.5 | Desktop app (Tauri + React): scan and clean, disk usage with a treemap, quarantine, history, and settings; installers for Windows, macOS, and Linux |
+| M5 · v1.0 | Elevated system cleanup on Windows and Linux, signed builds, package managers (current) |
 
 The design is described in the [architecture](docs/src/architecture.md) and
 [safety model](docs/src/safety-model.md) docs.
