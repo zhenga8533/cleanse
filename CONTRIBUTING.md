@@ -79,7 +79,7 @@ The reasoning is in the [decision records](docs/src/adr/README.md).
 - **Rules are data.** They match paths and describe what they found. They never run commands.
 - **No network access** in the engine or CLI.
 - **The desktop app's web view can only call the app's own commands**, and none of them takes a
-  path to remove. A new command is added to `src-tauri/build.rs` and allowed in
+  path. A new command is added to `src-tauri/build.rs` and allowed in
   `src-tauri/capabilities/main.json` ([ADR 0009](docs/src/adr/0009-desktop-web-view.md)).
 - **`unsafe` is denied** across the workspace. Per-OS code that needs it will be confined to
   `cleanse-platform`.

@@ -8,6 +8,9 @@
   --border: #d7dde0;
   --accent: #0f766e;
   --accent-text: #ffffff;
+  --danger: #b42318;
+  --danger-text: #ffffff;
+  --warns: #8a5a00;
   --warning-bg: #fff4d6;
   --warning-text: #5c4200;
   --error-bg: #fde8e8;
@@ -27,6 +30,9 @@
     --border: #2d363a;
     --accent: #2dd4bf;
     --accent-text: #062a26;
+    --danger: #f97066;
+    --danger-text: #2b0805;
+    --warns: #f5c26b;
     --warning-bg: #3a2f10;
     --warning-text: #f5dd9a;
     --error-bg: #3d1717;
@@ -46,9 +52,34 @@ h1 {
   font-weight: 600;
 }
 
+h2 {
+  margin: 0 0 4px;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+h3 {
+  margin: 12px 0 4px;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface);
+  font-family: ui-monospace, "Cascadia Mono", Menlo, monospace;
+  font-size: 0.9em;
+}
+
 .muted {
   margin: 0;
   color: var(--muted);
+}
+
+/* Paths are long and have no spaces, so they break anywhere rather than widen the page. */
+.path {
+  overflow-wrap: anywhere;
 }
 
 /* A column, since the banners come and go and the sections take whatever height is left. */
@@ -81,12 +112,14 @@ h1 {
   border-bottom: 1px solid var(--border);
 }
 
-.banner-warning {
+.banner-warning,
+.notice.warning {
   background: var(--warning-bg);
   color: var(--warning-text);
 }
 
-.banner-error {
+.banner-error,
+.notice.error {
   background: var(--error-bg);
   color: var(--error-text);
 }
@@ -131,7 +164,7 @@ h1 {
 }
 
 .panel {
-  padding: 24px 32px;
+  padding: 24px 32px 0;
   overflow: auto;
   outline: none;
 }
@@ -139,6 +172,442 @@ h1 {
 .panel[data-focus-visible] {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
+}
+
+/* A section kept mounted while another one shows. */
+.panel[data-inert] {
+  display: none;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.button {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  cursor: default;
+  outline: none;
+}
+
+.button[data-hovered] {
+  background: var(--hover);
+}
+
+.button[data-pressed] {
+  background: var(--border);
+}
+
+.button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.button.danger {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: var(--danger-text);
+}
+
+.button.quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--accent);
+}
+
+.button.primary[data-hovered],
+.button.danger[data-hovered] {
+  filter: brightness(1.1);
+}
+
+.button[data-disabled] {
+  opacity: 0.5;
+  filter: none;
+}
+
+.button[data-focus-visible],
+.group-trigger[data-focus-visible] {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.card {
+  margin: 16px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.card > .row:last-child {
+  margin-bottom: 0;
+}
+
+.folders {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.folders li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.notice {
+  margin: 12px 0;
+  padding: 8px 12px;
+  border-radius: 6px;
+}
+
+.activity {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 12px 0;
+}
+
+.progress {
+  display: grid;
+  flex: 1;
+  gap: 6px;
+}
+
+.bar {
+  position: relative;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--surface);
+}
+
+.fill {
+  height: 100%;
+  background: var(--accent);
+}
+
+.fill.indeterminate {
+  position: absolute;
+  width: 30%;
+  animation: sweep 1.2s ease-in-out infinite;
+}
+
+@keyframes sweep {
+  from {
+    left: -30%;
+  }
+  to {
+    left: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fill.indeterminate {
+    left: 0;
+    width: 100%;
+    animation: none;
+    opacity: 0.5;
+  }
+}
+
+/* The results, with an item's details beside them while one is open. */
+.scan {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  column-gap: 24px;
+}
+
+.scan.with-details {
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+}
+
+.scanned {
+  outline: none;
+}
+
+.result-section {
+  margin: 24px 0;
+}
+
+.groups {
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.group {
+  border-bottom: 1px solid var(--border);
+}
+
+.group-heading {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: normal;
+}
+
+.group-trigger {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 4px;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: default;
+  outline: none;
+}
+
+.group-trigger[data-hovered] {
+  background: var(--hover);
+}
+
+.group-name {
+  font-weight: 600;
+}
+
+.chevron {
+  display: inline-block;
+  width: 0.45em;
+  height: 0.45em;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.15s;
+}
+
+.group[data-expanded] .chevron {
+  transform: rotate(45deg);
+}
+
+.group-panel {
+  padding: 0 0 8px 20px;
+}
+
+.items {
+  display: grid;
+  outline: none;
+}
+
+.item {
+  display: grid;
+  grid-template-columns: auto 6.5em minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: default;
+  outline: none;
+}
+
+/* Kept items have no checkbox. */
+.items:not([aria-multiselectable]) .item {
+  grid-template-columns: 6.5em minmax(0, 1fr) auto;
+}
+
+.item .button {
+  padding: 0 8px;
+}
+
+.item[data-hovered] {
+  background: var(--hover);
+}
+
+.item[data-focus-visible] {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.item-size {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.item-main {
+  display: grid;
+  gap: 2px;
+}
+
+.item-note {
+  font-size: 0.9rem;
+}
+
+.warns {
+  color: var(--warns);
+}
+
+.keeps {
+  color: var(--muted);
+}
+
+.checkbox {
+  display: flex;
+  padding-top: 4px;
+}
+
+.box {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 15px;
+  height: 15px;
+  border: 1.5px solid var(--muted);
+  border-radius: 3px;
+}
+
+.checkbox[data-selected] .box {
+  border-color: var(--accent);
+  background:
+    var(--accent)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-7' fill='none' stroke='white' stroke-width='2'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+
+.details {
+  position: sticky;
+  top: 8px;
+  align-self: start;
+  max-height: calc(100vh - 140px);
+  overflow: auto;
+  margin-top: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+/* Too narrow for both side by side, so the details float over the results. */
+@media (max-width: 1000px) {
+  .scan.with-details {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .details {
+    position: fixed;
+    top: 56px;
+    right: 16px;
+    bottom: 72px;
+    z-index: 5;
+    width: min(340px, calc(100vw - 32px));
+    max-height: none;
+    margin: 0;
+    box-shadow: 0 10px 30px rgb(0 0 0 / 0.25);
+  }
+}
+
+.details-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.details-header h2,
+.report h2 {
+  overflow-wrap: anywhere;
+  outline: none;
+}
+
+.details dl {
+  display: grid;
+  gap: 2px;
+  margin: 12px 0 0;
+}
+
+.details dt {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.details dd {
+  margin: 0;
+}
+
+.details ul,
+.problems {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.problems li {
+  display: grid;
+  margin: 4px 0;
+}
+
+.tag {
+  padding: 0 6px;
+  border: 1px solid currentColor;
+  border-radius: 10px;
+  font-size: 0.8rem;
+}
+
+/* Stays in view at the bottom of the section while the results scroll. */
+.clean-bar {
+  position: sticky;
+  bottom: 0;
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  margin-top: 16px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.clean-bar .button {
+  margin-left: auto;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 0.4);
+}
+
+.modal {
+  max-width: min(520px, calc(100vw - 48px));
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.25);
+}
+
+.dialog {
+  padding: 20px 24px;
+  outline: none;
+}
+
+.dialog h2 {
+  font-size: 1.15rem;
+}
+
+.dialog p {
+  margin: 10px 0;
+}
+
+.dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
 }
 
 @media (forced-colors: active) {
@@ -149,7 +618,22 @@ h1 {
   }
 
   .react-aria-Tab[data-focus-visible],
-  .panel[data-focus-visible] {
+  .panel[data-focus-visible],
+  .button[data-focus-visible],
+  .group-trigger[data-focus-visible],
+  .item[data-focus-visible] {
     outline-color: Highlight;
+  }
+
+  .fill,
+  .checkbox[data-selected] .box {
+    forced-color-adjust: none;
+    border-color: Highlight;
+    background: Highlight;
+  }
+
+  .button[data-disabled] {
+    border-color: GrayText;
+    color: GrayText;
   }
 }

@@ -4,7 +4,18 @@ use std::path::Path;
 fn main() {
     // Listing the app's commands makes each one refused unless a capability allows it, so the
     // web view can only call what `capabilities/` names.
-    let commands = tauri_build::AppManifest::new().commands(&["app_info"]);
+    let commands = tauri_build::AppManifest::new().commands(&[
+        "app_info",
+        "folders",
+        "pick_folders",
+        "remove_folder",
+        "scan",
+        "cancel",
+        "summary",
+        "candidates",
+        "explain",
+        "clean",
+    ]);
 
     // Tauri's Windows code needs Common Controls v6, which a program only gets if its manifest
     // asks for it. tauri-build embeds such a manifest in the app alone, and test programs without
