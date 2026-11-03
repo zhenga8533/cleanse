@@ -161,6 +161,51 @@ fn scans_the_chosen_folders_and_reads_the_results() {
 
     let again = app.invoke("summary", json!({ "scan": scan })).unwrap();
     assert_eq!(again["sections"][0]["items"], 1);
+    assert_eq!(again["categories"][0]["category"], "dependencies");
+}
+
+#[test]
+fn shows_where_space_goes_folder_by_folder() {
+    let root = tempfile::tempdir().unwrap();
+    project(root.path());
+    let app = TestApp::new();
+    app.choose(root.path());
+    let scan = app.invoke("scan", json!({ "progress": CHANNEL })).unwrap()["scan"].clone();
+    let folder = |node: &Value, categories: Value| {
+        app.invoke(
+            "folder",
+            json!({ "scan": scan, "node": node, "limit": 10, "categories": categories }),
+        )
+    };
+    let named = |view: &Value, name: &str| -> Value {
+        view["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["name"] == name)
+            .cloned()
+            .unwrap_or_else(|| panic!("no {name} in {view}"))
+    };
+
+    let roots = folder(&Value::Null, json!([])).unwrap();
+    assert_eq!(roots["trail"], json!([]));
+    let top = folder(&roots["entries"][0]["node"], json!([])).unwrap();
+    let project = named(&top, "app");
+    let inside = folder(&project["node"], json!([])).unwrap();
+    let node_modules = named(&inside, "node_modules");
+
+    assert_eq!(inside["trail"].as_array().unwrap().len(), 2);
+    assert_eq!(node_modules["kind"], "item");
+    assert_eq!(node_modules["item"]["ruleName"], "Node.js dependencies");
+    assert_eq!(project["removable"], node_modules["usage"]["onDisk"]);
+    let logs_only = folder(&top["entries"][0]["node"], json!(["logs"])).unwrap();
+    assert_eq!(logs_only["entries"][0]["removable"], 0);
+    assert!(
+        folder(&Value::Null, json!(["no_such_category"]))
+            .unwrap_err()
+            .to_string()
+            .contains("no category")
+    );
 }
 
 #[test]

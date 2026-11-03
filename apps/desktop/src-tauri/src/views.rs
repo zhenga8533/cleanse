@@ -3,9 +3,11 @@
 //!
 //! Paths are here to be shown, never sent back: the web view names items by their IDs.
 
+use std::cmp::Reverse;
+use std::collections::BTreeMap;
 use std::path::Path;
 
-use cleanse_engine::{self as engine, Explained, Progress, RuleSet, Summary, advice};
+use cleanse_engine::{self as engine, Explained, NodeKind, Progress, RuleSet, Summary, advice};
 use cleanse_model::{self as model, Candidate};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -188,10 +190,17 @@ pub(crate) struct Results {
     /// What a cleanup selects to begin with, as `cleanse clean` does: Safe and Regenerable items
     /// with nothing to warn about.
     pub preselected: Vec<Choice>,
+    /// What can be removed in each category, largest first.
+    pub categories: Vec<CategoryTotal>,
 }
 
 impl Results {
-    pub(crate) fn new(summary: Summary, rules: &RuleSet, preselected: Vec<Choice>) -> Self {
+    pub(crate) fn new(
+        summary: Summary,
+        rules: &RuleSet,
+        preselected: Vec<Choice>,
+        categories: Vec<CategoryTotal>,
+    ) -> Self {
         Self {
             scan: summary.scan.0,
             roots: summary.roots.iter().map(|root| lossy(root)).collect(),
@@ -220,6 +229,7 @@ impl Results {
                 .collect(),
             removed: summary.removed.into(),
             preselected,
+            categories,
         }
     }
 }
@@ -243,6 +253,41 @@ pub(crate) struct RuleTotal {
     pub name: String,
     pub items: usize,
     pub size: Size,
+}
+
+/// What can be removed in one category.
+#[derive(Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct CategoryTotal {
+    /// The name `--category` takes, like `build_output`.
+    pub category: String,
+    pub name: String,
+    pub items: usize,
+    pub size: Size,
+}
+
+impl CategoryTotal {
+    /// The totals of `removable`, by category, largest first.
+    pub(crate) fn of<'c>(removable: impl IntoIterator<Item = &'c Candidate>) -> Vec<Self> {
+        let mut by_category: BTreeMap<model::Category, (usize, model::Size)> = BTreeMap::new();
+        for candidate in removable {
+            let total = by_category.entry(candidate.found.category).or_default();
+            total.0 += 1;
+            total.1 += candidate.found.size;
+        }
+        let mut totals: Vec<Self> = by_category
+            .into_iter()
+            .map(|(category, (items, size))| Self {
+                category: category.id().to_owned(),
+                name: category.to_string(),
+                items,
+                size: size.into(),
+            })
+            .collect();
+        totals.sort_by_key(|total| Reverse(total.size.on_disk));
+        totals
+    }
 }
 
 /// An item a cleanup can remove, and how.
@@ -395,6 +440,134 @@ pub(crate) struct Amount {
 pub(crate) struct Problem {
     pub path: String,
     pub reason: String,
+}
+
+/// How much space a folder takes, in bytes.
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct Usage {
+    #[ts(type = "number")]
+    pub logical: u64,
+    #[ts(type = "number")]
+    pub on_disk: u64,
+}
+
+impl From<engine::Usage> for Usage {
+    fn from(usage: engine::Usage) -> Self {
+        Self {
+            logical: usage.logical,
+            on_disk: usage.on_disk,
+        }
+    }
+}
+
+/// What a folder entry is.
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) enum EntryKind {
+    Folder,
+    /// Something a rule recognized, counted whole.
+    Item,
+    /// A folder on another filesystem, which the scan didn't enter or measure.
+    OtherFilesystem,
+}
+
+impl From<NodeKind> for EntryKind {
+    fn from(kind: NodeKind) -> Self {
+        match kind {
+            NodeKind::Folder => Self::Folder,
+            NodeKind::Item => Self::Item,
+            NodeKind::OtherFilesystem => Self::OtherFilesystem,
+        }
+    }
+}
+
+/// One folder of a scan's size tree, or its roots, with its largest entries.
+#[derive(Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct FolderView {
+    /// The folders from a root down to this one. Empty for the roots.
+    pub trail: Vec<FolderEntry>,
+    /// Its largest entries, or the roots, largest first.
+    pub entries: Vec<FolderEntry>,
+    /// How many `entries` leaves out, and how much they take.
+    pub hidden: usize,
+    #[ts(type = "number")]
+    pub hidden_on_disk: u64,
+    /// The files directly in it, which have no entries of their own.
+    #[ts(type = "number")]
+    pub own_files: u64,
+    pub own_usage: Usage,
+    #[ts(type = "number")]
+    pub own_removable: u64,
+}
+
+#[derive(Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct FolderEntry {
+    /// Names the folder for the `folder` command.
+    pub node: u32,
+    /// A root's whole path, or the name inside its folder.
+    pub name: String,
+    pub path: String,
+    pub kind: EntryKind,
+    pub usage: Usage,
+    #[ts(type = "number")]
+    pub files: u64,
+    /// How much at or inside it can be removed, counting only the categories asked for.
+    #[ts(type = "number")]
+    pub removable: u64,
+    /// Part of it couldn't be read, so it takes more than shown.
+    pub incomplete: bool,
+    /// It has entries inside it to show.
+    pub has_children: bool,
+    /// The item a rule recognized here, unless it's been removed since the scan.
+    pub item: Option<EntryItem>,
+}
+
+impl FolderEntry {
+    pub(crate) fn new(entry: &engine::FolderEntry, item: Option<EntryItem>) -> Self {
+        Self {
+            node: entry.node.index(),
+            name: entry.name.to_string_lossy().into_owned(),
+            path: lossy(&entry.path),
+            kind: entry.kind.into(),
+            usage: entry.usage.into(),
+            files: entry.files,
+            removable: entry.removable,
+            incomplete: entry.incomplete,
+            has_children: entry.has_children,
+            item,
+        }
+    }
+}
+
+/// What a rule made of an item in the size tree.
+#[derive(Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct EntryItem {
+    #[ts(type = "number")]
+    pub id: u64,
+    pub rule_name: String,
+    pub risk: Risk,
+    /// The command that cleans it better, if its own tool does.
+    pub command: Option<String>,
+}
+
+impl EntryItem {
+    pub(crate) fn new(explained: &Explained, rules: &RuleSet) -> Self {
+        Self {
+            id: explained.candidate.id.0,
+            rule_name: explained.rule.name.clone(),
+            risk: explained.candidate.risk().into(),
+            command: advice(rules, &explained.candidate).map(str::to_owned),
+        }
+    }
 }
 
 /// For display only: names that aren't valid Unicode get replacement characters.

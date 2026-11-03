@@ -14,16 +14,16 @@ use std::fmt::Display;
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use cleanse_engine::{Cleaned, Probe, ScanId, Section, Session, SessionError};
-use cleanse_model::{self as model, CandidateId, Outcome, RuleId};
+use cleanse_engine::{Cleaned, FolderEntry, Probe, ScanId, Section, Session, SessionError};
+use cleanse_model::{self as model, CandidateId, Category, Outcome, RuleId};
 use rfd::AsyncFileDialog;
 use tauri::ipc::{Channel, IpcResponse};
 use tauri::{Runtime, State, WebviewWindow};
 
 use crate::AppState;
 use crate::views::{
-    self, Amount, AppInfo, Choice, CleanReport, Details, Folders, Item, ItemPage, Problem, Results,
-    ScanProgress, lossy,
+    self, Amount, AppInfo, CategoryTotal, Choice, CleanReport, Details, EntryItem, Folders, Item,
+    ItemPage, Problem, Results, ScanProgress, lossy,
 };
 
 #[tauri::command]
@@ -149,6 +149,59 @@ pub(crate) fn explain(state: State<'_, AppState>, scan: u64, item: u64) -> Resul
     Ok(Details::new(&explained, session.engine().rules()))
 }
 
+/// The folder `node` names, or the scan's roots, with its largest entries up to `limit`. Only
+/// items in `categories` count as removable, or every item if there are none.
+#[tauri::command(async)]
+pub(crate) fn folder(
+    state: State<'_, AppState>,
+    scan: u64,
+    node: Option<u32>,
+    limit: usize,
+    categories: Vec<String>,
+) -> Result<views::FolderView, String> {
+    let session = state.session()?;
+    let scan = ScanId(scan);
+    let categories = categories
+        .iter()
+        .map(|id| {
+            Category::ALL
+                .into_iter()
+                .find(|category| category.id() == id)
+                .ok_or_else(|| format!("There's no category {id}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let view = session
+        .folder(scan, node, limit, &categories)
+        .map_err(message)?;
+    let rules = session.engine().rules();
+    let entry = |entry: FolderEntry| -> Result<views::FolderEntry, String> {
+        let item = entry
+            .candidate
+            .map(|id| session.explain(scan, id))
+            .transpose()
+            .map_err(message)?
+            .map(|explained| EntryItem::new(&explained, rules));
+        Ok(views::FolderEntry::new(&entry, item))
+    };
+    Ok(views::FolderView {
+        trail: view
+            .trail
+            .into_iter()
+            .map(entry)
+            .collect::<Result<_, _>>()?,
+        entries: view
+            .entries
+            .into_iter()
+            .map(entry)
+            .collect::<Result<_, _>>()?,
+        hidden: view.hidden,
+        hidden_on_disk: view.hidden_on_disk,
+        own_files: view.own_files,
+        own_usage: view.own_usage.into(),
+        own_removable: view.own_removable,
+    })
+}
+
 /// Removes the items `items` names, each the way its tier says, after checking each again, and
 /// reports what happened to each. What's removed leaves the results.
 #[tauri::command]
@@ -206,14 +259,21 @@ async fn run<T: Send + 'static>(
 
 fn results(session: &Session, scan: ScanId) -> Result<Results, SessionError> {
     let summary = session.summary(scan)?;
-    let preselected = session
-        .candidates(scan, Section::Removable, None, 0, usize::MAX)?
+    let removable = session.candidates(scan, Section::Removable, None, 0, usize::MAX)?;
+    let review = session.candidates(scan, Section::Review, None, 0, usize::MAX)?;
+    let preselected = removable
         .items
         .iter()
         .filter(|candidate| candidate.preselected())
         .filter_map(Choice::of)
         .collect();
-    Ok(Results::new(summary, session.engine().rules(), preselected))
+    let categories = CategoryTotal::of(removable.items.iter().chain(&review.items));
+    Ok(Results::new(
+        summary,
+        session.engine().rules(),
+        preselected,
+        categories,
+    ))
 }
 
 fn report(session: &Session, scan: ScanId, cleaned: Cleaned) -> Result<CleanReport, SessionError> {

@@ -23,10 +23,12 @@ type Running =
 interface Props {
   /** Cleanse runs elevated, so it won't remove anything. */
   elevated: boolean;
+  /** Told the scan whose results show, whenever they change. */
+  onResults: (scan: number) => void;
 }
 
 /** Choose folders, scan them, look through what was found, and clean up. */
-export function ScanScreen({ elevated }: Props) {
+export function ScanScreen({ elevated, onResults }: Props) {
   const [folders, setFolders] = useState<Folders | null>(null);
   const [running, setRunning] = useState<Running>({ kind: "nothing" });
   const [results, setResults] = useState<Results | null>(null);
@@ -54,6 +56,7 @@ export function ScanScreen({ elevated }: Props) {
         setRunning((running) => (running.kind === "scan" ? { ...running, progress } : running)),
       );
       setResults(found);
+      onResults(found.scan);
       setChosen(new Map(found.preselected.map((choice) => [choice.id, choice])));
       setVersion((version) => version + 1);
     } catch (error) {
@@ -81,6 +84,7 @@ export function ScanScreen({ elevated }: Props) {
       setChosen(new Map());
       setShown(null);
       setResults(await api.summary(results.scan));
+      onResults(results.scan);
       setVersion((version) => version + 1);
     } catch (error) {
       fail(error);
