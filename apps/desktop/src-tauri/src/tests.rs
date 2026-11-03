@@ -2,15 +2,13 @@ use tauri::ipc::{CallbackFn, InvokeBody, InvokeResponseBody};
 use tauri::test::{INVOKE_KEY, get_ipc_response, mock_builder};
 use tauri::webview::InvokeRequest;
 
-use crate::{configure, is_own_content, open_window};
+use crate::{configure, context, is_own_content, open_window};
 
 /// Calls `cmd` from the app's window, in the app as it's built for real, with its capabilities,
 /// on a runtime that shows nothing. The call comes from the window's own content unless `from`
 /// says otherwise.
 fn invoke_from(cmd: &str, from: Option<&str>) -> Result<InvokeResponseBody, serde_json::Value> {
-    let app = configure(mock_builder())
-        .build(tauri::generate_context!())
-        .unwrap();
+    let app = configure(mock_builder()).build(context()).unwrap();
     let window = open_window(&app).unwrap();
     let url = match from {
         Some(url) => url.parse().unwrap(),

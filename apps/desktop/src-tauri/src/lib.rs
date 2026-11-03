@@ -27,8 +27,14 @@ pub fn run() {
             open_window(app)?;
             Ok(())
         })
-        .run(tauri::generate_context!())
+        .run(context())
         .expect("the app couldn't start");
+}
+
+/// The app's configuration and assets. On macOS, `generate_context!` embeds the app's
+/// Info.plist under a fixed symbol, so a program can only expand it once.
+pub(crate) fn context<R: Runtime>() -> tauri::Context<R> {
+    tauri::generate_context!()
 }
 
 /// The app's state and commands, for any runtime, so tests can use a mock one.
