@@ -43,3 +43,7 @@ version_group = "cleanse"
 [[package]]
 name = "cleanse-platform"
 version_group = "cleanse"
+
+[[package]]
+name = "cleanse-desktop"
+version_group = "cleanse"

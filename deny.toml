@@ -1,9 +1,21 @@
 [graph]
 all-features = true
+# The platforms Cleanse ships for. Tauri depends on an HTTP client only on iOS and Android, so
+# checking every target would flag crates the desktop app never builds.
+targets = [
+    "aarch64-apple-darwin",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+]
 
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error is unmaintained. Only gtk-rs's GTK3 macros (glib-macros, gtk3-macros) use it, at build time, for the WebKitGTK web view Tauri uses on Linux." },
+]
 
 [licenses]
 version = 2
@@ -25,6 +37,24 @@ unused-allowed-license = "allow"
 # Cleanse. It comes in through dirs-sys, which `dirs` uses for known-folder lookup.
 [[licenses.exceptions]]
 crate = "option-ext"
+allow = ["MPL-2.0"]
+
+# The same kind of file-level copyleft: Servo's CSS parser, which only Tauri's proc macros use,
+# to process the app's HTML while it's compiled. None of it is linked into the app.
+[[licenses.exceptions]]
+crate = "cssparser"
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+crate = "cssparser-macros"
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+crate = "dtoa-short"
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+crate = "selectors"
 allow = ["MPL-2.0"]
 
 [bans]

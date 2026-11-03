@@ -1,2 +1,2 @@
 [files]
-extend-exclude = ["LICENSE-APACHE", "LICENSE-MIT"]
+extend-exclude = ["LICENSE-APACHE", "LICENSE-MIT", "pnpm-lock.yaml"]

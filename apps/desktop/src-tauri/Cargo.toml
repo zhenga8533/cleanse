@@ -1,0 +1,29 @@
+[package]
+name = "cleanse-desktop"
+description = "The Cleanse desktop app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# Tauri builds and bundles the app, not dist.
+[package.metadata.dist]
+dist = false
+
+[dependencies]
+cleanse-engine.workspace = true
+serde.workspace = true
+tauri = { workspace = true, features = ["isolation"] }
+ts-rs.workspace = true
+
+[build-dependencies]
+tauri-build = { workspace = true, features = ["isolation"] }
+
+[dev-dependencies]
+serde_json.workspace = true
+tauri = { workspace = true, features = ["test"] }
+
+[lints]
+workspace = true
