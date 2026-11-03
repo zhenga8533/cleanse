@@ -57,6 +57,30 @@ disabled_rules = ["unity.library"]
 large_file_size = "1 GiB"
 ```
 
+## Desktop app
+
+The desktop app does what the command line does, in a window: scan and clean, see where space
+goes, and manage the quarantine, history, and settings. Releases from v0.5.0 on include its
+installers, each with a `.sha256` checksum beside it:
+
+| System | File | Installing it |
+|---|---|---|
+| Windows 10 and 11 | `Cleanse_<version>_x64_en-US.msi` | Run it. |
+| macOS, Apple silicon and Intel | `Cleanse_<version>_universal.dmg` | Open it and drag Cleanse to Applications. |
+| Linux | `Cleanse_<version>_amd64.AppImage` | `chmod +x` it, then run it. It needs FUSE 2 (`libfuse2`). |
+| Debian and Ubuntu | `Cleanse_<version>_amd64.deb` | `sudo apt install ./Cleanse_<version>_amd64.deb` |
+
+The Linux builds need glibc 2.35 or later (Ubuntu 22.04, Debian 12) and WebKitGTK 4.1.
+
+The installers aren't signed with a publisher's certificate yet, so the first time you open
+Cleanse, your system asks you to confirm it:
+
+- **Windows:** SmartScreen says "Windows protected your PC". Choose **More info**, then **Run
+  anyway**. If Smart App Control is on, it blocks unsigned apps outright, and the command line is
+  the way to use Cleanse until the installers are signed.
+- **macOS:** the app is ad-hoc signed, so macOS opens it once you approve it. After the first
+  attempt to open it, go to **System Settings → Privacy & Security** and choose **Open Anyway**.
+
 ## What makes it different
 
 - **It explains itself.** Every item carries the rule that matched it, the evidence (for

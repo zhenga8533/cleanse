@@ -26,12 +26,21 @@
   },
   "bundle": {
     "active": true,
+    "category": "Utility",
+    "shortDescription": "Find and safely remove the files you don't need",
+    "longDescription": "Cleanse finds regenerable build output, package caches, and everyday junk, explains why each item is safe to remove, and removes only what you approve.",
+    "license": "MIT OR Apache-2.0",
+    "publisher": "The Cleanse Contributors",
+    "copyright": "Copyright (c) 2026 The Cleanse Contributors",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "macOS": {
+      "signingIdentity": "-"
+    }
   }
 }

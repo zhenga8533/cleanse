@@ -7,6 +7,7 @@ import type { CleanReport } from "../bindings/CleanReport";
 import type { Item } from "../bindings/Item";
 import type { Section } from "../bindings/Section";
 import { details, HOME_FOLDER, ITEMS, results } from "../dev/sample";
+import { findGrid } from "../test/grids";
 import { ScanScreen } from "./ScanScreen";
 
 const REPORT: CleanReport = {
@@ -90,7 +91,7 @@ it("lists a rule's items once it's opened, and chooses with their checkboxes", a
   const { user } = await scanned();
 
   await user.click(screen.getByRole("button", { name: /^Node\.js dependencies/ }));
-  const list = await screen.findByRole("grid", { name: "Node.js dependencies, Can be removed" });
+  const list = await findGrid("Node.js dependencies, Can be removed");
   const rows = within(list).getAllByRole("row");
   expect(rows.map((row) => row.textContent)).toEqual([
     expect.stringContaining("web\\node_modules"),
@@ -121,9 +122,7 @@ it("says what goes to quarantine when Review items are chosen", async () => {
   const { user } = await scanned();
 
   await user.click(screen.getByRole("button", { name: /^Installers in Downloads/ }));
-  const list = await screen.findByRole("grid", {
-    name: "Installers in Downloads, Needs your review",
-  });
+  const list = await findGrid("Installers in Downloads, Needs your review");
   expect(within(list).getByRole("row").textContent).toContain("modified 210 days ago");
   await user.click(within(list).getByRole("checkbox"));
   await user.click(screen.getByRole("button", { name: "Clean…" }));
@@ -167,7 +166,7 @@ it("explains an item when it's opened", async () => {
   const { user } = await scanned();
 
   await user.click(screen.getByRole("button", { name: /^Git repository data/ }));
-  const list = await screen.findByRole("grid", { name: "Git repository data, Kept" });
+  const list = await findGrid("Git repository data, Kept");
   await user.click(within(list).getByText(/notes\\\.git/));
 
   const panel = await screen.findByRole("complementary", { name: ".git" });
@@ -179,7 +178,7 @@ it("explains an item when it's opened", async () => {
 it("opens a chosen item's details from its button, and goes back there on closing", async () => {
   const { user } = await scanned();
   await user.click(screen.getByRole("button", { name: /^Node\.js dependencies/ }));
-  const list = await screen.findByRole("grid", { name: "Node.js dependencies, Can be removed" });
+  const list = await findGrid("Node.js dependencies, Can be removed");
   const first = within(list).getAllByRole("row")[0] as HTMLElement;
   const button = within(first).getByRole("button", { name: "Details" });
 

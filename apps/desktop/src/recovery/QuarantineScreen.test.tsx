@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { expect, it } from "vitest";
 import type { Handled } from "../bindings/Handled";
 import { QUARANTINE } from "../dev/sample";
+import { findGrid } from "../test/grids";
 import { QuarantineScreen } from "./QuarantineScreen";
 
 const PURGED: Handled = {
@@ -47,8 +48,8 @@ it("lists what's in quarantine, oldest first", async () => {
   engine();
   render(<QuarantineScreen elevated={false} />);
 
-  const table = await screen.findByRole("grid", { name: "What's in quarantine" });
-  const rows = (await within(table).findAllByRole("row")).slice(1);
+  const table = await findGrid("What's in quarantine");
+  const rows = within(table).getAllByRole("row").slice(1);
   expect(rows.map((row) => row.textContent)).toEqual([
     expect.stringContaining("driver-pack.zip"),
     expect.stringContaining("old-setup.msi"),
@@ -61,7 +62,7 @@ it("restores what's chosen, and says what couldn't be", async () => {
   const calls = engine();
   const user = userEvent.setup();
   render(<QuarantineScreen elevated={false} />);
-  const table = await screen.findByRole("grid", { name: "What's in quarantine" });
+  const table = await findGrid("What's in quarantine");
 
   await user.click(within(table).getAllByRole("checkbox")[2] as HTMLElement);
   await user.click(screen.getByRole("button", { name: "Restore" }));
@@ -77,7 +78,7 @@ it("asks before purging, starting at no", async () => {
   const calls = engine();
   const user = userEvent.setup();
   render(<QuarantineScreen elevated={false} />);
-  const table = await screen.findByRole("grid", { name: "What's in quarantine" });
+  const table = await findGrid("What's in quarantine");
 
   await user.click(within(table).getAllByRole("checkbox")[1] as HTMLElement);
   await user.click(screen.getByRole("button", { name: "Purge…" }));
@@ -101,7 +102,7 @@ it("turns restoring and purging off while elevated", async () => {
   engine();
   const user = userEvent.setup();
   render(<QuarantineScreen elevated={true} />);
-  const table = await screen.findByRole("grid", { name: "What's in quarantine" });
+  const table = await findGrid("What's in quarantine");
 
   await user.click(within(table).getAllByRole("checkbox")[1] as HTMLElement);
 
