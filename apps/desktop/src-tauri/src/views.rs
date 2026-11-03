@@ -7,7 +7,10 @@ use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use cleanse_engine::{self as engine, Explained, NodeKind, Progress, RuleSet, Summary, advice};
+use cleanse_engine::{
+    self as engine, Action, Entry, Explained, NodeKind, Os, Progress, Rule, RuleSet, Summary,
+    Target, advice,
+};
 use cleanse_model::{self as model, Candidate};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -434,6 +437,15 @@ pub(crate) struct Amount {
     pub size: Size,
 }
 
+impl From<(usize, model::Size)> for Amount {
+    fn from((items, size): (usize, model::Size)) -> Self {
+        Self {
+            items,
+            size: size.into(),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
@@ -566,6 +578,328 @@ impl EntryItem {
             rule_name: explained.rule.name.clone(),
             risk: explained.candidate.risk().into(),
             command: advice(rules, &explained.candidate).map(str::to_owned),
+        }
+    }
+}
+
+/// What's in quarantine.
+#[derive(Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct QuarantineView {
+    /// Oldest first.
+    pub entries: Vec<QuarantinedItem>,
+    /// Records that couldn't be read, so whatever they describe isn't listed.
+    pub unreadable: Vec<String>,
+}
+
+#[derive(Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct QuarantinedItem {
+    /// Names it for `restore` and `purge`.
+    pub id: String,
+    /// Where it was, and where restoring it puts it back.
+    pub original: String,
+    pub rule: String,
+    pub rule_name: String,
+    /// What it takes up, and what purging it frees.
+    pub size: Size,
+    /// When it was quarantined, in seconds since the Unix epoch.
+    #[ts(type = "number")]
+    pub at: u64,
+}
+
+impl QuarantinedItem {
+    pub(crate) fn new(entry: &model::QuarantineEntry, rules: &RuleSet) -> Self {
+        Self {
+            id: entry.id.clone(),
+            original: lossy(&entry.original),
+            rule: entry.rule.0.clone(),
+            rule_name: rule_name(rules, &entry.rule),
+            size: entry.size.into(),
+            at: entry.at,
+        }
+    }
+}
+
+/// What restoring, purging, or finishing did.
+#[derive(Debug, Default, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct Handled {
+    /// What was restored, purged, or removed, and how much space it takes or freed.
+    pub done: Amount,
+    /// What couldn't be, and why.
+    pub failed: Vec<Problem>,
+    /// The journal file recording the run, unless there was nothing to do.
+    pub journal: Option<String>,
+}
+
+/// What Cleanse has done before.
+#[derive(Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct HistoryView {
+    /// Most recent first.
+    pub runs: Vec<RunView>,
+    /// Removals that started but whose item is still on disk, under its tombstone name.
+    pub leftovers: Vec<LeftoverView>,
+    /// Journal files that couldn't be read.
+    pub unreadable: Vec<String>,
+}
+
+/// The command that made a run.
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) enum Command {
+    Clean,
+    Restore,
+    Purge,
+    Finish,
+}
+
+impl From<Action> for Command {
+    fn from(action: Action) -> Self {
+        match action {
+            Action::Apply => Self::Clean,
+            Action::Restore => Self::Restore,
+            Action::Purge => Self::Purge,
+            Action::Finish => Self::Finish,
+        }
+    }
+}
+
+/// One run that changed something, and what it did.
+#[derive(Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct RunView {
+    pub journal: String,
+    /// When it started, in seconds since the Unix epoch.
+    #[ts(type = "number")]
+    pub at: u64,
+    pub command: Command,
+    /// How many items it set out to handle.
+    pub items: usize,
+    pub deleted: Amount,
+    pub quarantined: Amount,
+    pub restored: usize,
+    pub purged: Amount,
+    pub skipped: usize,
+    pub failed: usize,
+    /// It didn't record its end, such as because it crashed.
+    pub cut_short: bool,
+}
+
+impl RunView {
+    pub(crate) fn new(run: &engine::Run) -> Self {
+        let mut deleted = (0, model::Size::default());
+        let mut quarantined = (0, model::Size::default());
+        let mut purged = (0, model::Size::default());
+        let (mut restored, mut skipped, mut failed) = (0, 0, 0);
+        for outcome in &run.outcomes {
+            match outcome {
+                model::Outcome::Deleted { size } => {
+                    deleted.0 += 1;
+                    deleted.1 += *size;
+                }
+                model::Outcome::Quarantined { size, .. } => {
+                    quarantined.0 += 1;
+                    quarantined.1 += *size;
+                }
+                model::Outcome::Skipped { .. } => skipped += 1,
+                model::Outcome::Failed { .. } => failed += 1,
+            }
+        }
+        for outcome in &run.entry_outcomes {
+            match outcome {
+                model::EntryOutcome::Restored => restored += 1,
+                model::EntryOutcome::Purged { size } => {
+                    purged.0 += 1;
+                    purged.1 += *size;
+                }
+                model::EntryOutcome::Failed { .. } => failed += 1,
+            }
+        }
+        Self {
+            journal: lossy(&run.journal),
+            at: run.at,
+            command: run.action.into(),
+            items: run.items,
+            deleted: deleted.into(),
+            quarantined: quarantined.into(),
+            restored,
+            purged: purged.into(),
+            skipped,
+            failed,
+            cut_short: !run.finished,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct LeftoverView {
+    /// Where the item was before it was renamed.
+    pub original: String,
+    /// Where what's left of it is now.
+    pub tombstone: String,
+    pub rule: String,
+}
+
+impl From<&engine::Leftover> for LeftoverView {
+    fn from(leftover: &engine::Leftover) -> Self {
+        Self {
+            original: lossy(&leftover.original),
+            tombstone: lossy(&leftover.tombstone),
+            rule: leftover.rule.0.clone(),
+        }
+    }
+}
+
+/// How Cleanse is set up on this system, as `cleanse doctor` reports it.
+#[derive(Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct SettingsView {
+    pub version: String,
+    pub os: String,
+    pub arch: String,
+    pub elevated: bool,
+    /// The settings file, unless this system has no folder for app settings.
+    pub path: Option<String>,
+    /// The settings file exists. Without one, the defaults apply.
+    pub exists: bool,
+    /// Folders Cleanse leaves alone, with everything inside them.
+    pub exclude: Vec<String>,
+    /// Rules the settings turn off.
+    pub disabled_rules: Vec<String>,
+    /// Files taking at least this much space on disk count as large.
+    #[ts(type = "number")]
+    pub large_file_size: u64,
+    pub cloud_sync_detection: String,
+    /// The system's folders Cleanse knows about, and where they are, if the system has them.
+    pub folders: Vec<KnownFolder>,
+}
+
+#[derive(Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct KnownFolder {
+    pub name: String,
+    pub path: Option<String>,
+}
+
+/// A rule, as `cleanse rules show` describes it.
+#[derive(Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct RuleView {
+    pub id: String,
+    pub name: String,
+    pub category: String,
+    pub risk: Risk,
+    /// Why what it matches is safe to remove.
+    pub explain: String,
+    /// How what it matches comes back, when that takes a deliberate step.
+    pub regenerate: Option<String>,
+    /// The command that cleans what it matches better, which Cleanse only shows.
+    pub advise: Option<String>,
+    pub matches: RuleMatch,
+    /// The app whose running keeps what it matches.
+    pub owner: Option<String>,
+    /// What it matches is kept until unchanged for this many days.
+    pub idle_days: Option<u32>,
+    /// How many small trees check the rule.
+    pub tests: usize,
+}
+
+/// What a rule matches.
+#[derive(Debug, Serialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) enum RuleMatch {
+    /// A folder inside a project.
+    ProjectArtifact {
+        names: Vec<String>,
+        /// Files next to it, at least one of which must exist.
+        markers: Vec<String>,
+        /// Files inside it, all of which must exist.
+        contains: Vec<String>,
+        /// Only where the project's Git repository ignores it.
+        git_ignored: bool,
+    },
+    /// Places on this operating system, like `Home/.npm`. Empty if the rule has none here.
+    KnownLocation {
+        locations: Vec<String>,
+        entry: LocationEntry,
+    },
+    /// Files at least this large, outside the folders apps keep their data in.
+    LargeFile {
+        #[ts(type = "number")]
+        size: u64,
+    },
+}
+
+/// What a known location matches.
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) enum LocationEntry {
+    Folder,
+    Files,
+    FilesAndFolders,
+}
+
+impl RuleView {
+    pub(crate) fn new(rule: &Rule, large_file_size: u64) -> Self {
+        let matches = match &rule.target {
+            Target::ProjectArtifact {
+                names,
+                markers,
+                contains,
+                require_git_ignored,
+            } => RuleMatch::ProjectArtifact {
+                names: names.clone(),
+                markers: markers.clone(),
+                contains: contains.clone(),
+                git_ignored: *require_git_ignored,
+            },
+            Target::KnownLocation { locations, entry } => RuleMatch::KnownLocation {
+                locations: locations
+                    .iter()
+                    .filter(|location| location.os == Os::current())
+                    .map(|location| format!("{:?}/{}", location.base, location.path))
+                    .collect(),
+                entry: match entry {
+                    Entry::Dir => LocationEntry::Folder,
+                    Entry::File => LocationEntry::Files,
+                    Entry::Any => LocationEntry::FilesAndFolders,
+                },
+            },
+            Target::LargeFile {} => RuleMatch::LargeFile {
+                size: large_file_size,
+            },
+        };
+        Self {
+            id: rule.id.0.clone(),
+            name: rule.name.clone(),
+            category: rule.category.to_string(),
+            risk: rule.risk.into(),
+            explain: rule.explain.clone(),
+            regenerate: rule.regenerate.clone(),
+            advise: rule.advise.clone(),
+            matches,
+            owner: rule.owner.as_ref().map(|owner| owner.app.clone()),
+            idle_days: rule.idle_days,
+            tests: rule.tests.len(),
         }
     }
 }

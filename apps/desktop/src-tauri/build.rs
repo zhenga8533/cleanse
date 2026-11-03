@@ -16,6 +16,13 @@ fn main() {
         "explain",
         "folder",
         "clean",
+        "quarantined",
+        "restore",
+        "purge",
+        "history",
+        "finish",
+        "settings",
+        "rules",
     ]);
 
     // Tauri's Windows code needs Common Controls v6, which a program only gets if its manifest

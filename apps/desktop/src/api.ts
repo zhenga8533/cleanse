@@ -7,10 +7,15 @@ import type { CleanReport } from "./bindings/CleanReport";
 import type { Details } from "./bindings/Details";
 import type { Folders } from "./bindings/Folders";
 import type { FolderView } from "./bindings/FolderView";
+import type { Handled } from "./bindings/Handled";
+import type { HistoryView } from "./bindings/HistoryView";
 import type { ItemPage } from "./bindings/ItemPage";
+import type { QuarantineView } from "./bindings/QuarantineView";
 import type { Results } from "./bindings/Results";
+import type { RuleView } from "./bindings/RuleView";
 import type { ScanProgress } from "./bindings/ScanProgress";
 import type { Section } from "./bindings/Section";
+import type { SettingsView } from "./bindings/SettingsView";
 
 export function appInfo(): Promise<AppInfo> {
   return invoke("app_info");
@@ -81,4 +86,39 @@ export function clean(
   onProgress: (done: number) => void,
 ): Promise<CleanReport> {
   return invoke("clean", { scan, items, progress: new Channel(onProgress) });
+}
+
+/** What's in quarantine, oldest first. */
+export function quarantined(): Promise<QuarantineView> {
+  return invoke("quarantined");
+}
+
+/** Puts back the quarantined items `ids` names, unless something has taken their place. */
+export function restore(ids: string[]): Promise<Handled> {
+  return invoke("restore", { ids });
+}
+
+/** Deletes the quarantined items `ids` names for good. */
+export function purge(ids: string[]): Promise<Handled> {
+  return invoke("purge", { ids });
+}
+
+/** What Cleanse has done before, most recent first, and what's left of removals that didn't finish. */
+export function history(): Promise<HistoryView> {
+  return invoke("history");
+}
+
+/** Removes what's left of every removal that didn't finish, if it's still what was approved. */
+export function finish(): Promise<Handled> {
+  return invoke("finish");
+}
+
+/** How Cleanse is set up on this system, as `cleanse doctor` reports it. */
+export function settings(): Promise<SettingsView> {
+  return invoke("settings");
+}
+
+/** Every rule the settings don't turn off. */
+export function rules(): Promise<RuleView[]> {
+  return invoke("rules");
 }

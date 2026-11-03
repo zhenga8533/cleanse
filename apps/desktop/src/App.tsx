@@ -3,7 +3,10 @@ import { type Key, Tab, TabList, TabPanel, Tabs } from "react-aria-components";
 import { appInfo } from "./api";
 import type { AppInfo } from "./bindings/AppInfo";
 import { DiskScreen, type Latest } from "./disk/DiskScreen";
+import { HistoryScreen } from "./recovery/HistoryScreen";
+import { QuarantineScreen } from "./recovery/QuarantineScreen";
 import { ScanScreen } from "./scan/ScanScreen";
+import { SettingsScreen } from "./settings/SettingsScreen";
 
 const SECTIONS = [
   {
@@ -97,15 +100,29 @@ export function App() {
             <DiskScreen latest={latest} onScan={() => setSection("scan")} />
           </TabPanel>
         )}
-        {SECTIONS.filter(
-          (section) =>
-            startup.state !== "ready" || (section.id !== "scan" && section.id !== "disk"),
-        ).map((section) => (
-          <TabPanel key={section.id} id={section.id} className="panel">
-            <h1>{section.title}</h1>
-            <p className="muted">{section.description}</p>
+        {/* The rest read what's on disk afresh each time they're opened. */}
+        {startup.state === "ready" && (
+          <TabPanel id="quarantine" className="panel">
+            <QuarantineScreen elevated={startup.info.elevated} />
           </TabPanel>
-        ))}
+        )}
+        {startup.state === "ready" && (
+          <TabPanel id="history" className="panel">
+            <HistoryScreen elevated={startup.info.elevated} />
+          </TabPanel>
+        )}
+        {startup.state === "ready" && (
+          <TabPanel id="settings" className="panel">
+            <SettingsScreen />
+          </TabPanel>
+        )}
+        {startup.state !== "ready" &&
+          SECTIONS.map((section) => (
+            <TabPanel key={section.id} id={section.id} className="panel">
+              <h1>{section.title}</h1>
+              <p className="muted">{section.description}</p>
+            </TabPanel>
+          ))}
       </Tabs>
     </div>
   );

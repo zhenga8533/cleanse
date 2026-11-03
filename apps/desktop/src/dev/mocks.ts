@@ -3,11 +3,22 @@ import { mockIPC } from "@tauri-apps/api/mocks";
 import type { AppInfo } from "../bindings/AppInfo";
 import type { CleanReport } from "../bindings/CleanReport";
 import type { Folders } from "../bindings/Folders";
+import type { Handled } from "../bindings/Handled";
 import type { Item } from "../bindings/Item";
 import type { ItemPage } from "../bindings/ItemPage";
 import type { ScanProgress } from "../bindings/ScanProgress";
 import type { Section } from "../bindings/Section";
-import { details, folder, HOME_FOLDER, ITEMS, results } from "./sample";
+import {
+  details,
+  folder,
+  HISTORY,
+  HOME_FOLDER,
+  ITEMS,
+  QUARANTINE,
+  RULE_VIEWS,
+  results,
+  SETTINGS,
+} from "./sample";
 
 /** Answers the app's commands with sample data, for reviewing the UI in a browser. */
 export function installMocks(): void {
@@ -16,6 +27,8 @@ export function installMocks(): void {
   let items = structuredClone(ITEMS);
   let removed = 0;
   let cancelled = false;
+  let quarantine = structuredClone(QUARANTINE);
+  let history = structuredClone(HISTORY);
 
   const folders = (): Folders =>
     chosen.length > 0 ? { folders: chosen, home: false } : { folders: [HOME_FOLDER], home: true };
@@ -96,6 +109,43 @@ export function installMocks(): void {
         );
       case "clean":
         return clean(args.items as number[], args.progress as Channel<number>);
+      case "quarantined":
+        return quarantine;
+      case "restore":
+      case "purge": {
+        const ids = args.ids as string[];
+        const handled = quarantine.entries.filter((entry) => ids.includes(entry.id));
+        await pause(400);
+        quarantine = {
+          ...quarantine,
+          entries: quarantine.entries.filter((entry) => !ids.includes(entry.id)),
+        };
+        const size = handled.reduce((sum, entry) => sum + entry.size.onDisk, 0);
+        return {
+          done: { items: handled.length, size: { logical: size, onDisk: size, guaranteed: size } },
+          failed: [],
+          journal: `${HOME_FOLDER}\\AppData\\Local\\cleanse\\journal\\run-4.jsonl`,
+        } satisfies Handled;
+      }
+      case "history":
+        return history;
+      case "finish": {
+        const left = history.leftovers;
+        await pause(400);
+        history = { ...history, leftovers: [] };
+        return {
+          done: { items: 0, size: { logical: 0, onDisk: 0, guaranteed: 0 } },
+          failed: left.map((leftover) => ({
+            path: leftover.tombstone,
+            reason: "Something else is there now",
+          })),
+          journal: `${HOME_FOLDER}\\AppData\\Local\\cleanse\\journal\\run-5.jsonl`,
+        } satisfies Handled;
+      }
+      case "settings":
+        return SETTINGS;
+      case "rules":
+        return RULE_VIEWS;
       default:
         throw new Error(`The browser preview has no sample data for ${cmd}`);
     }

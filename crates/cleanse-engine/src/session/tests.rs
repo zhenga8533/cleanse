@@ -287,8 +287,46 @@ fn quarantines_review_items_and_restores_them_by_entry_id() {
         .restore(&[entries[0].id.clone(), entries[0].id.clone()])
         .unwrap();
 
-    assert_eq!(restored.outcomes, [EntryOutcome::Restored]);
+    assert!(restored.journal.is_some());
+    let [(entry, outcome)] = &restored.outcomes[..] else {
+        panic!("{restored:?}")
+    };
+    assert_eq!(entry.id, entries[0].id);
+    assert_eq!(*outcome, EntryOutcome::Restored);
     assert!(fixture.path("web/node_modules/left-pad/index.js").exists());
+}
+
+#[test]
+fn purges_by_entry_id_saying_which_is_which() {
+    let fixture =
+        Fixture::with_rules(RuleSet::from_sources([("test.toml", REVIEW_NODE_MODULES)]).unwrap());
+    project(fixture.root.path());
+    let scan = fixture.scan();
+    let ids = fixture.ids(scan, Section::Review);
+    fixture.session.clean(scan, &ids, &|_| {}).unwrap();
+    let entries = fixture.session.quarantined().unwrap().entries;
+
+    let purged = fixture.session.purge(&[entries[0].id.clone()]).unwrap();
+
+    let [(entry, EntryOutcome::Purged { .. })] = &purged.outcomes[..] else {
+        panic!("{purged:?}")
+    };
+    assert_eq!(entry.original, entries[0].original);
+    assert_eq!(fixture.session.quarantined().unwrap().entries, Vec::new());
+}
+
+#[test]
+fn nothing_to_restore_purge_or_finish_writes_no_journal() {
+    let fixture = Fixture::new();
+
+    let restored = fixture.session.restore(&[]).unwrap();
+    let purged = fixture.session.purge(&[]).unwrap();
+    let finished = fixture.session.finish().unwrap();
+
+    assert!(restored.journal.is_none() && restored.outcomes.is_empty());
+    assert!(purged.journal.is_none() && purged.outcomes.is_empty());
+    assert!(finished.journal.is_none() && finished.outcomes.is_empty());
+    assert!(fixture.session.history().unwrap().runs.is_empty());
 }
 
 #[test]
