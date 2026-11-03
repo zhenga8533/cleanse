@@ -1,3 +1,14 @@
+# Listed rather than found, so taplo never walks the desktop app's node_modules.
+include = [
+    "*.toml",
+    ".taplo.toml",
+    ".cargo/*.toml",
+    "apps/cli/*.toml",
+    "apps/desktop/src-tauri/*.toml",
+    "crates/**/*.toml",
+    "docs/*.toml",
+    "xtask/*.toml",
+]
 exclude = ["target/**"]
 
 [formatting]

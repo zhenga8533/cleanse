@@ -55,7 +55,9 @@ It goes through the engine's `Session`, which holds the latest scan's results an
 or change at a time. Candidates, folders, and quarantine entries are named by IDs the session
 gave out, and an ID from an earlier scan is refused, so a compromised web view can't direct
 deletions or name something it wasn't shown. Results are served as summaries and pages, and the
-size tree a folder at a time, rather than whole.
+size tree a folder at a time, rather than whole. [ADR 0009](adr/0009-desktop-web-view.md)
+describes the rest of the web view's limits: only the app's own commands, a strict content
+security policy, and no navigating elsewhere.
 
 ## Enforcement
 

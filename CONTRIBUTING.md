@@ -28,6 +28,11 @@ correctness is high. This guide covers setup, conventions, and how changes are r
    cargo install --locked cargo-nextest cargo-deny typos-cli taplo-cli
    ```
 
+5. For the desktop app, also install Node.js 24 and pnpm (`corepack enable` gives you the version
+   `apps/desktop/package.json` names). On Linux, install WebKitGTK as well, such as
+   `sudo apt install libwebkit2gtk-4.1-dev librsvg2-dev` on Debian and Ubuntu. Windows 10 and 11
+   already have the WebView2 runtime it uses.
+
 ## Everyday commands
 
 | Task | Command |
@@ -36,6 +41,9 @@ correctness is high. This guide covers setup, conventions, and how changes are r
 | Run the CLI | `cargo run --bin cleanse -- <args>` |
 | Run the tests | `cargo nextest run --workspace` |
 | Run every CI check | `cargo xtask ci` |
+| Run the desktop app | `pnpm --dir apps/desktop install`, then `pnpm --dir apps/desktop tauri dev` |
+| Preview the desktop UI in a browser, with sample data | `pnpm --dir apps/desktop dev`, then open http://localhost:1420 |
+| Run the desktop app's checks | `cargo xtask desktop` |
 | Preview the docs | `mdbook serve docs` |
 | Create a synthetic tree for benchmarks | `cargo xtask gen-tree <dir> [--entries <n>]` |
 | Benchmark the directory walker (read-only) | `cargo bench -p cleanse-core --bench walk -- <dir>` |
@@ -54,6 +62,7 @@ crates/
   cleanse-exec/      executes approved plans: the only code that changes the filesystem
   cleanse-engine/    the API the CLI and desktop app call
 apps/cli/            the `cleanse` binary
+apps/desktop/        the desktop app: a React front end (src/) in a Tauri shell (src-tauri/)
 docs/                design docs and architecture decision records (mdBook)
 xtask/               repository automation
 ```
@@ -69,6 +78,9 @@ The reasoning is in the [decision records](docs/src/adr/README.md).
   `#[allow(clippy::disallowed_methods, reason = "...")]`.
 - **Rules are data.** They match paths and describe what they found. They never run commands.
 - **No network access** in the engine or CLI.
+- **The desktop app's web view can only call the app's own commands**, and none of them takes a
+  path to remove. A new command is added to `src-tauri/build.rs` and allowed in
+  `src-tauri/capabilities/main.json` ([ADR 0009](docs/src/adr/0009-desktop-web-view.md)).
 - **`unsafe` is denied** across the workspace. Per-OS code that needs it will be confined to
   `cleanse-platform`.
 

@@ -1,6 +1,9 @@
 [workspace]
 resolver = "3"
-members = ["apps/cli", "crates/*", "xtask"]
+members = ["apps/cli", "apps/desktop/src-tauri", "crates/*", "xtask"]
+# The desktop app needs its web view's system libraries to build, so a plain `cargo build` or
+# `cargo test` leaves it out. `cargo xtask desktop` checks it.
+default-members = ["apps/cli", "crates/*", "xtask"]
 
 [workspace.package]
 version = "0.3.0"
@@ -25,7 +28,10 @@ rayon = "1.12"
 rustix = "1.1"
 serde = { version = "1.0", features = ["derive"] }
 sysinfo = { version = "0.40", default-features = false, features = ["system"] }
+tauri = "2.12"
+tauri-build = "2.7"
 toml = "1.1"
+ts-rs = "12.0"
 windows-sys = "0.61"
 
 junction = "2.1"

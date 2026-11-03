@@ -1,0 +1,155 @@
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --surface: #f3f5f6;
+  --hover: #e6eaec;
+  --text: #1b2023;
+  --muted: #56626a;
+  --border: #d7dde0;
+  --accent: #0f766e;
+  --accent-text: #ffffff;
+  --warning-bg: #fff4d6;
+  --warning-text: #5c4200;
+  --error-bg: #fde8e8;
+  --error-text: #7a1c1c;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15191b;
+    --surface: #1c2225;
+    --hover: #262e32;
+    --text: #e6eaec;
+    --muted: #9ba7ae;
+    --border: #2d363a;
+    --accent: #2dd4bf;
+    --accent-text: #062a26;
+    --warning-bg: #3a2f10;
+    --warning-text: #f5dd9a;
+    --error-bg: #3d1717;
+    --error-text: #f6c2c2;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+h1 {
+  margin: 0 0 4px;
+  font-size: 1.6rem;
+  font-weight: 600;
+}
+
+.muted {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* A column, since the banners come and go and the sections take whatever height is left. */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.app-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.app-name {
+  font-weight: 600;
+}
+
+.app-version {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.banner {
+  margin: 0;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.banner-warning {
+  background: var(--warning-bg);
+  color: var(--warning-text);
+}
+
+.banner-error {
+  background: var(--error-bg);
+  color: var(--error-text);
+}
+
+.layout {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 200px 1fr;
+  min-height: 0;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.react-aria-Tab {
+  padding: 7px 12px;
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: default;
+  outline: none;
+}
+
+.react-aria-Tab[data-hovered] {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.react-aria-Tab[data-selected] {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.react-aria-Tab[data-focus-visible] {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.panel {
+  padding: 24px 32px;
+  overflow: auto;
+  outline: none;
+}
+
+.panel[data-focus-visible] {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+@media (forced-colors: active) {
+  .react-aria-Tab[data-selected] {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+  }
+
+  .react-aria-Tab[data-focus-visible],
+  .panel[data-focus-visible] {
+    outline-color: Highlight;
+  }
+}

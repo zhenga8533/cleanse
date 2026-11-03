@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "What the app's window may call: Cleanse's own commands, and nothing from Tauri's core or any plugin.",
+  "windows": ["main"],
+  "permissions": ["allow-app-info"]
+}
