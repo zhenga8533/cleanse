@@ -115,7 +115,7 @@ fn the_window_cant_call_tauris_own_commands_or_plugins() {
 fn other_pages_cant_call_the_apps_commands() {
     let app = TestApp::new();
 
-    for cmd in ["app_info", "scan", "clean"] {
+    for cmd in ["app_info", "scan", "clean", "restore", "purge", "finish"] {
         let error = app
             .invoke_from(cmd, json!({}), Some("https://example.com/"))
             .unwrap_err();
@@ -227,6 +227,53 @@ fn a_cleanup_names_items_by_the_current_scans_ids() {
             .contains("has no item 999")
     );
     assert!(project_is_whole(root.path()));
+}
+
+#[test]
+fn reads_the_quarantine_history_settings_and_rules() {
+    let app = TestApp::new();
+
+    // What's in them depends on what this computer's Cleanse has done, so only their shape is
+    // checked.
+    let quarantine = app.invoke("quarantined", json!({})).unwrap();
+    assert!(quarantine["entries"].is_array());
+    let history = app.invoke("history", json!({})).unwrap();
+    assert!(history["runs"].is_array() && history["leftovers"].is_array());
+
+    let settings = app.invoke("settings", json!({})).unwrap();
+    assert_eq!(settings["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(settings["folders"][0]["name"], "Home");
+    assert!(settings["largeFileSize"].as_u64().unwrap() > 0);
+
+    let rules = app.invoke("rules", json!({})).unwrap();
+    let node_modules = rules
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|rule| rule["id"] == "javascript.node_modules")
+        .unwrap();
+    assert_eq!(node_modules["matches"]["kind"], "projectArtifact");
+    assert_eq!(node_modules["matches"]["names"], json!(["node_modules"]));
+    assert_eq!(node_modules["risk"], "regenerable");
+}
+
+#[test]
+fn restoring_or_purging_names_entries_by_id() {
+    let app = TestApp::new();
+
+    // Neither changes anything: there's nothing to do, or the ID is refused first.
+    let nothing = app.invoke("restore", json!({ "ids": [] })).unwrap();
+    assert_eq!(nothing["done"]["items"], 0);
+    assert_eq!(nothing["journal"], Value::Null);
+    let unknown = app
+        .invoke("purge", json!({ "ids": ["no-such-entry"] }))
+        .unwrap_err();
+    assert!(
+        unknown
+            .to_string()
+            .contains("Nothing in quarantine has the ID no-such-entry"),
+        "{unknown}"
+    );
 }
 
 #[test]

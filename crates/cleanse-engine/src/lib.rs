@@ -37,8 +37,8 @@ pub use cleanse_exec::{
 };
 pub use cleanse_platform::{KnownFolders, Probe, System};
 pub use session::{
-    Cleaned, Explained, FolderEntry, FolderView, Page, RuleSummary, ScanId, SectionSummary,
-    Session, SessionError, Summary,
+    Cleaned, Explained, Finished, FolderEntry, FolderView, HandledEntries, Page, RuleSummary,
+    ScanId, SectionSummary, Session, SessionError, Summary,
 };
 
 /// Walk progress is reported every this many entries.
@@ -79,6 +79,17 @@ pub fn advice<'r>(rules: &'r RuleSet, candidate: &Candidate) -> Option<&'r str> 
         return None;
     }
     rules.get(&candidate.found.rule)?.advise.as_deref()
+}
+
+/// How this build recognizes folders a cloud service syncs, which are kept.
+pub fn cloud_sync_detection() -> &'static str {
+    if cfg!(windows) {
+        "Windows Cloud Files API (OneDrive, iCloud, Dropbox, and other providers)"
+    } else if cfg!(target_os = "macos") {
+        "by location (~/Library/CloudStorage and iCloud Drive)"
+    } else {
+        "not available; synced folders aren't recognized on Linux yet"
+    }
 }
 
 /// The rules and platform a session works with.

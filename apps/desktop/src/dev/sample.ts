@@ -4,10 +4,14 @@ import type { CategoryTotal } from "../bindings/CategoryTotal";
 import type { Details } from "../bindings/Details";
 import type { FolderEntry } from "../bindings/FolderEntry";
 import type { FolderView } from "../bindings/FolderView";
+import type { HistoryView } from "../bindings/HistoryView";
 import type { Item } from "../bindings/Item";
+import type { QuarantineView } from "../bindings/QuarantineView";
 import type { Results } from "../bindings/Results";
 import type { RuleTotal } from "../bindings/RuleTotal";
+import type { RuleView } from "../bindings/RuleView";
 import type { Section } from "../bindings/Section";
+import type { SettingsView } from "../bindings/SettingsView";
 import type { Size } from "../bindings/Size";
 
 const HOME = "C:\\Users\\sample";
@@ -384,3 +388,164 @@ export function details(found: Item, section: Section): Details {
 }
 
 export const HOME_FOLDER = HOME;
+
+const NOW = Math.floor(Date.now() / 1000);
+
+export const QUARANTINE: QuarantineView = {
+  entries: [
+    {
+      id: "q-2025-1",
+      original: `${HOME}\\Downloads\\driver-pack.zip`,
+      rule: "downloads.installers",
+      ruleName: "Installers in Downloads",
+      size: bytes(640 * MIB),
+      at: NOW - 40 * DAY,
+    },
+    {
+      id: "q-2026-7",
+      original: `${HOME}\\Downloads\\old-setup.msi`,
+      rule: "downloads.installers",
+      ruleName: "Installers in Downloads",
+      size: bytes(220 * MIB),
+      at: NOW - 2 * DAY,
+    },
+  ],
+  unreadable: [],
+};
+
+const NONE = { items: 0, size: bytes(0) };
+
+export const HISTORY: HistoryView = {
+  runs: [
+    {
+      journal: `${HOME}\\AppData\\Local\\cleanse\\journal\\run-3.jsonl`,
+      at: NOW - 2 * DAY,
+      command: "clean",
+      items: 4,
+      deleted: { items: 2, size: bytes(3212 * MIB) },
+      quarantined: { items: 1, size: bytes(220 * MIB) },
+      restored: 0,
+      purged: NONE,
+      skipped: 1,
+      failed: 0,
+      cutShort: false,
+    },
+    {
+      journal: `${HOME}\\AppData\\Local\\cleanse\\journal\\run-2.jsonl`,
+      at: NOW - 30 * DAY,
+      command: "purge",
+      items: 1,
+      deleted: NONE,
+      quarantined: NONE,
+      restored: 0,
+      purged: { items: 1, size: bytes(90 * MIB) },
+      skipped: 0,
+      failed: 0,
+      cutShort: false,
+    },
+    {
+      journal: `${HOME}\\AppData\\Local\\cleanse\\journal\\run-1.jsonl`,
+      at: NOW - 41 * DAY,
+      command: "clean",
+      items: 3,
+      deleted: { items: 1, size: bytes(400 * MIB) },
+      quarantined: { items: 1, size: bytes(640 * MIB) },
+      restored: 0,
+      purged: NONE,
+      skipped: 0,
+      failed: 0,
+      cutShort: true,
+    },
+  ],
+  leftovers: [
+    {
+      original: `${HOME}\\code\\old-app\\node_modules`,
+      tombstone: `${HOME}\\code\\old-app\\.cleanse-removing-node_modules`,
+      rule: "javascript.node_modules",
+    },
+  ],
+  unreadable: [],
+};
+
+export const SETTINGS: SettingsView = {
+  version: "0.0.0-preview",
+  os: "windows",
+  arch: "x86_64",
+  elevated: false,
+  path: `${HOME}\\AppData\\Roaming\\cleanse\\config.toml`,
+  exists: true,
+  exclude: [`${HOME}\\code\\keep`],
+  disabledRules: ["browsers.edge_cache"],
+  largeFileSize: 1024 * MIB,
+  cloudSyncDetection: "Windows Cloud Files API (OneDrive, iCloud, Dropbox, and other providers)",
+  folders: [
+    { name: "Home", path: HOME },
+    { name: "Documents", path: `${HOME}\\Documents` },
+    { name: "Downloads", path: `${HOME}\\Downloads` },
+    { name: "Cache", path: `${HOME}\\AppData\\Local` },
+    { name: "App data", path: `${HOME}\\AppData\\Local` },
+    { name: "Settings", path: `${HOME}\\AppData\\Roaming` },
+    { name: "Temp", path: `${HOME}\\AppData\\Local\\Temp` },
+  ],
+};
+
+export const RULE_VIEWS: RuleView[] = [
+  {
+    id: "javascript.node_modules",
+    name: "Node.js dependencies",
+    category: "Dependencies",
+    risk: "regenerable",
+    explain: "Installed packages, which the project's package manager installs again.",
+    regenerate: "Run npm install, or your package manager's install, in the project.",
+    advise: null,
+    matches: {
+      kind: "projectArtifact",
+      names: ["node_modules"],
+      markers: ["package.json"],
+      contains: [],
+      gitIgnored: false,
+    },
+    owner: null,
+    idleDays: null,
+    tests: 3,
+  },
+  {
+    id: "pnpm.store",
+    name: "pnpm store",
+    category: "Package caches",
+    risk: "protected",
+    explain: "pnpm's package store, which pnpm cleans itself without breaking projects.",
+    regenerate: null,
+    advise: "pnpm store prune",
+    matches: { kind: "knownLocation", locations: ["DataLocal/pnpm/store"], entry: "folder" },
+    owner: null,
+    idleDays: null,
+    tests: 1,
+  },
+  {
+    id: "temp.files",
+    name: "Temporary files",
+    category: "Temporary files",
+    risk: "safe",
+    explain: "Files programs leave in the temp folder and don't need once they've finished.",
+    regenerate: null,
+    advise: null,
+    matches: { kind: "knownLocation", locations: ["Temp/*"], entry: "filesAndFolders" },
+    owner: null,
+    idleDays: 7,
+    tests: 2,
+  },
+  {
+    id: "files.large",
+    name: "Large files",
+    category: "Large files",
+    risk: "review",
+    explain: "Files this large are worth a look, but only you know whether you still need them.",
+    regenerate: null,
+    advise: null,
+    matches: { kind: "largeFile", size: 1024 * MIB },
+    owner: null,
+    idleDays: null,
+    tests: 2,
+  },
+];

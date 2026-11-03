@@ -321,15 +321,53 @@ code {
   }
 }
 
-/* The results, with an item's details beside them while one is open. */
-.scan {
+/* A list, with the details of what's open in it beside it. */
+.scan,
+.split {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   column-gap: 24px;
 }
 
-.scan.with-details {
+.scan.with-details,
+.split.with-details {
   grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+}
+
+.split-main {
+  min-width: 0;
+  padding-bottom: 24px;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 16px;
+  margin: 12px 0;
+}
+
+.facts dt {
+  color: var(--muted);
+}
+
+.facts dd {
+  margin: 0;
+}
+
+.facts ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.checkbox-column {
+  width: 1%;
 }
 
 .scanned {
@@ -489,7 +527,8 @@ code {
 
 /* Too narrow for both side by side, so the details float over the results. */
 @media (max-width: 1000px) {
-  .scan.with-details {
+  .scan.with-details,
+  .split.with-details {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -568,7 +607,7 @@ code {
   background: var(--bg);
 }
 
-.clean-bar .button {
+.clean-bar > .button {
   margin-left: auto;
 }
 

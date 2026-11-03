@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use cleanse_engine::{Engine, Probe};
+use cleanse_engine::{Engine, Probe, cloud_sync_detection};
 use cleanse_model::RuleId;
 use serde::Serialize;
 
@@ -39,7 +39,7 @@ pub fn run(engine: &Engine, args: &Args) -> crate::Result {
             engine.rules().rules().len() + disabled
         );
     }
-    println!("Cloud sync detection: {}", cloud_detection());
+    println!("Cloud sync detection: {}", cloud_sync_detection());
     match engine.config_path() {
         Some(path) if path.exists() => println!("Settings: {}", path.display()),
         Some(path) => println!("Settings: {} (not created)", path.display()),
@@ -115,7 +115,7 @@ fn print_json(engine: &Engine) -> crate::Result {
         arch: std::env::consts::ARCH,
         elevated: engine.system().is_elevated(),
         rules: engine.rules().rules().len() + config.disabled_rules.len(),
-        cloud_sync_detection: cloud_detection(),
+        cloud_sync_detection: cloud_sync_detection(),
         settings: Settings {
             path: engine.config_path().map(lossy),
             exists: engine.config_path().is_some_and(Path::exists),
@@ -133,14 +133,4 @@ fn print_json(engine: &Engine) -> crate::Result {
             temp: lossy(&folders.temp),
         },
     })
-}
-
-fn cloud_detection() -> &'static str {
-    if cfg!(windows) {
-        "Windows Cloud Files API (OneDrive, iCloud, Dropbox, and other providers)"
-    } else if cfg!(target_os = "macos") {
-        "by location (~/Library/CloudStorage and iCloud Drive)"
-    } else {
-        "not available; synced folders aren't recognized on Linux yet"
-    }
 }

@@ -18,12 +18,12 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use cleanse_model::{
-    Candidate, CandidateId, Category, EntryKind, Outcome, Plan, PlanItem, QuarantineEntry, RuleId,
-    Size,
+    Candidate, CandidateId, Category, EntryKind, EntryOutcome, Outcome, Plan, PlanItem,
+    QuarantineEntry, RuleId, Size,
 };
 
 use crate::{
-    Analysis, Applied, ApplyError, Engine, Handled, History, Listing, NodeId, NodeKind, Progress,
+    Analysis, ApplyError, Engine, Handled, History, Leftover, Listing, NodeId, NodeKind, Progress,
     Rule, Section, Usage, removable_under,
 };
 
@@ -147,6 +147,31 @@ pub struct Cleaned {
     /// The journal file recording the run, unless there was nothing to remove.
     pub journal: Option<PathBuf>,
     pub outcomes: Vec<(CandidateId, Outcome)>,
+}
+
+/// What restoring or purging did, entry by entry, in the order the IDs were given.
+#[derive(Debug, Default)]
+pub struct HandledEntries {
+    /// The journal file recording the run, unless there was nothing to do.
+    pub journal: Option<PathBuf>,
+    pub outcomes: Vec<(QuarantineEntry, EntryOutcome)>,
+}
+
+impl HandledEntries {
+    fn new(entries: Vec<QuarantineEntry>, handled: Handled) -> Self {
+        Self {
+            journal: Some(handled.journal),
+            outcomes: entries.into_iter().zip(handled.outcomes).collect(),
+        }
+    }
+}
+
+/// What finishing the removals that didn't finish did, leftover by leftover.
+#[derive(Debug)]
+pub struct Finished {
+    /// The journal file recording the run, unless nothing was left.
+    pub journal: Option<PathBuf>,
+    pub outcomes: Vec<(Leftover, Outcome)>,
 }
 
 /// Why a session couldn't do what it was asked. Nothing was changed.
@@ -511,17 +536,25 @@ impl Session {
     }
 
     /// Puts back the quarantined items `ids` names, unless something has taken their place.
-    pub fn restore(&self, ids: &[String]) -> Result<Handled, SessionError> {
+    pub fn restore(&self, ids: &[String]) -> Result<HandledEntries, SessionError> {
         let _busy = self.start()?;
         let entries = self.entries(ids)?;
-        Ok(self.engine.restore(&entries)?)
+        if entries.is_empty() {
+            return Ok(HandledEntries::default());
+        }
+        let handled = self.engine.restore(&entries)?;
+        Ok(HandledEntries::new(entries, handled))
     }
 
     /// Deletes the quarantined items `ids` names for good.
-    pub fn purge(&self, ids: &[String]) -> Result<Handled, SessionError> {
+    pub fn purge(&self, ids: &[String]) -> Result<HandledEntries, SessionError> {
         let _busy = self.start()?;
         let entries = self.entries(ids)?;
-        Ok(self.engine.purge(&entries)?)
+        if entries.is_empty() {
+            return Ok(HandledEntries::default());
+        }
+        let handled = self.engine.purge(&entries)?;
+        Ok(HandledEntries::new(entries, handled))
     }
 
     pub fn history(&self) -> io::Result<History> {
@@ -530,10 +563,20 @@ impl Session {
 
     /// Removes what's left of every removal that didn't finish, if it's still what was
     /// approved, as `cleanse history --finish` does.
-    pub fn finish(&self) -> Result<Applied, SessionError> {
+    pub fn finish(&self) -> Result<Finished, SessionError> {
         let _busy = self.start()?;
         let leftovers = self.engine.history()?.leftovers;
-        Ok(self.engine.finish(&leftovers)?)
+        if leftovers.is_empty() {
+            return Ok(Finished {
+                journal: None,
+                outcomes: Vec::new(),
+            });
+        }
+        let applied = self.engine.finish(&leftovers)?;
+        Ok(Finished {
+            journal: Some(applied.journal),
+            outcomes: leftovers.into_iter().zip(applied.outcomes).collect(),
+        })
     }
 
     /// Marks the session busy for one scan or change, refusing if another is running.

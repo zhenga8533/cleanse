@@ -14,16 +14,22 @@ use std::fmt::Display;
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use cleanse_engine::{Cleaned, FolderEntry, Probe, ScanId, Section, Session, SessionError};
-use cleanse_model::{self as model, CandidateId, Category, Outcome, RuleId};
+use std::path::Path;
+
+use cleanse_engine::{
+    Cleaned, FolderEntry, HandledEntries, Probe, ScanId, Section, Session, SessionError,
+    cloud_sync_detection,
+};
+use cleanse_model::{self as model, CandidateId, Category, EntryOutcome, Outcome, RuleId};
 use rfd::AsyncFileDialog;
 use tauri::ipc::{Channel, IpcResponse};
 use tauri::{Runtime, State, WebviewWindow};
 
 use crate::AppState;
 use crate::views::{
-    self, Amount, AppInfo, CategoryTotal, Choice, CleanReport, Details, EntryItem, Folders, Item,
-    ItemPage, Problem, Results, ScanProgress, lossy,
+    self, Amount, AppInfo, CategoryTotal, Choice, CleanReport, Details, EntryItem, Folders,
+    HistoryView, Item, ItemPage, KnownFolder, LeftoverView, Problem, QuarantineView,
+    QuarantinedItem, Results, RuleView, RunView, ScanProgress, SettingsView, lossy,
 };
 
 #[tauri::command]
@@ -224,6 +230,166 @@ pub(crate) async fn clean(
         report(&session, scan, cleaned)
     })
     .await
+}
+
+/// What's in quarantine, oldest first.
+#[tauri::command(async)]
+pub(crate) fn quarantined(state: State<'_, AppState>) -> Result<QuarantineView, String> {
+    let session = state.session()?;
+    let listing = session.quarantined().map_err(message)?;
+    let rules = session.engine().rules();
+    Ok(QuarantineView {
+        entries: listing
+            .entries
+            .iter()
+            .map(|entry| QuarantinedItem::new(entry, rules))
+            .collect(),
+        unreadable: listing.unreadable.iter().map(|path| lossy(path)).collect(),
+    })
+}
+
+/// Puts back the quarantined items `ids` names, unless something has taken their place.
+#[tauri::command]
+pub(crate) async fn restore(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+) -> Result<views::Handled, String> {
+    let session = state.session()?;
+    run(move || session.restore(&ids).map(handled_entries)).await
+}
+
+/// Deletes the quarantined items `ids` names for good.
+#[tauri::command]
+pub(crate) async fn purge(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+) -> Result<views::Handled, String> {
+    let session = state.session()?;
+    run(move || session.purge(&ids).map(handled_entries)).await
+}
+
+/// What Cleanse has done before, most recent first, and what's left of removals that didn't
+/// finish.
+#[tauri::command(async)]
+pub(crate) fn history(state: State<'_, AppState>) -> Result<HistoryView, String> {
+    let session = state.session()?;
+    let history = session.history().map_err(message)?;
+    Ok(HistoryView {
+        runs: history.runs.iter().rev().map(RunView::new).collect(),
+        leftovers: history.leftovers.iter().map(LeftoverView::from).collect(),
+        unreadable: history.unreadable.iter().map(|path| lossy(path)).collect(),
+    })
+}
+
+/// Removes what's left of every removal that didn't finish, if it's still what was approved.
+#[tauri::command]
+pub(crate) async fn finish(state: State<'_, AppState>) -> Result<views::Handled, String> {
+    let session = state.session()?;
+    run(move || {
+        let finished = session.finish()?;
+        let mut done = (0, model::Size::default());
+        let mut failed = Vec::new();
+        for (leftover, outcome) in finished.outcomes {
+            let reason = match outcome {
+                Outcome::Deleted { size } => {
+                    done.0 += 1;
+                    done.1 += size;
+                    continue;
+                }
+                Outcome::Skipped { reason } => reason.to_string(),
+                Outcome::Failed { error } => error,
+                // Finishing only deletes.
+                Outcome::Quarantined { .. } => continue,
+            };
+            failed.push(Problem {
+                path: lossy(&leftover.tombstone),
+                reason,
+            });
+        }
+        Ok(views::Handled {
+            done: done.into(),
+            failed,
+            journal: finished.journal.as_deref().map(lossy),
+        })
+    })
+    .await
+}
+
+/// How Cleanse is set up on this system, as `cleanse doctor` reports it.
+#[tauri::command(async)]
+pub(crate) fn settings(state: State<'_, AppState>) -> Result<SettingsView, String> {
+    let session = state.session()?;
+    let engine = session.engine();
+    let config = engine.config();
+    let folders = engine.system().known_folders();
+    let folder = |name: &str, path: Option<&Path>| KnownFolder {
+        name: name.to_owned(),
+        path: path.map(lossy),
+    };
+    Ok(SettingsView {
+        version: env!("CARGO_PKG_VERSION").to_owned(),
+        os: std::env::consts::OS.to_owned(),
+        arch: std::env::consts::ARCH.to_owned(),
+        elevated: engine.system().is_elevated(),
+        path: engine.config_path().map(lossy),
+        exists: engine.config_path().is_some_and(Path::exists),
+        exclude: config.exclude.iter().map(|path| lossy(path)).collect(),
+        disabled_rules: config
+            .disabled_rules
+            .iter()
+            .map(|rule| rule.0.clone())
+            .collect(),
+        large_file_size: config.large_file_size,
+        cloud_sync_detection: cloud_sync_detection().to_owned(),
+        folders: vec![
+            folder("Home", folders.home.as_deref()),
+            folder("Documents", folders.documents.as_deref()),
+            folder("Downloads", folders.downloads.as_deref()),
+            folder("Cache", folders.cache.as_deref()),
+            folder("App data", folders.data_local.as_deref()),
+            folder("Settings", folders.config.as_deref()),
+            folder("Temp", Some(&folders.temp)),
+        ],
+    })
+}
+
+/// Every rule the settings don't turn off, as `cleanse rules show` describes each.
+#[tauri::command(async)]
+pub(crate) fn rules(state: State<'_, AppState>) -> Result<Vec<RuleView>, String> {
+    let session = state.session()?;
+    let engine = session.engine();
+    Ok(engine
+        .rules()
+        .rules()
+        .iter()
+        .map(|rule| RuleView::new(rule, engine.config().large_file_size))
+        .collect())
+}
+
+fn handled_entries(handled: HandledEntries) -> views::Handled {
+    let mut done = (0, model::Size::default());
+    let mut failed = Vec::new();
+    for (entry, outcome) in handled.outcomes {
+        match outcome {
+            EntryOutcome::Restored => {
+                done.0 += 1;
+                done.1 += entry.size;
+            }
+            EntryOutcome::Purged { size } => {
+                done.0 += 1;
+                done.1 += size;
+            }
+            EntryOutcome::Failed { error } => failed.push(Problem {
+                path: lossy(&entry.original),
+                reason: error,
+            }),
+        }
+    }
+    views::Handled {
+        done: done.into(),
+        failed,
+        journal: handled.journal.as_deref().map(lossy),
+    }
 }
 
 fn folders_of(state: &AppState) -> Result<Folders, String> {
