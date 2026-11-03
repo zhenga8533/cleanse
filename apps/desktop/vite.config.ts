@@ -17,5 +17,8 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: ["src/test/setup.ts"],
+    // The first test in a file pays for jsdom and React Aria's first render, which takes over the
+    // default 5 seconds on CI's Windows runners.
+    testTimeout: 20_000,
   },
 });

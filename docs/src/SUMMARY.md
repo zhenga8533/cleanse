@@ -20,3 +20,4 @@
   - [0007: A std-based parallel directory walker](adr/0007-directory-walker.md)
   - [0008: Read Git repositories with gix, never by running git](adr/0008-read-git-with-gix.md)
   - [0009: The desktop app's web view can only name what the engine showed it](adr/0009-desktop-web-view.md)
+  - [0010: System cleanup runs elevated, apart from everything else](adr/0010-elevated-system-cleanup.md)
