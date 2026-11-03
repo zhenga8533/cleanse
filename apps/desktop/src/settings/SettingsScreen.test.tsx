@@ -3,6 +3,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it } from "vitest";
 import { RULE_VIEWS, SETTINGS } from "../dev/sample";
+import { findGrid } from "../test/grids";
 import { matches, SettingsScreen } from "./SettingsScreen";
 
 function engine(): void {
@@ -36,7 +37,7 @@ it("shows a rule in detail when it's opened, and goes back on closing", async ()
   engine();
   const user = userEvent.setup();
   render(<SettingsScreen />);
-  const table = await screen.findByRole("grid", { name: "Rules" });
+  const table = await findGrid("Rules");
   const row = within(table).getByRole("row", { name: /pnpm store/ });
 
   await user.click(within(row).getByText("pnpm store"));

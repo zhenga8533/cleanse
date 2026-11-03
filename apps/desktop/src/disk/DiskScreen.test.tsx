@@ -3,6 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 import { folder, HOME_FOLDER, results } from "../dev/sample";
+import { findGrid } from "../test/grids";
 import { DiskScreen } from "./DiskScreen";
 
 /** Answers with the sample tree, and records what each `folder` call asked for. */
@@ -47,7 +48,7 @@ it("starts inside the one folder scanned, largest first, with a picture of the s
   engine();
   render(<DiskScreen latest={{ scan: 1, version: 1 }} onScan={() => {}} />);
 
-  const table = await screen.findByRole("grid", { name: `What's in ${HOME_FOLDER}` });
+  const table = await findGrid(`What's in ${HOME_FOLDER}`);
   expect(names(table)).toEqual(["Videos", "code", "AppData", "Downloads", "8 files"]);
   expect(
     screen.getByRole("img", { name: /What takes the space in C:\\Users\\sample/ }),
@@ -61,27 +62,27 @@ it("opens a folder from its row, and goes back up from the trail", async () => {
   engine();
   const user = userEvent.setup();
   render(<DiskScreen latest={{ scan: 1, version: 1 }} onScan={() => {}} />);
-  const table = await screen.findByRole("grid", { name: `What's in ${HOME_FOLDER}` });
+  const table = await findGrid(`What's in ${HOME_FOLDER}`);
 
   await user.click(within(table).getByRole("rowheader", { name: "code" }));
 
-  const inside = await screen.findByRole("grid", { name: "What's in code" });
+  const inside = await findGrid("What's in code");
   expect(names(inside)).toEqual(["engine", "web", "site", "notes"]);
   await user.click(within(inside).getByRole("rowheader", { name: "engine" }));
-  const engineTable = await screen.findByRole("grid", { name: "What's in engine" });
+  const engineTable = await findGrid("What's in engine");
   const target = within(engineTable).getByRole("row", { name: /^target/ });
   expect(target.textContent).toContain("Rust build output, Regenerable");
 
   const trail = screen.getByRole("navigation", { name: "Folders" });
   await user.click(within(trail).getByText(HOME_FOLDER));
-  expect(await screen.findByRole("grid", { name: `What's in ${HOME_FOLDER}` })).toBeTruthy();
+  expect(await findGrid(`What's in ${HOME_FOLDER}`)).toBeTruthy();
 });
 
 it("sorts by name", async () => {
   engine();
   const user = userEvent.setup();
   render(<DiskScreen latest={{ scan: 1, version: 1 }} onScan={() => {}} />);
-  const table = await screen.findByRole("grid", { name: `What's in ${HOME_FOLDER}` });
+  const table = await findGrid(`What's in ${HOME_FOLDER}`);
 
   await user.click(within(table).getByRole("columnheader", { name: "Name" }));
 
@@ -94,7 +95,7 @@ it("counts only the categories chosen as removable", async () => {
   const asked = engine();
   const user = userEvent.setup();
   render(<DiskScreen latest={{ scan: 1, version: 1 }} onScan={() => {}} />);
-  const table = await screen.findByRole("grid", { name: `What's in ${HOME_FOLDER}` });
+  const table = await findGrid(`What's in ${HOME_FOLDER}`);
   const code = () => within(table).getByRole("row", { name: /^code/ }).textContent;
   expect(code()).toContain("3.6 GiB3.5 GiB");
 
@@ -111,10 +112,10 @@ it("opens a folder with the keyboard", async () => {
   engine();
   const user = userEvent.setup();
   render(<DiskScreen latest={{ scan: 1, version: 1 }} onScan={() => {}} />);
-  const table = await screen.findByRole("grid", { name: `What's in ${HOME_FOLDER}` });
+  const table = await findGrid(`What's in ${HOME_FOLDER}`);
 
   within(table).getByRole("columnheader", { name: "Name" }).focus();
   await user.keyboard("{ArrowDown}{ArrowDown}{Enter}");
 
-  expect(await screen.findByRole("grid", { name: "What's in code" })).toBeTruthy();
+  expect(await findGrid("What's in code")).toBeTruthy();
 });

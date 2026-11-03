@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { expect, it } from "vitest";
 import type { Handled } from "../bindings/Handled";
 import { HISTORY } from "../dev/sample";
+import { findGrid } from "../test/grids";
 import { HistoryScreen } from "./HistoryScreen";
 
 function engine(): string[] {
@@ -32,7 +33,7 @@ it("lists runs most recent first, saying what each did as the CLI does", async (
   engine();
   render(<HistoryScreen elevated={false} />);
 
-  const table = await screen.findByRole("grid", { name: "Runs, most recent first" });
+  const table = await findGrid("Runs, most recent first");
   const rows = within(table)
     .getAllByRole("row")
     .slice(1)
