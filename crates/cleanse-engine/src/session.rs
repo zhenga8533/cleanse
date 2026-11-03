@@ -18,7 +18,8 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use cleanse_model::{
-    Candidate, CandidateId, EntryKind, Outcome, Plan, PlanItem, QuarantineEntry, RuleId, Size,
+    Candidate, CandidateId, Category, EntryKind, Outcome, Plan, PlanItem, QuarantineEntry, RuleId,
+    Size,
 };
 
 use crate::{
@@ -369,16 +370,21 @@ impl Session {
     }
 
     /// The folder `node` names, from [`NodeId::index`], with its largest folders up to
-    /// `limit`, or the scan's roots if there's no `node`.
+    /// `limit`, or the scan's roots if there's no `node`. Only items in `categories` count as
+    /// removable, or every item if there are none, as `--category` does.
     pub fn folder(
         &self,
         scan: ScanId,
         node: Option<u32>,
         limit: usize,
+        categories: &[Category],
     ) -> Result<FolderView, SessionError> {
         self.read(scan, |current| {
             let tree = &current.analysis.tree;
-            let entry = |id: NodeId| folder_entry(current, id);
+            let counted = |candidate: &&Candidate| {
+                categories.is_empty() || categories.contains(&candidate.found.category)
+            };
+            let entry = |id: NodeId| folder_entry(current, id, counted);
             let Some(index) = node else {
                 let roots = tree.roots();
                 let shown = roots.len().min(limit);
@@ -423,6 +429,7 @@ impl Session {
                 own_files: node.own_files,
                 own_usage: node.own_usage,
                 own_removable: removable_under(&current.analysis.scan.candidates, &path)
+                    .filter(counted)
                     .filter(|candidate| {
                         candidate.found.kind == EntryKind::File
                             && candidate.found.path.parent() == Some(path.as_path())
@@ -583,7 +590,13 @@ fn find(current: &Current, id: CandidateId) -> Result<&Candidate, SessionError> 
         .ok_or(SessionError::UnknownCandidate(id))
 }
 
-fn folder_entry(current: &Current, id: NodeId) -> FolderEntry {
+/// The entry for folder `id`, counting as removable the candidates `counted` keeps. An item is
+/// labeled with its candidate whatever it counts.
+fn folder_entry(
+    current: &Current,
+    id: NodeId,
+    counted: impl Fn(&&Candidate) -> bool,
+) -> FolderEntry {
     let tree = &current.analysis.tree;
     let candidates = &current.analysis.scan.candidates;
     let node = tree.node(id);
@@ -592,6 +605,7 @@ fn folder_entry(current: &Current, id: NodeId) -> FolderEntry {
         node: id,
         name: node.name.to_os_string(),
         removable: removable_under(candidates, &path)
+            .filter(counted)
             .map(|candidate| candidate.found.size.on_disk)
             .sum(),
         candidate: (node.kind == NodeKind::Item)

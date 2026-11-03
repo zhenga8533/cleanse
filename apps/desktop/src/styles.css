@@ -610,7 +610,180 @@ code {
   margin-top: 18px;
 }
 
+.disk-bar {
+  justify-content: space-between;
+}
+
+.crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.crumb:not(:last-child)::after {
+  content: "›";
+  padding: 0 8px;
+  color: var(--muted);
+}
+
+.crumb-link {
+  color: var(--accent);
+  overflow-wrap: anywhere;
+  cursor: default;
+  outline: none;
+}
+
+.crumb-link[data-hovered] {
+  text-decoration: underline;
+}
+
+.crumb-link[data-current] {
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.crumb-link[data-focus-visible] {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.treemap {
+  margin: 12px 0;
+}
+
+.treemap svg {
+  display: block;
+}
+
+.tile-box {
+  fill: var(--surface);
+  stroke: var(--border);
+}
+
+.tile-box.rest {
+  fill: var(--bg);
+  stroke-dasharray: 4 3;
+}
+
+.tile.opens {
+  cursor: pointer;
+}
+
+.tile.opens:hover .tile-box {
+  fill: var(--hover);
+}
+
+.tile-removable {
+  fill: var(--accent);
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.tile-name,
+.tile-size {
+  fill: var(--text);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.tile-size {
+  fill: var(--muted);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  outline: none;
+}
+
+.column {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-align: start;
+  cursor: default;
+  outline: none;
+}
+
+.column[data-focus-visible],
+.table-row[data-focus-visible] {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.number {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.table-row {
+  outline: none;
+}
+
+.table-row.opens {
+  cursor: pointer;
+}
+
+.table-row[data-hovered] {
+  background: var(--hover);
+}
+
+.cell {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.table-row.opens .cell:first-child {
+  color: var(--accent);
+}
+
+.popover {
+  min-width: 260px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.2);
+}
+
+.popover .dialog {
+  padding: 12px 14px;
+}
+
+.categories {
+  display: grid;
+  gap: 6px;
+}
+
+.categories .checkbox {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  outline: none;
+}
+
+.categories .checkbox[data-focus-visible] {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 @media (forced-colors: active) {
+  .tile-removable {
+    fill: Highlight;
+  }
+
+  .tile-box {
+    stroke: CanvasText;
+  }
+
   .react-aria-Tab[data-selected] {
     forced-color-adjust: none;
     background: Highlight;

@@ -14,6 +14,7 @@ fn main() {
         "summary",
         "candidates",
         "explain",
+        "folder",
         "clean",
     ]);
 

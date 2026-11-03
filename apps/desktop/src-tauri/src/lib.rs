@@ -94,6 +94,7 @@ pub(crate) fn configure<R: Runtime>(builder: Builder<R>) -> Builder<R> {
             commands::summary,
             commands::candidates,
             commands::explain,
+            commands::folder,
             commands::clean,
         ])
 }

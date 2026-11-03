@@ -7,7 +7,7 @@ import type { Item } from "../bindings/Item";
 import type { ItemPage } from "../bindings/ItemPage";
 import type { ScanProgress } from "../bindings/ScanProgress";
 import type { Section } from "../bindings/Section";
-import { details, HOME_FOLDER, ITEMS, results } from "./sample";
+import { details, folder, HOME_FOLDER, ITEMS, results } from "./sample";
 
 /** Answers the app's commands with sample data, for reviewing the UI in a browser. */
 export function installMocks(): void {
@@ -87,6 +87,13 @@ export function installMocks(): void {
         }
         return details(...found);
       }
+      case "folder":
+        return folder(
+          args.node as number | null,
+          args.limit as number,
+          args.categories as string[],
+          items,
+        );
       case "clean":
         return clean(args.items as number[], args.progress as Channel<number>);
       default:

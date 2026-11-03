@@ -63,7 +63,7 @@ function find(id: number): [Item, Section] {
 async function scanned(elevated = false) {
   const calls = engine();
   const user = userEvent.setup();
-  render(<ScanScreen elevated={elevated} />);
+  render(<ScanScreen elevated={elevated} onResults={() => {}} />);
   await user.click(await screen.findByRole("button", { name: "Scan" }));
   await screen.findByRole("heading", { name: /^Can be removed/ });
   return { calls, user };

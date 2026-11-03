@@ -6,6 +6,7 @@ import type { AppInfo } from "./bindings/AppInfo";
 import type { CleanReport } from "./bindings/CleanReport";
 import type { Details } from "./bindings/Details";
 import type { Folders } from "./bindings/Folders";
+import type { FolderView } from "./bindings/FolderView";
 import type { ItemPage } from "./bindings/ItemPage";
 import type { Results } from "./bindings/Results";
 import type { ScanProgress } from "./bindings/ScanProgress";
@@ -58,6 +59,19 @@ export function candidates(
 
 export function explain(scan: number, item: number): Promise<Details> {
   return invoke("explain", { scan, item });
+}
+
+/**
+ * Folder `node` of scan `scan`, or its roots, with its largest entries up to `limit`. Only items
+ * in `categories` count as removable, or every item if there are none, as `--category` does.
+ */
+export function folder(
+  scan: number,
+  node: number | null,
+  limit: number,
+  categories: string[],
+): Promise<FolderView> {
+  return invoke("folder", { scan, node, limit, categories });
 }
 
 /** Removes `items` from scan `scan`, each the way its tier says, after checking each again. */

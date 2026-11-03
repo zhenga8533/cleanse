@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Tab, TabList, TabPanel, Tabs } from "react-aria-components";
+import { type Key, Tab, TabList, TabPanel, Tabs } from "react-aria-components";
 import { appInfo } from "./api";
 import type { AppInfo } from "./bindings/AppInfo";
+import { DiskScreen, type Latest } from "./disk/DiskScreen";
 import { ScanScreen } from "./scan/ScanScreen";
 
 const SECTIONS = [
@@ -39,6 +40,8 @@ type Startup =
 
 export function App() {
   const [startup, setStartup] = useState<Startup>({ state: "loading" });
+  const [section, setSection] = useState<Key>("scan");
+  const [latest, setLatest] = useState<Latest | null>(null);
 
   useEffect(() => {
     appInfo().then(
@@ -64,7 +67,12 @@ export function App() {
           remove files your own account can't. Open it again without elevation to clean up.
         </p>
       )}
-      <Tabs orientation="vertical" className="layout">
+      <Tabs
+        orientation="vertical"
+        className="layout"
+        selectedKey={section}
+        onSelectionChange={setSection}
+      >
         <TabList aria-label="Sections" className="nav">
           {SECTIONS.map((section) => (
             <Tab key={section.id} id={section.id}>
@@ -72,19 +80,32 @@ export function App() {
             </Tab>
           ))}
         </TabList>
-        {SECTIONS.map((section) =>
-          section.id === "scan" && startup.state === "ready" ? (
-            // Kept while another section shows, so its results are still there on coming back.
-            <TabPanel key={section.id} id={section.id} className="panel" shouldForceMount>
-              <ScanScreen elevated={startup.info.elevated} />
-            </TabPanel>
-          ) : (
-            <TabPanel key={section.id} id={section.id} className="panel">
-              <h1>{section.title}</h1>
-              <p className="muted">{section.description}</p>
-            </TabPanel>
-          ),
+        {/* Scan and Disk usage are kept while another section shows, so what they show is still
+            there on coming back. */}
+        {startup.state === "ready" && (
+          <TabPanel id="scan" className="panel" shouldForceMount>
+            <ScanScreen
+              elevated={startup.info.elevated}
+              onResults={(scan) =>
+                setLatest((latest) => ({ scan, version: (latest?.version ?? 0) + 1 }))
+              }
+            />
+          </TabPanel>
         )}
+        {startup.state === "ready" && (
+          <TabPanel id="disk" className="panel" shouldForceMount>
+            <DiskScreen latest={latest} onScan={() => setSection("scan")} />
+          </TabPanel>
+        )}
+        {SECTIONS.filter(
+          (section) =>
+            startup.state !== "ready" || (section.id !== "scan" && section.id !== "disk"),
+        ).map((section) => (
+          <TabPanel key={section.id} id={section.id} className="panel">
+            <h1>{section.title}</h1>
+            <p className="muted">{section.description}</p>
+          </TabPanel>
+        ))}
       </Tabs>
     </div>
   );

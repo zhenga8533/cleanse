@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use cleanse_model::{CandidateId, EntryOutcome, Outcome, Risk, RuleId};
+use cleanse_model::{CandidateId, Category, EntryOutcome, Outcome, Risk, RuleId};
 use tempfile::TempDir;
 
 use super::{ScanId, Session, SessionError};
@@ -297,13 +297,13 @@ fn shows_folders_with_what_can_be_removed_under_each() {
     project(fixture.root.path());
     let scan = fixture.scan();
 
-    let roots = fixture.session.folder(scan, None, 10).unwrap();
+    let roots = fixture.session.folder(scan, None, 10, &[]).unwrap();
     let [root] = &roots.entries[..] else {
         panic!("{roots:?}")
     };
     let top = fixture
         .session
-        .folder(scan, Some(root.node.index()), 10)
+        .folder(scan, Some(root.node.index()), 10, &[])
         .unwrap();
     let web = top
         .entries
@@ -312,7 +312,7 @@ fn shows_folders_with_what_can_be_removed_under_each() {
         .unwrap();
     let inside_web = fixture
         .session
-        .folder(scan, Some(web.node.index()), 1)
+        .folder(scan, Some(web.node.index()), 1, &[])
         .unwrap();
 
     assert!(roots.trail.is_empty());
@@ -329,9 +329,37 @@ fn shows_folders_with_what_can_be_removed_under_each() {
     assert_eq!(web.removable, node_modules.usage.on_disk);
     assert_eq!(node_modules.removable, node_modules.usage.on_disk);
     assert!(matches!(
-        fixture.session.folder(scan, Some(u32::MAX), 10),
+        fixture.session.folder(scan, Some(u32::MAX), 10, &[]),
         Err(SessionError::UnknownFolder(_))
     ));
+}
+
+#[test]
+fn counts_only_the_chosen_categories_as_removable() {
+    let fixture = Fixture::new();
+    project(fixture.root.path());
+    let scan = fixture.scan();
+    let root = fixture.session.folder(scan, None, 10, &[]).unwrap().entries[0].node;
+    let web = |categories: &[Category]| {
+        let top = fixture
+            .session
+            .folder(scan, Some(root.index()), 10, categories)
+            .unwrap();
+        top.entries
+            .into_iter()
+            .find(|entry| entry.name == "web")
+            .unwrap()
+    };
+
+    let all = web(&[]);
+    let dependencies = web(&[Category::Dependencies]);
+    let logs = web(&[Category::Logs, Category::Temp]);
+
+    assert!(all.removable > 0);
+    assert_eq!(dependencies.removable, all.removable);
+    assert_eq!(logs.removable, 0);
+    // Sizes count everything whatever is chosen.
+    assert_eq!(logs.usage, all.usage);
 }
 
 #[test]
