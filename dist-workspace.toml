@@ -27,6 +27,9 @@ install-updater = false
 github-attestations = true
 # The desktop app's installers, which Tauri builds rather than dist. See the workflow.
 local-artifacts-jobs = ["./desktop-installers"]
+# Build only the packages dist ships, the CLI, rather than the whole workspace: the desktop app
+# needs GTK's development files to compile on Linux, which the CLI's runners don't have.
+precise-builds = true
 
 # Pin the generated workflow's actions by commit, like the other workflows.
 # Dependabot bumps to release.yml fail dist's up-to-date check until the
