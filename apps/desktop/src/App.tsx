@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Tab, TabList, TabPanel, Tabs } from "react-aria-components";
 import { appInfo } from "./api";
 import type { AppInfo } from "./bindings/AppInfo";
+import { ScanScreen } from "./scan/ScanScreen";
 
 const SECTIONS = [
   {
@@ -71,12 +72,19 @@ export function App() {
             </Tab>
           ))}
         </TabList>
-        {SECTIONS.map((section) => (
-          <TabPanel key={section.id} id={section.id} className="panel">
-            <h1>{section.title}</h1>
-            <p className="muted">{section.description}</p>
-          </TabPanel>
-        ))}
+        {SECTIONS.map((section) =>
+          section.id === "scan" && startup.state === "ready" ? (
+            // Kept while another section shows, so its results are still there on coming back.
+            <TabPanel key={section.id} id={section.id} className="panel" shouldForceMount>
+              <ScanScreen elevated={startup.info.elevated} />
+            </TabPanel>
+          ) : (
+            <TabPanel key={section.id} id={section.id} className="panel">
+              <h1>{section.title}</h1>
+              <p className="muted">{section.description}</p>
+            </TabPanel>
+          ),
+        )}
       </Tabs>
     </div>
   );

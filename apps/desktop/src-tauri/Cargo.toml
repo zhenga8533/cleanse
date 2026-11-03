@@ -14,6 +14,10 @@ dist = false
 
 [dependencies]
 cleanse-engine.workspace = true
+cleanse-model.workspace = true
+# The system's folder picker, without Tauri's dialog plugin, which would also bring in its file
+# system plugin. GTK on Linux, as Tauri uses.
+rfd = { workspace = true, features = ["common-controls-v6", "gtk3"] }
 serde.workspace = true
 tauri = { workspace = true, features = ["isolation"] }
 ts-rs.workspace = true
@@ -24,6 +28,7 @@ tauri-build = { workspace = true, features = ["isolation"] }
 [dev-dependencies]
 serde_json.workspace = true
 tauri = { workspace = true, features = ["test"] }
+tempfile.workspace = true
 
 [lints]
 workspace = true

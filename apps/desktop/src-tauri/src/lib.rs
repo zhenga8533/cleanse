@@ -6,17 +6,60 @@ mod commands;
 mod tests;
 mod views;
 
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+
 use cleanse_engine::{Engine, Session};
 use tauri::webview::NewWindowResponse;
 use tauri::{App, Builder, Runtime, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
-/// The session, or why the engine couldn't start, such as a mistake in the settings file. The
-/// app shows that rather than closing.
-pub(crate) struct AppState(Result<Session, String>);
+pub(crate) struct AppState {
+    /// The session, or why the engine couldn't start, such as a mistake in the settings file.
+    /// The app shows that rather than closing.
+    session: Result<Arc<Session>, String>,
+    /// The folders chosen in the folder picker, which a scan covers instead of the home folder.
+    chosen: Mutex<Vec<PathBuf>>,
+}
 
 impl AppState {
-    fn session(&self) -> Result<&Session, String> {
-        self.0.as_ref().map_err(Clone::clone)
+    fn new() -> Self {
+        Self {
+            session: Engine::new()
+                .map(|engine| Arc::new(Session::new(engine)))
+                .map_err(|error| error.to_string()),
+            chosen: Mutex::default(),
+        }
+    }
+
+    fn session(&self) -> Result<Arc<Session>, String> {
+        self.session.clone()
+    }
+
+    fn chosen(&self) -> Vec<PathBuf> {
+        self.lock_chosen().clone()
+    }
+
+    /// Adds `folders` to those a scan covers, leaving out any already there.
+    fn choose(&self, folders: impl IntoIterator<Item = PathBuf>) {
+        let mut chosen = self.lock_chosen();
+        for folder in folders {
+            if !chosen.contains(&folder) {
+                chosen.push(folder);
+            }
+        }
+    }
+
+    fn unchoose(&self, index: usize) -> Result<(), String> {
+        let mut chosen = self.lock_chosen();
+        if index >= chosen.len() {
+            return Err(format!("There's no chosen folder {index}"));
+        }
+        chosen.remove(index);
+        Ok(())
+    }
+
+    fn lock_chosen(&self) -> MutexGuard<'_, Vec<PathBuf>> {
+        self.chosen.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 
@@ -39,12 +82,20 @@ pub(crate) fn context<R: Runtime>() -> tauri::Context<R> {
 
 /// The app's state and commands, for any runtime, so tests can use a mock one.
 pub(crate) fn configure<R: Runtime>(builder: Builder<R>) -> Builder<R> {
-    let state = Engine::new()
-        .map(Session::new)
-        .map_err(|error| error.to_string());
     builder
-        .manage(AppState(state))
-        .invoke_handler(tauri::generate_handler![commands::app_info])
+        .manage(AppState::new())
+        .invoke_handler(tauri::generate_handler![
+            commands::app_info,
+            commands::folders,
+            commands::pick_folders,
+            commands::remove_folder,
+            commands::scan,
+            commands::cancel,
+            commands::summary,
+            commands::candidates,
+            commands::explain,
+            commands::clean,
+        ])
 }
 
 /// The app's one window, which `capabilities/main.json` names.

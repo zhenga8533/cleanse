@@ -13,7 +13,7 @@ through Tauri: reading files, spawning processes, opening windows, and loading o
 ## Decision
 
 The web view gets nothing but a small set of the app's own commands, and none of them takes a
-path to remove.
+path.
 
 - **Commands are refused unless a capability allows them.** `src-tauri/build.rs` lists the
   app's commands for tauri-build's app manifest, which makes each one deny-by-default, and the
@@ -25,6 +25,11 @@ path to remove.
   folders, and quarantine entries by IDs it gave out and refuses IDs from an earlier scan.
   Cleaning re-checks every item as `cleanse clean` does, so the web view can only choose among
   what the engine already decided may be removed.
+- **Scans cover the folders the person picked.** A scan covers the folders chosen in the
+  system's folder picker, which the Rust side opens, or else the home folder. The web view can
+  ask for the picker but can't name a folder, so it can't widen a scan to somewhere the person
+  didn't choose. The picker comes from `rfd` directly rather than Tauri's dialog plugin, which
+  would bring in Tauri's file system plugin too.
 - **The web view shows only the app.** The content security policy is `default-src 'self'`, so
   no remote or inline scripts run and nothing is fetched except through the app's own IPC.
   Inline styles are allowed, since React Aria positions popovers with them. The window refuses

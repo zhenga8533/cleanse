@@ -25,6 +25,7 @@ dirs = "7.0"
 gix = { version = "0.90", default-features = false }
 inquire = { version = "0.9", default-features = false, features = ["crossterm"] }
 rayon = "1.12"
+rfd = { version = "0.17", default-features = false }
 rustix = "1.1"
 serde = { version = "1.0", features = ["derive"] }
 sysinfo = { version = "0.40", default-features = false, features = ["system"] }

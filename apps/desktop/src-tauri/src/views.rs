@@ -1,7 +1,13 @@
 //! What commands return, shaped for the web view. `ts-rs` writes a TypeScript type for each to
 //! `apps/desktop/src/bindings/` when the tests run, and CI fails if those are out of date.
+//!
+//! Paths are here to be shown, never sent back: the web view names items by their IDs.
 
-use serde::Serialize;
+use std::path::Path;
+
+use cleanse_engine::{self as engine, Explained, Progress, RuleSet, Summary, advice};
+use cleanse_model::{self as model, Candidate};
+use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 #[derive(Debug, Serialize, TS)]
@@ -11,4 +17,394 @@ pub(crate) struct AppInfo {
     pub version: String,
     /// Cleanse runs as an administrator or root, so it won't change anything.
     pub elevated: bool,
+}
+
+/// The folders a scan covers.
+#[derive(Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct Folders {
+    pub folders: Vec<String>,
+    /// None were chosen, so `folders` is the home folder.
+    pub home: bool,
+}
+
+/// How far a scan has got.
+#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) enum ScanProgress {
+    /// Looking through folders for things rules recognize.
+    Walking {
+        #[ts(type = "number")]
+        entries: u64,
+    },
+    /// Measuring and checking what the rules found.
+    Assessing { done: usize, total: usize },
+}
+
+impl From<Progress> for ScanProgress {
+    fn from(progress: Progress) -> Self {
+        match progress {
+            Progress::Walking { entries } => Self::Walking { entries },
+            Progress::Assessing { done, total } => Self::Assessing { done, total },
+        }
+    }
+}
+
+/// How much space something takes, and how much removing it would free, in bytes.
+#[derive(Clone, Copy, Debug, Default, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct Size {
+    #[ts(type = "number")]
+    pub logical: u64,
+    #[ts(type = "number")]
+    pub on_disk: u64,
+    /// The part of `onDisk` that removing it is certain to free. Data shared with files
+    /// elsewhere isn't counted.
+    #[ts(type = "number")]
+    pub guaranteed: u64,
+}
+
+impl From<model::Size> for Size {
+    fn from(size: model::Size) -> Self {
+        Self {
+            logical: size.logical,
+            on_disk: size.on_disk,
+            guaranteed: size.guaranteed,
+        }
+    }
+}
+
+/// Where an item is listed in the results.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) enum Section {
+    /// Safe and Regenerable items.
+    Removable,
+    /// Review items, which only a person can decide about.
+    Review,
+    /// Kept, because their own tool cleans them better.
+    Advice,
+    /// Kept by a safety check or their rule.
+    Kept,
+}
+
+impl From<engine::Section> for Section {
+    fn from(section: engine::Section) -> Self {
+        match section {
+            engine::Section::Removable => Self::Removable,
+            engine::Section::Review => Self::Review,
+            engine::Section::Advice => Self::Advice,
+            engine::Section::Kept => Self::Kept,
+        }
+    }
+}
+
+impl From<Section> for engine::Section {
+    fn from(section: Section) -> Self {
+        match section {
+            Section::Removable => Self::Removable,
+            Section::Review => Self::Review,
+            Section::Advice => Self::Advice,
+            Section::Kept => Self::Kept,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) enum Risk {
+    Safe,
+    Regenerable,
+    Review,
+    Protected,
+}
+
+impl From<model::Risk> for Risk {
+    fn from(risk: model::Risk) -> Self {
+        match risk {
+            model::Risk::Safe => Self::Safe,
+            model::Risk::Regenerable => Self::Regenerable,
+            model::Risk::Review => Self::Review,
+            model::Risk::Protected => Self::Protected,
+        }
+    }
+}
+
+/// How a cleanup removes an item.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) enum Disposal {
+    Delete,
+    Quarantine,
+    Trash,
+}
+
+impl From<model::Disposal> for Disposal {
+    fn from(disposal: model::Disposal) -> Self {
+        match disposal {
+            model::Disposal::Delete => Self::Delete,
+            model::Disposal::Quarantine => Self::Quarantine,
+            model::Disposal::Trash => Self::Trash,
+        }
+    }
+}
+
+/// A reason to be careful about removing an item.
+#[derive(Clone, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct Concern {
+    pub message: String,
+    /// It keeps the item. Otherwise it's a warning, and the item isn't selected to begin with.
+    pub blocks: bool,
+}
+
+/// What a scan found, section by section.
+#[derive(Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct Results {
+    #[ts(type = "number")]
+    pub scan: u64,
+    pub roots: Vec<String>,
+    /// Files, folders, and links looked at.
+    #[ts(type = "number")]
+    pub entries: u64,
+    pub seconds: f64,
+    /// The scan was cancelled, so the results are partial.
+    pub cancelled: bool,
+    /// How many folders couldn't be read.
+    pub unreadable: usize,
+    /// Every section, in the order they're shown, even the empty ones.
+    pub sections: Vec<SectionResults>,
+    /// What's been removed since the scan.
+    pub removed: Size,
+    /// What a cleanup selects to begin with, as `cleanse clean` does: Safe and Regenerable items
+    /// with nothing to warn about.
+    pub preselected: Vec<Choice>,
+}
+
+impl Results {
+    pub(crate) fn new(summary: Summary, rules: &RuleSet, preselected: Vec<Choice>) -> Self {
+        Self {
+            scan: summary.scan.0,
+            roots: summary.roots.iter().map(|root| lossy(root)).collect(),
+            entries: summary.entries,
+            seconds: summary.elapsed.as_secs_f64(),
+            cancelled: summary.cancelled,
+            unreadable: summary.unreadable,
+            sections: summary
+                .sections
+                .into_iter()
+                .map(|section| SectionResults {
+                    section: section.section.into(),
+                    items: section.items,
+                    size: section.size.into(),
+                    rules: section
+                        .rules
+                        .into_iter()
+                        .map(|rule| RuleTotal {
+                            name: rule_name(rules, &rule.rule),
+                            rule: rule.rule.0,
+                            items: rule.items,
+                            size: rule.size.into(),
+                        })
+                        .collect(),
+                })
+                .collect(),
+            removed: summary.removed.into(),
+            preselected,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct SectionResults {
+    pub section: Section,
+    pub items: usize,
+    pub size: Size,
+    /// The rules with items here, largest first.
+    pub rules: Vec<RuleTotal>,
+}
+
+#[derive(Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct RuleTotal {
+    pub rule: String,
+    pub name: String,
+    pub items: usize,
+    pub size: Size,
+}
+
+/// An item a cleanup can remove, and how.
+#[derive(Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct Choice {
+    #[ts(type = "number")]
+    pub id: u64,
+    pub size: Size,
+    pub disposal: Disposal,
+}
+
+impl Choice {
+    /// Protected items can't be chosen, so they have none.
+    pub(crate) fn of(candidate: &Candidate) -> Option<Self> {
+        Some(Self {
+            id: candidate.id.0,
+            size: candidate.found.size.into(),
+            disposal: candidate.default_disposal()?.into(),
+        })
+    }
+}
+
+/// Something a rule recognized.
+#[derive(Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct Item {
+    #[ts(type = "number")]
+    pub id: u64,
+    pub path: String,
+    pub rule: String,
+    pub risk: Risk,
+    pub size: Size,
+    /// The number of files, counting the item itself if it's a file.
+    #[ts(type = "number")]
+    pub files: u64,
+    /// When its most recently modified file was modified, in seconds since the Unix epoch.
+    #[ts(type = "number | null")]
+    pub modified: Option<u64>,
+    pub concerns: Vec<Concern>,
+    /// How a cleanup removes it, unless it's kept.
+    pub disposal: Option<Disposal>,
+    /// The command that cleans it better than removing it would, if its own tool does.
+    pub command: Option<String>,
+    pub preselected: bool,
+}
+
+impl Item {
+    pub(crate) fn new(candidate: &Candidate, rules: &RuleSet) -> Self {
+        Self {
+            id: candidate.id.0,
+            path: lossy(&candidate.found.path),
+            rule: candidate.found.rule.0.clone(),
+            risk: candidate.risk().into(),
+            size: candidate.found.size.into(),
+            files: candidate.found.files,
+            modified: candidate.found.modified,
+            concerns: candidate
+                .concerns()
+                .iter()
+                .map(|concern| Concern {
+                    message: concern.to_string(),
+                    blocks: concern.blocks(),
+                })
+                .collect(),
+            disposal: candidate.default_disposal().map(Disposal::from),
+            command: advice(rules, candidate).map(str::to_owned),
+            preselected: candidate.preselected(),
+        }
+    }
+}
+
+/// Part of a section's items.
+#[derive(Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct ItemPage {
+    pub items: Vec<Item>,
+    /// Where in the list `items` starts.
+    pub offset: usize,
+    /// How long the whole list is.
+    pub total: usize,
+}
+
+/// An item, the rule that recognized it, and why it can be removed or is kept.
+#[derive(Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct Details {
+    pub item: Item,
+    pub section: Section,
+    pub rule_name: String,
+    /// Why what the rule recognizes is safe to remove.
+    pub explain: String,
+    /// How it comes back, when that takes a deliberate step.
+    pub regenerate: Option<String>,
+    /// What the rule found that supports removing it.
+    pub evidence: Vec<String>,
+}
+
+impl Details {
+    pub(crate) fn new(explained: &Explained, rules: &RuleSet) -> Self {
+        Self {
+            item: Item::new(&explained.candidate, rules),
+            section: explained.section.into(),
+            rule_name: explained.rule.name.clone(),
+            explain: explained.rule.explain.clone(),
+            regenerate: explained.rule.regenerate.clone(),
+            evidence: explained
+                .candidate
+                .found
+                .evidence
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+        }
+    }
+}
+
+/// What a cleanup did.
+#[derive(Debug, Default, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct CleanReport {
+    pub deleted: Amount,
+    /// Moved into quarantine, where they take space until they're purged.
+    pub quarantined: Amount,
+    /// Left alone, because something about them changed since the scan, or the cleanup stopped
+    /// first.
+    pub skipped: Vec<Problem>,
+    /// Attempted, and couldn't be removed.
+    pub failed: Vec<Problem>,
+    /// The journal file recording the cleanup, unless there was nothing to remove.
+    pub journal: Option<String>,
+}
+
+#[derive(Debug, Default, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct Amount {
+    pub items: usize,
+    pub size: Size,
+}
+
+#[derive(Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct Problem {
+    pub path: String,
+    pub reason: String,
+}
+
+/// For display only: names that aren't valid Unicode get replacement characters.
+pub(crate) fn lossy(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
+}
+
+/// A rule's name, or its ID if the rules don't have it.
+fn rule_name(rules: &RuleSet, id: &model::RuleId) -> String {
+    rules
+        .get(id)
+        .map_or_else(|| id.0.clone(), |rule| rule.name.clone())
 }

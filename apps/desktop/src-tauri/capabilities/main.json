@@ -3,5 +3,16 @@
   "identifier": "main",
   "description": "What the app's window may call: Cleanse's own commands, and nothing from Tauri's core or any plugin.",
   "windows": ["main"],
-  "permissions": ["allow-app-info"]
+  "permissions": [
+    "allow-app-info",
+    "allow-folders",
+    "allow-pick-folders",
+    "allow-remove-folder",
+    "allow-scan",
+    "allow-cancel",
+    "allow-summary",
+    "allow-candidates",
+    "allow-explain",
+    "allow-clean"
+  ]
 }

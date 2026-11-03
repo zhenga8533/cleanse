@@ -4,13 +4,18 @@ import userEvent from "@testing-library/user-event";
 import { expect, it } from "vitest";
 import { App } from "./App";
 import type { AppInfo } from "./bindings/AppInfo";
+import type { Folders } from "./bindings/Folders";
 
 function answer(info: AppInfo): void {
   mockIPC((cmd) => {
-    if (cmd === "app_info") {
-      return info;
+    switch (cmd) {
+      case "app_info":
+        return info;
+      case "folders":
+        return { folders: ["C:\\Users\\sample"], home: true } satisfies Folders;
+      default:
+        throw new Error(`unexpected command ${cmd}`);
     }
-    throw new Error(`unexpected command ${cmd}`);
   });
 }
 
