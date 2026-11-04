@@ -1,5 +1,6 @@
-//! What the web view can ask for. Each command is also listed in `build.rs` and allowed in
-//! `capabilities/main.json`, or the web view can't call it.
+//! What the web view can ask for, apart from system cleanup, which `system.rs` has. Each command
+//! is also listed in `build.rs` and allowed in `capabilities/main.json`, or the web view can't
+//! call it.
 //!
 //! None takes a path. A scan covers the folders chosen in the system's folder picker, or the home
 //! folder, and everything after that is named by an ID the session gave out.
@@ -350,23 +351,23 @@ async fn run<T: Send + 'static>(
 
 /// Sends progress to the web view. It's only progress, so if the window has closed, there's no
 /// one to tell.
-fn tell<T: IpcResponse>(channel: &Channel<T>, update: T) {
+pub(crate) fn tell<T: IpcResponse>(channel: &Channel<T>, update: T) {
     let _ = channel.send(update);
 }
 
-fn message(error: impl Display) -> String {
+pub(crate) fn message(error: impl Display) -> String {
     error.to_string()
 }
 
 /// Lets an update through at most every [`Throttle::INTERVAL`], so a fast scan doesn't flood
 /// the web view.
 #[derive(Default)]
-struct Throttle(Mutex<Option<Instant>>);
+pub(crate) struct Throttle(Mutex<Option<Instant>>);
 
 impl Throttle {
     const INTERVAL: Duration = Duration::from_millis(100);
 
-    fn due(&self) -> bool {
+    pub(crate) fn due(&self) -> bool {
         let mut last = self.0.lock().unwrap_or_else(PoisonError::into_inner);
         let now = Instant::now();
         if last.is_some_and(|last| now.duration_since(last) < Self::INTERVAL) {

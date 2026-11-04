@@ -21,6 +21,19 @@
     "allow-history",
     "allow-finish",
     "allow-settings",
-    "allow-rules"
+    "allow-rules",
+    "allow-system-status",
+    "allow-system-scan",
+    "allow-system-cancel",
+    "allow-system-summary",
+    "allow-system-candidates",
+    "allow-system-explain",
+    "allow-system-clean",
+    "allow-system-quarantined",
+    "allow-system-restore",
+    "allow-system-purge",
+    "allow-system-history",
+    "allow-system-finish",
+    "allow-system-rules"
   ]
 }

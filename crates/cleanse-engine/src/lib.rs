@@ -32,7 +32,7 @@ pub use cleanse_core::rules::{
     Base, Entry, Location, Os, Rule, RuleError, RuleSet, RuleTest, Target,
 };
 pub use cleanse_exec::{
-    Action, Applied, ApplyError, Handled, History, Leftover, Listing, PlanFileError, Run,
+    Action, Applied, ApplyError, Handled, History, Leftover, Listing, PlanFileError, Run, helper,
     load_plan, save_plan,
 };
 pub use cleanse_platform::{KnownFolders, Probe, System, SystemFolders};

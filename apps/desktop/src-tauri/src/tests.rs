@@ -1,15 +1,22 @@
 #![allow(clippy::disallowed_methods, reason = "tests build fixture trees")]
 
 use std::fs::{self, File};
-use std::path::Path;
+use std::io::{BufReader, pipe};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::thread;
 use std::time::{Duration, SystemTime};
 
+use cleanse_elevate::server::serve;
+use cleanse_engine::{Engine, KnownFolders, Session, System};
 use serde_json::{Value, json};
 use tauri::ipc::{CallbackFn, InvokeBody};
 use tauri::test::{INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder};
 use tauri::webview::InvokeRequest;
 use tauri::{App, Manager, WebviewWindow};
 
+use crate::system::{Connection, Starter, SystemState};
 use crate::{AppState, configure, context, is_own_content, open_window};
 
 /// The app as it's built for real, with its capabilities, on a runtime that shows nothing.
@@ -20,7 +27,12 @@ struct TestApp {
 
 impl TestApp {
     fn new() -> Self {
-        let app = configure(mock_builder()).build(context()).unwrap();
+        Self::with_system(SystemState::installed())
+    }
+
+    /// With `system` for system cleanup's helper.
+    fn with_system(system: Arc<SystemState>) -> Self {
+        let app = configure(mock_builder(), system).build(context()).unwrap();
         let window = open_window(&app).unwrap();
         Self { app, window }
     }
@@ -312,4 +324,203 @@ fn the_window_shows_only_the_apps_own_content() {
 
 fn project_is_whole(root: &Path) -> bool {
     root.join("app/node_modules/dep/index.js").is_file()
+}
+
+/// Every system cleanup command.
+const SYSTEM_COMMANDS: [&str; 13] = [
+    "system_status",
+    "system_scan",
+    "system_cancel",
+    "system_summary",
+    "system_candidates",
+    "system_explain",
+    "system_clean",
+    "system_quarantined",
+    "system_restore",
+    "system_purge",
+    "system_history",
+    "system_finish",
+    "system_rules",
+];
+
+/// Serves the user's cleanup of `home`, as the helper serves system cleanup's: the protocol
+/// doesn't tell them apart. It acts as if it isn't elevated, since CI runs tests as an
+/// administrator on Windows.
+struct InProcess {
+    home: PathBuf,
+    data: PathBuf,
+    /// How long each helper waits for a request before it stops.
+    idle: Duration,
+    /// How many helpers it has started.
+    started: Arc<AtomicUsize>,
+}
+
+impl InProcess {
+    fn new(home: &Path, data: &Path, idle: Duration) -> Self {
+        Self {
+            home: home.to_path_buf(),
+            data: data.to_path_buf(),
+            idle,
+            started: Arc::default(),
+        }
+    }
+}
+
+impl Starter for InProcess {
+    fn unavailable(&self) -> Option<String> {
+        None
+    }
+
+    fn start(&self, _: Option<usize>) -> Result<Connection, String> {
+        self.started.fetch_add(1, Ordering::Relaxed);
+        let folders = KnownFolders {
+            home: Some(self.home.clone()),
+            temp: self.home.join("temp"),
+            ..KnownFolders::default()
+        };
+        let system = System::new()
+            .unwrap()
+            .elevated(false)
+            .with_known_folders(folders);
+        let engine = Engine::user_at(system, self.data.clone()).unwrap();
+        let session = Arc::new(Session::new(engine));
+        let (served, requests) = pipe().unwrap();
+        let (answers, answering) = pipe().unwrap();
+        let idle = self.idle;
+        thread::spawn(move || serve(&session, BufReader::new(served), answering, idle));
+        Ok(Connection {
+            answers: Box::new(BufReader::new(answers)),
+            requests: Box::new(requests),
+            process: None,
+        })
+    }
+}
+
+#[test]
+fn other_pages_cant_call_the_system_commands() {
+    let app = TestApp::new();
+
+    for cmd in SYSTEM_COMMANDS {
+        let error = app
+            .invoke_from(cmd, json!({}), Some("https://example.com/"))
+            .unwrap_err();
+        assert!(error.to_string().contains("not allowed"), "{cmd}: {error}");
+    }
+}
+
+/// Tests don't run from where an installer puts the app, so it has no helper to start, and says
+/// why. On macOS that's that system cleanup is for Windows and Linux.
+#[test]
+fn without_its_helper_the_app_says_why_and_starts_nothing() {
+    let app = TestApp::new();
+
+    let status = app.invoke("system_status", json!({})).unwrap();
+    let why = status["unavailable"].as_str().unwrap();
+    assert_eq!(status["supported"], cfg!(any(windows, target_os = "linux")));
+    assert_eq!(status["running"], false);
+    let error = app.invoke("system_history", json!({})).unwrap_err();
+    assert_eq!(error, json!(why));
+    // Nothing is running to cancel.
+    app.invoke("system_cancel", json!({})).unwrap();
+}
+
+/// They're built in, so listing them needs no helper.
+#[test]
+fn lists_system_cleanups_rules() {
+    let app = TestApp::new();
+
+    let rules = app.invoke("system_rules", json!({})).unwrap();
+
+    let ids: Vec<&str> = rules
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|rule| rule["id"].as_str().unwrap())
+        .collect();
+    assert!(ids.contains(&"windows.memory_dumps"), "{ids:?}");
+    assert!(ids.contains(&"linux.core_dumps"), "{ids:?}");
+    assert!(!ids.contains(&"javascript.node_modules"), "{ids:?}");
+}
+
+#[test]
+fn system_commands_go_to_the_helper_the_first_one_starts() {
+    let root = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let home = root.path().join("home");
+    project(&home);
+    let app = TestApp::with_system(SystemState::with(Box::new(InProcess::new(
+        &home,
+        data.path(),
+        Duration::from_secs(60),
+    ))));
+    let status = app.invoke("system_status", json!({})).unwrap();
+    assert_eq!(status["unavailable"], Value::Null);
+    assert_eq!(status["running"], false);
+
+    let results = app
+        .invoke("system_scan", json!({ "progress": CHANNEL }))
+        .unwrap();
+    let scan = &results["scan"];
+    assert_eq!(results["sections"][0]["items"], 1);
+    let status = app.invoke("system_status", json!({})).unwrap();
+    assert_eq!(status["running"], true);
+    let page = app
+        .invoke(
+            "system_candidates",
+            json!({ "scan": scan, "section": "removable", "rule": null, "offset": 0, "limit": 10 }),
+        )
+        .unwrap();
+    let item = &page["items"][0]["id"];
+    let details = app
+        .invoke("system_explain", json!({ "scan": scan, "item": item }))
+        .unwrap();
+    assert_eq!(details["ruleName"], "Node.js dependencies");
+
+    let report = app
+        .invoke(
+            "system_clean",
+            json!({ "scan": scan, "items": [item], "progress": CHANNEL }),
+        )
+        .unwrap();
+    assert_eq!(report["deleted"]["items"], 1, "{report}");
+    assert!(!project_is_whole(&home));
+    let summary = app
+        .invoke("system_summary", json!({ "scan": scan }))
+        .unwrap();
+    assert_eq!(summary["sections"][0]["items"], 0);
+    let history = app.invoke("system_history", json!({})).unwrap();
+    assert_eq!(history["runs"].as_array().unwrap().len(), 1, "{history}");
+    let quarantine = app.invoke("system_quarantined", json!({})).unwrap();
+    assert!(quarantine["entries"].is_array());
+
+    // The helper's own errors come back as they are.
+    let error = app
+        .invoke("system_purge", json!({ "ids": ["no-such-entry"] }))
+        .unwrap_err();
+    assert!(error.to_string().contains("no-such-entry"), "{error}");
+}
+
+/// A helper that stopped, as one does after ten minutes with nothing asked, is replaced by the
+/// next command after the one that found it gone.
+#[test]
+fn a_helper_that_stopped_is_started_again() {
+    let root = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let helpers = InProcess::new(root.path(), data.path(), Duration::from_millis(100));
+    let started = Arc::clone(&helpers.started);
+    let app = TestApp::with_system(SystemState::with(Box::new(helpers)));
+    app.invoke("system_history", json!({})).unwrap();
+
+    thread::sleep(Duration::from_millis(500));
+    let error = app.invoke("system_history", json!({})).unwrap_err();
+    let status = app.invoke("system_status", json!({})).unwrap();
+    let history = app.invoke("system_history", json!({}));
+
+    assert!(
+        error.to_string().contains("System cleanup stopped"),
+        "{error}"
+    );
+    assert_eq!(status["running"], false);
+    assert!(history.is_ok(), "{history:?}");
+    assert_eq!(started.load(Ordering::Relaxed), 2);
 }

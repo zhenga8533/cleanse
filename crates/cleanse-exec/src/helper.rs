@@ -223,6 +223,11 @@ pub struct HelperProcess {
 }
 
 impl HelperProcess {
+    /// Whether it has stopped, without waiting.
+    pub fn has_stopped(&mut self) -> bool {
+        matches!(self.exit(), Ok(Some(_)))
+    }
+
     /// Why it stopped, once it has, for the window to say. Its answers end as it exits, so this
     /// waits a moment for that.
     pub fn stopped(&mut self) -> Option<String> {
