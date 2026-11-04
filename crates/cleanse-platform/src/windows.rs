@@ -53,6 +53,9 @@ use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken}
 
 use crate::{FileFacts, FileOwner, ListedFacts, SystemFolders};
 
+#[cfg(any(test, feature = "privileged"))]
+pub mod pipe;
+
 /// Reparse tags with this bit stand in for another name: symbolic links, junctions, and mount
 /// points. They're the only reparse points treated as links.
 const NAME_SURROGATE_BIT: u32 = 0x2000_0000;
@@ -312,6 +315,38 @@ fn is_administrators_or_system(sid: PSID) -> bool {
 fn is_sid(sid: PSID, kind: WELL_KNOWN_SID_TYPE) -> bool {
     // SAFETY: `sid` is a valid SID.
     unsafe { IsWellKnownSid(sid, kind) != 0 }
+}
+
+/// Has Windows load the DLLs this process asks for only from System32 from now on.
+#[cfg(any(test, feature = "privileged"))]
+pub(crate) fn load_dlls_from_system32_only() -> io::Result<()> {
+    use windows_sys::Win32::System::LibraryLoader::{
+        LOAD_LIBRARY_SEARCH_SYSTEM32, SetDefaultDllDirectories,
+    };
+
+    // SAFETY: setting where DLLs are looked for has no preconditions.
+    if unsafe { SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// Loads and unloads the DLL named `name`, as Windows looks for it, for tests. It must be a copy
+/// of one of Windows' own.
+#[cfg(test)]
+pub(crate) fn load_dll(name: &str) -> io::Result<()> {
+    use windows_sys::Win32::Foundation::FreeLibrary;
+    use windows_sys::Win32::System::LibraryLoader::LoadLibraryW;
+
+    let name: Vec<u16> = name.encode_utf16().chain([0]).collect();
+    // SAFETY: `name` is NUL-terminated, and the caller passes a DLL that's safe to load.
+    let module = unsafe { LoadLibraryW(name.as_ptr()) };
+    if module.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: `module` was just loaded, and nothing else uses it.
+    unsafe { FreeLibrary(module) };
+    Ok(())
 }
 
 /// Creates the folder at `path`, which mustn't exist, owned by Administrators, with an access list

@@ -539,3 +539,203 @@ fn the_fake_reports_only_the_programs_it_was_told_are_running() {
 
     assert_eq!(running.into_iter().collect::<Vec<_>>(), ["claude"]);
 }
+
+#[cfg(windows)]
+mod pipes {
+    use std::io::{BufRead, BufReader, Write};
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::thread;
+    use std::time::Duration;
+
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_WRITE_DATA, PIPE_ACCESS_INBOUND, SYNCHRONIZE,
+    };
+
+    use super::io;
+    use crate::privileged::pipe::{self, Connection, Parent};
+    use crate::windows::pipe::{REQUESTS, allowed, create, logon_of};
+
+    const WAIT: Duration = Duration::from_secs(10);
+
+    /// A name no other test's pipes have.
+    fn name() -> String {
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        format!(
+            "cleanse-test-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        )
+    }
+
+    fn this_program() -> PathBuf {
+        std::env::current_exe().unwrap()
+    }
+
+    /// The helper's side, for this process, waiting for it to connect.
+    fn serve(name: &str) -> thread::JoinHandle<io::Result<Connection>> {
+        let parent = Parent::check(std::process::id(), &this_program()).unwrap();
+        let name = name.to_owned();
+        thread::spawn(move || pipe::serve(&name, &parent))
+    }
+
+    fn read_line(file: &std::fs::File) -> String {
+        let mut line = String::new();
+        BufReader::new(file).read_line(&mut line).unwrap();
+        line
+    }
+
+    #[test]
+    fn the_window_and_the_helper_talk_each_way() {
+        let name = name();
+        let serving = serve(&name);
+
+        let window = pipe::connect(&name, std::process::id(), WAIT).unwrap();
+        let helper = serving.join().unwrap().unwrap();
+
+        (&window.requests).write_all(b"scan\n").unwrap();
+        assert_eq!(read_line(&helper.requests), "scan\n");
+        (&helper.answers).write_all(b"results\n").unwrap();
+        assert_eq!(read_line(&window.answers), "results\n");
+    }
+
+    #[test]
+    fn only_the_parents_logon_session_may_open_the_pipes_for_their_one_way() {
+        let name = name();
+        let serving = serve(&name);
+        let _window = pipe::connect(&name, std::process::id(), WAIT).unwrap();
+        let helper = serving.join().unwrap().unwrap();
+        let logon = logon_of(std::process::id()).unwrap();
+
+        assert_eq!(
+            allowed(&helper.requests).unwrap(),
+            [(
+                logon.clone(),
+                SYNCHRONIZE | FILE_READ_ATTRIBUTES | FILE_WRITE_DATA
+            )]
+        );
+        assert_eq!(
+            allowed(&helper.answers).unwrap(),
+            [(logon, SYNCHRONIZE | FILE_READ_ATTRIBUTES | FILE_READ_DATA)]
+        );
+    }
+
+    /// Someone who makes a pipe of the helper's name first, as anyone in the session can, stops
+    /// the helper rather than taking its place.
+    #[test]
+    fn a_name_someone_took_first_is_refused() {
+        let name = name();
+        let parent = Parent::check(std::process::id(), &this_program()).unwrap();
+        let _squatter = create(
+            &name,
+            REQUESTS,
+            PIPE_ACCESS_INBOUND,
+            FILE_WRITE_DATA,
+            &parent,
+        )
+        .unwrap();
+
+        let error = pipe::serve(&name, &parent).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied, "{error}");
+    }
+
+    #[test]
+    fn the_parent_must_run_the_program_named() {
+        let program = PathBuf::from(r"C:\Program Files\Cleanse\cleanse-desktop.exe");
+
+        let error = Parent::check(std::process::id(), &program).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied, "{error}");
+        assert!(Parent::check(std::process::id(), &this_program()).is_ok());
+    }
+
+    /// The helper's parent here is a child of this process, so this process may open the pipes,
+    /// but isn't the one the helper waits for.
+    #[test]
+    fn a_program_other_than_the_parent_cant_connect() {
+        // It waits on its input until it's killed.
+        let mut child = std::process::Command::new("cmd")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let windows = crate::SystemFolders::current()
+            .unwrap()
+            .system_root
+            .unwrap();
+        let parent = Parent::check(child.id(), &windows.join(r"System32\cmd.exe")).unwrap();
+        let name = name();
+        let serving = {
+            let name = name.clone();
+            thread::spawn(move || pipe::serve(&name, &parent))
+        };
+
+        // It may or may not get as far as the second pipe before the helper gives up.
+        let _ = pipe::connect(&name, std::process::id(), WAIT);
+        let served = serving.join().unwrap();
+
+        child.kill().unwrap();
+        child.wait().unwrap();
+        let error = served.unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied, "{error}");
+    }
+
+    #[test]
+    fn the_window_refuses_pipes_another_program_made() {
+        let name = name();
+        let serving = serve(&name);
+
+        let error = pipe::connect(&name, std::process::id() + 1, WAIT).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied, "{error}");
+        let _ = serving.join().unwrap();
+    }
+
+    #[test]
+    fn pipe_names_are_letters_digits_and_dashes() {
+        let parent = Parent::check(std::process::id(), &this_program()).unwrap();
+        let long = "a".repeat(65);
+
+        for name in ["", "a b", r"..\x", "a/b", long.as_str()] {
+            let error = pipe::serve(name, &parent).unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::InvalidInput, "{name:?}");
+            let error = pipe::connect(name, 1, Duration::ZERO).unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::InvalidInput, "{name:?}");
+        }
+    }
+}
+
+/// Planted beside this test program, a DLL loads, until DLLs come from System32 only.
+#[cfg(windows)]
+#[test]
+fn dlls_beside_the_program_dont_load_once_only_system32_is_searched() {
+    use windows_sys::Win32::Foundation::ERROR_MOD_NOT_FOUND;
+
+    use crate::windows::load_dll;
+
+    let program = std::env::current_exe().unwrap();
+    let system32 = crate::SystemFolders::current()
+        .unwrap()
+        .system_root
+        .unwrap()
+        .join("System32");
+    let names = ["before", "after"]
+        .map(|when| format!("cleanse-planted-{}-{when}.dll", std::process::id()));
+    for name in &names {
+        fs::copy(system32.join("version.dll"), program.with_file_name(name)).unwrap();
+    }
+
+    let before = load_dll(&names[0]);
+    crate::privileged::load_dlls_from_system32_only().unwrap();
+    let after = load_dll(&names[1]);
+
+    for name in &names {
+        fs::remove_file(program.with_file_name(name)).unwrap();
+    }
+    before.unwrap();
+    assert_eq!(
+        after.unwrap_err().raw_os_error(),
+        Some(ERROR_MOD_NOT_FOUND.cast_signed())
+    );
+}

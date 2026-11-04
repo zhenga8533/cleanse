@@ -614,8 +614,10 @@ dependencies = [
  "cleanse-desktop-views",
  "cleanse-engine",
  "cleanse-model",
+ "cleanse-platform",
  "serde",
  "serde_json",
+ "static_vcruntime",
  "tempfile",
 ]
 
