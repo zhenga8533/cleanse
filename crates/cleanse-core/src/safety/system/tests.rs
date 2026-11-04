@@ -6,76 +6,24 @@
     target_os = "macos",
     allow(
         dead_code,
+        unused_imports,
         reason = "system cleanup is for Windows and Linux, and so are the tests that scan fixtures"
     )
 )]
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime};
 
 use cleanse_model::{Candidate, CandidateId, Concern, Risk};
-use cleanse_platform::{FileFacts, FileOwner, KnownFolders, Probe, System, SystemFolders};
+use cleanse_platform::{FileOwner, Probe, StagedSystem, System, SystemFolders};
 
 use super::SystemRoots;
 use crate::rules::{Base, Matcher, Os, RuleSet, Target};
 use crate::safety::policy::{SYSTEM_ADVISED, SYSTEM_DISPOSABLE};
 use crate::safety::{Assessor, ProtectedPolicy};
-
-/// Reports what's on disk, except that everything belongs to the system unless the test says
-/// otherwise, and the computer started when the test says. Fixtures can't really belong to root
-/// or SYSTEM unless the tests run as root or an administrator, which CI only does on Windows.
-struct Owners {
-    system: System,
-    given: HashMap<PathBuf, Option<FileOwner>>,
-    booted_at: SystemTime,
-}
-
-impl Owners {
-    fn new() -> Self {
-        Self {
-            system: System::new().unwrap(),
-            given: HashMap::new(),
-            booted_at: SystemTime::now(),
-        }
-    }
-
-    fn owned(mut self, path: &Path, owner: Option<FileOwner>) -> Self {
-        self.given.insert(path.to_path_buf(), owner);
-        self
-    }
-}
-
-impl Probe for Owners {
-    fn inspect(&self, path: &Path) -> io::Result<FileFacts> {
-        let mut facts = self.system.inspect(path)?;
-        facts.owner = self
-            .given
-            .get(path)
-            .copied()
-            .unwrap_or(Some(FileOwner::System));
-        Ok(facts)
-    }
-
-    fn known_folders(&self) -> &KnownFolders {
-        self.system.known_folders()
-    }
-
-    fn is_elevated(&self) -> bool {
-        true
-    }
-
-    fn running_processes(&self) -> io::Result<HashSet<String>> {
-        Ok(HashSet::new())
-    }
-
-    fn booted_at(&self) -> io::Result<SystemTime> {
-        Ok(self.booted_at)
-    }
-}
 
 /// System folders under `root`, each named after its base.
 fn folders(root: &Path) -> SystemFolders {
@@ -112,8 +60,24 @@ fn git(dir: &Path, args: &[&str]) {
 }
 
 /// Scans the fixture at `root` with `rules`, as system cleanup would, and assesses each match a
-/// week from now, after the computer last started.
-fn assess(rules: &RuleSet, policy: ProtectedPolicy, root: &Path, probe: &Owners) -> Vec<Candidate> {
+/// week from now, after the computer last started, thoroughly, as before a removal.
+fn assess(
+    rules: &RuleSet,
+    policy: ProtectedPolicy,
+    root: &Path,
+    probe: &StagedSystem,
+) -> Vec<Candidate> {
+    assess_as(rules, policy, root, probe, true)
+}
+
+/// Like [`assess`], and as a scan does if not `thorough`.
+fn assess_as(
+    rules: &RuleSet,
+    policy: ProtectedPolicy,
+    root: &Path,
+    probe: &StagedSystem,
+    thorough: bool,
+) -> Vec<Candidate> {
     let folders = folders(root);
     let matcher = Matcher::system(rules.rules(), &folders, Os::current());
     let (found, _) = matcher.find(root).unwrap();
@@ -124,6 +88,11 @@ fn assess(rules: &RuleSet, policy: ProtectedPolicy, root: &Path, probe: &Owners)
         roots,
         SystemTime::now() + Duration::from_hours(24 * 8),
     );
+    let assessor = if thorough {
+        assessor.thorough()
+    } else {
+        assessor
+    };
     (0u64..)
         .zip(&found)
         .map(|(id, detection)| assessor.assess(CandidateId(id), detection))
@@ -194,7 +163,7 @@ fn under(root: &Path, relative: &str) -> PathBuf {
 }
 
 /// Without a protected policy, only system cleanup's own gates apply.
-fn no_policy(probe: &Owners) -> ProtectedPolicy {
+fn no_policy(probe: &StagedSystem) -> ProtectedPolicy {
     ProtectedPolicy::new(Vec::new(), probe)
 }
 
@@ -235,7 +204,8 @@ fn only_what_the_system_owns_throughout_can_be_removed() {
     // changes nothing.
     git(&root, &["init", "-q"]);
     git(&root, &["add", "--", &format!("{}/ok.tmp", temp_folder())]);
-    let probe = Owners::new()
+    let probe = StagedSystem::new()
+        .unwrap()
         .owned(&temp.join("admins.tmp"), Some(FileOwner::Administrators))
         .owned(&temp.join("users.tmp"), Some(FileOwner::Other))
         .owned(&temp.join("mine.tmp"), Some(FileOwner::CurrentUser))
@@ -266,6 +236,48 @@ fn only_what_the_system_owns_throughout_can_be_removed() {
     assert_eq!(blocked(&candidates, &root), expected);
 }
 
+/// A scan checks only what folder listings show inside each item, and leaves who owns each entry
+/// to the check before removal.
+#[cfg(any(windows, target_os = "linux"))]
+#[test]
+fn a_scan_checks_only_what_listings_show_inside() {
+    let fixture = tempfile::tempdir().unwrap();
+    let root = std::path::absolute(fixture.path()).unwrap();
+    let temp = under(&root, temp_folder());
+    write(&temp.join("has-users-file/users.txt"));
+    write(&temp.join("has-link/x"));
+    write(&temp.join("has-hard-link/x"));
+    write(&root.join("elsewhere/original"));
+    fs::hard_link(
+        root.join("elsewhere/original"),
+        temp.join("has-hard-link/linked"),
+    )
+    .unwrap();
+    link_dir(&root.join("elsewhere"), &temp.join("has-link/link"));
+    let probe = StagedSystem::new().unwrap().owned(
+        &temp.join("has-users-file/users.txt"),
+        Some(FileOwner::Other),
+    );
+
+    let candidates = assess_as(&temp_rule(), no_policy(&probe), &root, &probe, false);
+
+    let item = |name: &str| format!("{}/{name}", temp_folder());
+    // Unix listings count hard links. Windows listings don't, and only opening a file does.
+    let hard_linked = if cfg!(unix) {
+        vec![Concern::HardLinked]
+    } else {
+        vec![]
+    };
+    assert_eq!(
+        blocked(&candidates, &root),
+        HashMap::from([
+            (item("has-users-file"), vec![]),
+            (item("has-link"), vec![Concern::LinksInside]),
+            (item("has-hard-link"), hard_linked),
+        ])
+    );
+}
+
 #[cfg(any(windows, target_os = "linux"))]
 #[test]
 fn nothing_is_removed_from_a_folder_that_isnt_the_systems() {
@@ -281,7 +293,7 @@ fn nothing_is_removed_from_a_folder_that_isnt_the_systems() {
         (&temp, None),
         (&base.to_path_buf(), Some(FileOwner::Other)),
     ] {
-        let probe = Owners::new().owned(folder, owner);
+        let probe = StagedSystem::new().unwrap().owned(folder, owner);
 
         let candidates = assess(&temp_rule(), no_policy(&probe), &root, &probe);
 
@@ -307,7 +319,7 @@ fn a_system_folder_must_still_be_the_one_checked() {
     write(&temp.join("ok.tmp"));
     let rules = temp_rule();
     let folders = folders(&root);
-    let probe = Owners::new();
+    let probe = StagedSystem::new().unwrap();
     let roots = SystemRoots::verify(&rules, &folders, &probe);
     assert!(roots.holds(&temp.join("ok.tmp"), &probe));
 
@@ -359,7 +371,7 @@ fn system_exceptions_are_exactly_the_system_rules_locations() {
 fn the_system_policy_protects_system_folders_but_not_whats_disposable_in_them() {
     let root = if cfg!(windows) { r"C:\fake" } else { "/fake" };
     let root = Path::new(root);
-    let policy = ProtectedPolicy::for_system_cleanup(&folders(root), &Owners::new());
+    let policy = ProtectedPolicy::for_system_cleanup(&folders(root), &StagedSystem::new().unwrap());
     let check = |relative: &str| policy.check(&under(root, relative), None, &[]);
 
     for removable in [
@@ -423,7 +435,8 @@ fn the_windows_rules_on_a_fixture() {
         &under(&root, "system_root/Temp/System32"),
     );
     let rules = RuleSet::builtin_system().unwrap();
-    let probe = Owners::new()
+    let probe = StagedSystem::new()
+        .unwrap()
         .owned(
             &under(&root, "system_root/Temp/users.log"),
             Some(FileOwner::Other),
@@ -486,7 +499,7 @@ fn the_linux_rules_on_a_fixture() {
         write(&under(&root, file));
     }
     let rules = RuleSet::builtin_system().unwrap();
-    let probe = Owners::new()
+    let probe = StagedSystem::new().unwrap()
         .owned(
             &under(&root, "var/crash/_usr_bin_app.1000.crash"),
             Some(FileOwner::Other),

@@ -21,7 +21,7 @@ use super::quarantine::Quarantine;
 use super::{Action, ApplyError, Executor, Leftover, PlanFileError, delete, load_plan, save_plan};
 
 /// Writes a file dated a day ago, so it doesn't count as recent activity.
-fn write_old(path: &Path, contents: &str) {
+pub(crate) fn write_old(path: &Path, contents: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(path, contents).unwrap();
     File::options()

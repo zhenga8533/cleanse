@@ -22,7 +22,15 @@ disallowed-methods = [
     { path = "std::fs::File::set_modified", reason = "only cleanse-exec may write files (ADR 0002)" },
     { path = "std::fs::File::set_times", reason = "only cleanse-exec may write files (ADR 0002)" },
     { path = "std::fs::File::set_permissions", reason = "only cleanse-exec may change permissions (ADR 0002)" },
+    { path = "std::fs::DirBuilder::create", reason = "only cleanse-exec may write files (ADR 0002)" },
+    { path = "std::os::unix::fs::symlink", reason = "only cleanse-exec may write files (ADR 0002)", allow-invalid = true },
+    { path = "std::os::unix::fs::chown", reason = "only cleanse-exec may change ownership (ADR 0002)", allow-invalid = true },
+    { path = "std::os::unix::fs::fchown", reason = "only cleanse-exec may change ownership (ADR 0002)", allow-invalid = true },
+    { path = "std::os::unix::fs::lchown", reason = "only cleanse-exec may change ownership (ADR 0002)", allow-invalid = true },
+    { path = "std::os::windows::fs::symlink_file", reason = "only cleanse-exec may write files (ADR 0002)", allow-invalid = true },
+    { path = "std::os::windows::fs::symlink_dir", reason = "only cleanse-exec may write files (ADR 0002)", allow-invalid = true },
     { path = "std::process::Command::new", reason = "rules never run commands; only cleanse-exec may spawn processes (ADR 0003)" },
+    { path = "cleanse_platform::privileged::create_private_dir", reason = "only cleanse-exec creates system cleanup's data folder (ADR 0010)", allow-invalid = true },
 ]
 
 allow-unwrap-in-tests = true

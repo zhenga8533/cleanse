@@ -1,7 +1,7 @@
 #![allow(
     unsafe_code,
-    reason = "file identity, ownership, sync root, token, folder, and long name queries need Win32 \
-              calls that std doesn't wrap"
+    reason = "file identity, ownership, permissions, sync root, token, folder, and long name queries \
+              need Win32 calls that std doesn't wrap"
 )]
 
 use std::env;
@@ -21,11 +21,14 @@ use windows_sys::Win32::Foundation::{
 };
 use windows_sys::Win32::Security::Authorization::{GetSecurityInfo, SE_FILE_OBJECT};
 use windows_sys::Win32::Security::{
-    CopySid, EqualSid, GetLengthSid, GetSidIdentifierAuthority, GetSidSubAuthority,
-    GetSidSubAuthorityCount, GetTokenInformation, IsWellKnownSid, OWNER_SECURITY_INFORMATION,
-    PSECURITY_DESCRIPTOR, PSID, SECURITY_NT_AUTHORITY, TOKEN_ELEVATION, TOKEN_QUERY, TOKEN_USER,
-    TokenElevation, TokenUser, WELL_KNOWN_SID_TYPE, WinBuiltinAdministratorsSid,
-    WinLocalServiceSid, WinLocalSystemSid, WinNetworkServiceSid,
+    ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_SIZE_INFORMATION, AclSizeInformation, CopySid,
+    DACL_SECURITY_INFORMATION, EqualSid, GetAce, GetAclInformation, GetLengthSid,
+    GetSecurityDescriptorControl, GetSidIdentifierAuthority, GetSidSubAuthority,
+    GetSidSubAuthorityCount, GetTokenInformation, IsWellKnownSid, OBJECT_SECURITY_INFORMATION,
+    OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SE_DACL_PROTECTED,
+    SECURITY_NT_AUTHORITY, TOKEN_ELEVATION, TOKEN_QUERY, TOKEN_USER, TokenElevation, TokenUser,
+    WELL_KNOWN_SID_TYPE, WinBuiltinAdministratorsSid, WinLocalServiceSid, WinLocalSystemSid,
+    WinNetworkServiceSid,
 };
 use windows_sys::Win32::Storage::CloudFilters::{
     CF_SYNC_ROOT_BASIC_INFO, CF_SYNC_ROOT_INFO_BASIC, CfGetSyncRootInfoByHandle,
@@ -43,7 +46,8 @@ use windows_sys::Win32::System::Registry::{
 };
 use windows_sys::Win32::System::SystemInformation::GetSystemWindowsDirectoryW;
 use windows_sys::Win32::System::SystemServices::{
-    FILE_PERSISTENT_ACLS, SECURITY_SERVICE_ID_BASE_RID,
+    ACCESS_ALLOWED_ACE_TYPE, ACCESS_DENIED_ACE_TYPE, FILE_PERSISTENT_ACLS,
+    SECURITY_SERVICE_ID_BASE_RID,
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
@@ -177,30 +181,182 @@ fn owner(file: &File, user: &User) -> io::Result<Option<FileOwner>> {
     if !records_owners(file)? {
         return Ok(Some(FileOwner::Unrecorded));
     }
-    let mut owner: PSID = ptr::null_mut();
-    let mut descriptor: PSECURITY_DESCRIPTOR = ptr::null_mut();
-    // SAFETY: `file` is open with `READ_CONTROL` access, `owner` and `descriptor` are writable,
-    // and the outputs for the group and access lists may be null since they aren't asked for.
-    let error = unsafe {
-        GetSecurityInfo(
-            file.as_raw_handle(),
-            SE_FILE_OBJECT,
-            OWNER_SECURITY_INFORMATION,
-            &raw mut owner,
-            ptr::null_mut(),
-            ptr::null_mut(),
-            ptr::null_mut(),
-            &raw mut descriptor,
+    let security = Security::read(file, OWNER_SECURITY_INFORMATION)?;
+    Ok((!security.owner.is_null()).then(|| classify(security.owner, user)))
+}
+
+/// Parts of a file's security descriptor, which Windows allocated and this frees when dropped.
+struct Security {
+    descriptor: PSECURITY_DESCRIPTOR,
+    /// Null if it wasn't asked for, or no owner is set.
+    owner: PSID,
+    /// Null if it wasn't asked for, or the file has no access list, which lets anyone in.
+    dacl: *mut ACL,
+}
+
+impl Security {
+    /// Reads `what` of `file`'s security descriptor. `file` must be open with `READ_CONTROL`
+    /// access.
+    fn read(file: &File, what: OBJECT_SECURITY_INFORMATION) -> io::Result<Self> {
+        let mut security = Self {
+            descriptor: ptr::null_mut(),
+            owner: ptr::null_mut(),
+            dacl: ptr::null_mut(),
+        };
+        // SAFETY: `file` is open with `READ_CONTROL` access, and the outputs are writable. The
+        // group and audit list aren't asked for, so their outputs may be null.
+        let error = unsafe {
+            GetSecurityInfo(
+                file.as_raw_handle(),
+                SE_FILE_OBJECT,
+                what,
+                &raw mut security.owner,
+                ptr::null_mut(),
+                &raw mut security.dacl,
+                ptr::null_mut(),
+                &raw mut security.descriptor,
+            )
+        };
+        if error != ERROR_SUCCESS {
+            return Err(io::Error::from_raw_os_error(error.cast_signed()));
+        }
+        Ok(security)
+    }
+}
+
+impl Drop for Security {
+    fn drop(&mut self) {
+        // SAFETY: `GetSecurityInfo` allocated `descriptor` for the caller to free with
+        // `LocalFree`, and `owner` and `dacl` point into it, so nothing uses them after this.
+        unsafe { LocalFree(self.descriptor) };
+    }
+}
+
+/// Whether the folder at `path` is one only Administrators and SYSTEM can change: a real folder,
+/// not a link, that one of them owns, whose access list inherits nothing and lets no one else in.
+pub(crate) fn is_private_dir(path: &Path) -> io::Result<bool> {
+    let file = open(path, FILE_READ_ATTRIBUTES | READ_CONTROL)?;
+    let tag: FILE_ATTRIBUTE_TAG_INFO = query(&file)?;
+    if tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
+        || tag.FileAttributes & FILE_ATTRIBUTE_DIRECTORY == 0
+    {
+        return Ok(false);
+    }
+    let security = Security::read(
+        &file,
+        OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+    )?;
+    let mut control = 0;
+    let mut revision = 0;
+    // SAFETY: `descriptor` is a valid security descriptor, and the outputs are writable.
+    let ok = unsafe {
+        GetSecurityDescriptorControl(security.descriptor, &raw mut control, &raw mut revision)
+    };
+    if ok == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if control & SE_DACL_PROTECTED == 0
+        || security.owner.is_null()
+        || !is_administrators_or_system(security.owner)
+        || security.dacl.is_null()
+    {
+        return Ok(false);
+    }
+
+    let mut size = ACL_SIZE_INFORMATION::default();
+    // SAFETY: `dacl` is a valid access list, and `size` is a writable `ACL_SIZE_INFORMATION`
+    // (what `AclSizeInformation` returns) of exactly the size passed.
+    let ok = unsafe {
+        GetAclInformation(
+            security.dacl,
+            (&raw mut size).cast(),
+            byte_size::<ACL_SIZE_INFORMATION>(),
+            AclSizeInformation,
         )
     };
-    if error != ERROR_SUCCESS {
-        return Err(io::Error::from_raw_os_error(error.cast_signed()));
+    if ok == 0 {
+        return Err(io::Error::last_os_error());
     }
-    let class = (!owner.is_null()).then(|| classify(owner, user));
-    // SAFETY: `GetSecurityInfo` allocated `descriptor` for the caller to free with `LocalFree`.
-    // `owner` points into it and isn't used after this.
+    for index in 0..size.AceCount {
+        let mut ace = ptr::null_mut();
+        // SAFETY: `dacl` is a valid access list with more than `index` entries, and `ace` is
+        // writable.
+        if unsafe { GetAce(security.dacl, index, &raw mut ace) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: `GetAce` gave a pointer to an entry in the access list, which starts with a
+        // header.
+        let kind = u32::from(unsafe { (*ace.cast::<ACE_HEADER>()).AceType });
+        match kind {
+            ACCESS_DENIED_ACE_TYPE => {}
+            ACCESS_ALLOWED_ACE_TYPE => {
+                // SAFETY: the entry is an `ACCESS_ALLOWED_ACE`, whose SID starts at `SidStart`.
+                let sid = unsafe { (&raw mut (*ace.cast::<ACCESS_ALLOWED_ACE>()).SidStart).cast() };
+                if !is_administrators_or_system(sid) {
+                    return Ok(false);
+                }
+            }
+            // Object, callback, and other entries could let someone in on conditions.
+            _ => return Ok(false),
+        }
+    }
+    Ok(true)
+}
+
+/// `sid` must be a valid SID.
+fn is_administrators_or_system(sid: PSID) -> bool {
+    is_sid(sid, WinBuiltinAdministratorsSid) || is_sid(sid, WinLocalSystemSid)
+}
+
+/// Whether `sid`, a valid SID, is the well-known one of `kind`.
+fn is_sid(sid: PSID, kind: WELL_KNOWN_SID_TYPE) -> bool {
+    // SAFETY: `sid` is a valid SID.
+    unsafe { IsWellKnownSid(sid, kind) != 0 }
+}
+
+/// Creates the folder at `path`, which mustn't exist, owned by Administrators, with an access list
+/// that inherits nothing and lets only Administrators and SYSTEM in from the moment it exists.
+#[cfg(any(test, feature = "privileged"))]
+pub(crate) fn create_private_dir(path: &Path) -> io::Result<()> {
+    use windows_sys::Win32::Security::Authorization::{
+        ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+    };
+    use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
+    use windows_sys::Win32::Storage::FileSystem::CreateDirectoryW;
+
+    // Owned by Administrators (S-1-5-32-544), protected from inheriting, and full control for
+    // SYSTEM (S-1-5-18) and Administrators, which folders and files inside inherit.
+    const SDDL: &str = "O:S-1-5-32-544D:P(A;OICI;FA;;;S-1-5-18)(A;OICI;FA;;;S-1-5-32-544)";
+
+    let sddl: Vec<u16> = SDDL.encode_utf16().chain([0]).collect();
+    let path: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+    let mut descriptor: PSECURITY_DESCRIPTOR = ptr::null_mut();
+    // SAFETY: `sddl` is NUL-terminated, `descriptor` is writable, and the size output may be
+    // null.
+    let ok = unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl.as_ptr(),
+            SDDL_REVISION_1,
+            &raw mut descriptor,
+            ptr::null_mut(),
+        )
+    };
+    if ok == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let attributes = SECURITY_ATTRIBUTES {
+        nLength: byte_size::<SECURITY_ATTRIBUTES>(),
+        lpSecurityDescriptor: descriptor,
+        bInheritHandle: 0,
+    };
+    // SAFETY: `path` is NUL-terminated, and `attributes` holds the valid security descriptor
+    // made above.
+    let created = unsafe { CreateDirectoryW(path.as_ptr(), &raw const attributes) } != 0;
+    let error = io::Error::last_os_error();
+    // SAFETY: the conversion allocated `descriptor` for the caller to free with `LocalFree`, and
+    // it isn't used after this.
     unsafe { LocalFree(descriptor) };
-    Ok(class)
+    if created { Ok(()) } else { Err(error) }
 }
 
 /// Whether the volume `file` is on records owners. FAT and exFAT drives don't, and Windows
@@ -230,10 +386,7 @@ fn records_owners(file: &File) -> io::Result<bool> {
 
 /// `sid` must be a valid SID.
 fn classify(sid: PSID, user: &User) -> FileOwner {
-    let is = |kind: WELL_KNOWN_SID_TYPE| {
-        // SAFETY: `sid` is a valid SID.
-        unsafe { IsWellKnownSid(sid, kind) != 0 }
-    };
+    let is = |kind| is_sid(sid, kind);
     let is_user = || {
         // SAFETY: `sid` and the user's SID are valid SIDs.
         unsafe { EqualSid(sid, user.sid()) != 0 }

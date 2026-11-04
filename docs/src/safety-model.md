@@ -110,7 +110,7 @@ a large file is measured again the same way, against the size in the settings th
 
 ## System cleanup
 
-> Status: its rules and safety checks are written. It can't be run yet.
+> Status: its rules, safety checks, and executor are written. It can't be run yet.
 
 System cleanup removes clutter from the operating system's own folders, such as the Windows temp
 folder, and runs only as an administrator or root
@@ -130,10 +130,23 @@ folders, so it never mixes with the user's cleanup, and adds gates of its own:
   and only while that folder is still the one that was checked. The folders come from the
   operating system, never from environment variables.
 - **The system's throughout.** The item must belong to the system, and so must everything inside
-  it. A link or special file inside, or a file with other hard links, keeps it too.
+  it. A link or special file inside, or a file with other hard links, keeps it too. A scan
+  checks the item and what folder listings show: links inside, and hard links on Linux. Who owns
+  each entry inside, and hard links on Windows, take opening every entry, which can take minutes
+  for an update with hundreds of thousands of files, so they're checked right before removal.
 - **No Git.** It doesn't read Git, since anyone can create a repository above a system folder.
 - **Advice.** A rule that only advises a command, such as `apt-get clean`, isn't checked this
   way, since nothing it matches is removed.
+- **Its own data folder.** Its journal and quarantine are in `ProgramData\Cleanse` on Windows and
+  `/var/lib/cleanse` on Linux, apart from the user's. Anyone can create folders in `ProgramData`,
+  so the folder is created with permissions that let only Administrators and SYSTEM, or root, in,
+  and checked before every run: a real folder, owned by one of them, that no one else can open,
+  inside folders no one else can change. One someone else made first is refused, never repaired.
+- **What it reads.** No settings file, no Git, and no plan files. A plan's roots are ignored, so
+  only its items count, each checked again before it's touched.
+- **Putting back and finishing.** An item is restored, or a removal that stopped is finished,
+  only where a system rule names one, directly inside a system folder that checks out, whatever
+  its record says.
 
 The other gates apply as they do to the user's cleanup: activity, owner programs, idle days,
 contents that couldn't be read, and other filesystems mounted inside.

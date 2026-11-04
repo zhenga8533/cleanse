@@ -59,6 +59,30 @@ jobs:
       - run: cargo nextest run --workspace --exclude cleanse-desktop --locked --no-fail-fast
       - run: cargo test --workspace --exclude cleanse-desktop --doc --locked
 
+  # System cleanup's tests that need root (ADR 0010). They're built as the runner's own user and
+  # run from an archive, so nothing in `target` ends up belonging to root.
+  root:
+    name: Tests as root (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: cargo-nextest
+      - run: cargo nextest archive --workspace --exclude cleanse-desktop --locked --archive-file "$RUNNER_TEMP/tests.tar.zst"
+      # The tests named `when_elevated` skip without root, unless CLEANSE_TEST_AS_ROOT says they
+      # mustn't.
+      - name: Run the tests that need root, as root
+        run: >-
+          sudo env CLEANSE_TEST_AS_ROOT=1 "$(command -v cargo-nextest)" nextest run
+          --archive-file "$RUNNER_TEMP/tests.tar.zst" --workspace-remap .
+          -E 'test(/when_elevated/)'
+
   desktop:
     name: Desktop (${{ matrix.os }})
     strategy:

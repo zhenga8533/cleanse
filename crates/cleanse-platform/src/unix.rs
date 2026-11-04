@@ -48,6 +48,41 @@ pub(crate) fn temp_dir() -> PathBuf {
     env::temp_dir()
 }
 
+/// Whether the folder at `path` is one only root can change: a real folder, not a link, that root
+/// owns and no one else can open, inside folders no one else can change.
+pub(crate) fn is_private_dir(path: &Path) -> io::Result<bool> {
+    /// Group and others' permissions.
+    const OTHERS: u32 = 0o077;
+    /// Group and others' permission to write.
+    const OTHERS_WRITE: u32 = 0o022;
+    /// In a folder with the sticky bit, such as `/tmp`, only an entry's owner can move it.
+    const STICKY: u32 = 0o1000;
+
+    let metadata = fs::symlink_metadata(path)?;
+    let private = metadata.is_dir() && metadata.uid() == 0 && metadata.mode() & OTHERS == 0;
+    // Whoever can write a folder above it can move it away and put another in its place.
+    let above_safe = path.ancestors().skip(1).all(|folder| {
+        fs::symlink_metadata(folder).is_ok_and(|folder| {
+            folder.is_dir()
+                && folder.uid() == 0
+                && (folder.mode() & OTHERS_WRITE == 0 || folder.mode() & STICKY != 0)
+        })
+    });
+    Ok(private && above_safe)
+}
+
+/// Creates the folder at `path`, which mustn't exist, so that only its owner can open it.
+#[cfg(any(test, feature = "privileged"))]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the privileged module's one change: creating system cleanup's data folder"
+)]
+pub(crate) fn create_private_dir(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+
+    fs::DirBuilder::new().mode(0o700).create(path)
+}
+
 #[expect(
     clippy::unnecessary_wraps,
     reason = "matches the Windows version, which can fail"
