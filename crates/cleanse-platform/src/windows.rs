@@ -1,7 +1,7 @@
 #![allow(
     unsafe_code,
-    reason = "file identity, sync root, token, and long name queries need Win32 calls that std \
-              doesn't wrap"
+    reason = "file identity, ownership, sync root, token, and long name queries need Win32 calls \
+              that std doesn't wrap"
 )]
 
 use std::env;
@@ -17,10 +17,15 @@ use std::ptr;
 
 use cleanse_model::{EntryKind, FileIdentity};
 use windows_sys::Win32::Foundation::{
-    ERROR_CLOUD_FILE_NOT_UNDER_SYNC_ROOT, ERROR_INVALID_FUNCTION, HANDLE,
+    ERROR_CLOUD_FILE_NOT_UNDER_SYNC_ROOT, ERROR_INVALID_FUNCTION, ERROR_SUCCESS, HANDLE, LocalFree,
 };
+use windows_sys::Win32::Security::Authorization::{GetSecurityInfo, SE_FILE_OBJECT};
 use windows_sys::Win32::Security::{
-    GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation,
+    CopySid, EqualSid, GetLengthSid, GetSidIdentifierAuthority, GetSidSubAuthority,
+    GetSidSubAuthorityCount, GetTokenInformation, IsWellKnownSid, OWNER_SECURITY_INFORMATION,
+    PSECURITY_DESCRIPTOR, PSID, SECURITY_NT_AUTHORITY, TOKEN_ELEVATION, TOKEN_QUERY, TOKEN_USER,
+    TokenElevation, TokenUser, WELL_KNOWN_SID_TYPE, WinBuiltinAdministratorsSid,
+    WinLocalServiceSid, WinLocalSystemSid, WinNetworkServiceSid,
 };
 use windows_sys::Win32::Storage::CloudFilters::{
     CF_SYNC_ROOT_BASIC_INFO, CF_SYNC_ROOT_INFO_BASIC, CfGetSyncRootInfoByHandle,
@@ -31,11 +36,14 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_ID_INFO,
     FILE_INFO_BY_HANDLE_CLASS, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ,
     FILE_SHARE_WRITE, FILE_STANDARD_INFO, FileAttributeTagInfo, FileIdInfo, FileStandardInfo,
-    GetFileInformationByHandleEx, GetLongPathNameW,
+    GetFileInformationByHandleEx, GetLongPathNameW, GetVolumeInformationByHandleW, READ_CONTROL,
+};
+use windows_sys::Win32::System::SystemServices::{
+    FILE_PERSISTENT_ACLS, SECURITY_SERVICE_ID_BASE_RID,
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
-use crate::{FileFacts, ListedFacts};
+use crate::{FileFacts, FileOwner, ListedFacts};
 
 /// Reparse tags with this bit stand in for another name: symbolic links, junctions, and mount
 /// points. They're the only reparse points treated as links.
@@ -45,14 +53,17 @@ const NAME_SURROGATE_BIT: u32 = 0x2000_0000;
 const OFFLINE_ATTRIBUTES: u32 =
     FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS | FILE_ATTRIBUTE_RECALL_ON_OPEN | FILE_ATTRIBUTE_OFFLINE;
 
-pub(crate) fn inspect(path: &Path) -> io::Result<FileFacts> {
-    // Asking only for attribute access never downloads a cloud placeholder's data, and opening
-    // the reparse point itself describes a link instead of following it.
-    let file = OpenOptions::new()
-        .access_mode(FILE_READ_ATTRIBUTES)
-        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
-        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(path)?;
+pub(crate) fn inspect(path: &Path, user: &User) -> io::Result<FileFacts> {
+    let (file, owner_readable) = match open(path, FILE_READ_ATTRIBUTES | READ_CONTROL) {
+        Ok(file) => (file, true),
+        // The folder's permissions let anyone who can list it read its entries' attributes, but
+        // reading an entry's owner takes permission on the entry itself, which another account's
+        // entries may not give.
+        Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+            (open(path, FILE_READ_ATTRIBUTES)?, false)
+        }
+        Err(error) => return Err(error),
+    };
     let id: FILE_ID_INFO = query(&file)?;
     let standard: FILE_STANDARD_INFO = query(&file)?;
     let tag: FILE_ATTRIBUTE_TAG_INFO = query(&file)?;
@@ -76,7 +87,182 @@ pub(crate) fn inspect(path: &Path) -> io::Result<FileFacts> {
         allocated: u64::try_from(standard.AllocationSize).unwrap_or(0),
         cloud_synced: in_sync_root(&file)?,
         offline: tag.FileAttributes & OFFLINE_ATTRIBUTES != 0,
+        owner: if owner_readable {
+            owner(&file, user)?
+        } else {
+            None
+        },
     })
+}
+
+/// Opens `path` itself, even if it's a link, for `access`.
+fn open(path: &Path, access: u32) -> io::Result<File> {
+    // Reading attributes and the security descriptor never downloads a cloud placeholder's
+    // data, and opening the reparse point itself describes a link instead of following it.
+    OpenOptions::new()
+        .access_mode(access)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+}
+
+/// The account this process runs as.
+#[derive(Debug)]
+pub(crate) struct User {
+    /// Its SID, held in `u32`s so it's aligned as Windows expects a `SID` to be.
+    sid: Vec<u32>,
+}
+
+impl User {
+    fn sid(&self) -> PSID {
+        self.sid.as_ptr().cast_mut().cast()
+    }
+}
+
+pub(crate) fn current_user() -> io::Result<User> {
+    let token = process_token()?;
+    let mut needed = 0;
+    // SAFETY: `token` is open with `TOKEN_QUERY` access. With no buffer, the call only writes the
+    // size it needs to `needed`, which is writable.
+    unsafe {
+        GetTokenInformation(
+            token.as_raw_handle(),
+            TokenUser,
+            ptr::null_mut(),
+            0,
+            &raw mut needed,
+        )
+    };
+    if needed == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // `TOKEN_USER` points to a SID stored after it in the same buffer, so the buffer is aligned
+    // for pointers, which suits both.
+    let mut buffer = vec![0usize; (needed as usize).div_ceil(size_of::<usize>())];
+    // SAFETY: `token` is open with `TOKEN_QUERY` access, `buffer` is writable for at least the
+    // `needed` bytes passed and aligned for a `TOKEN_USER`, and `needed` is writable.
+    let ok = unsafe {
+        GetTokenInformation(
+            token.as_raw_handle(),
+            TokenUser,
+            buffer.as_mut_ptr().cast(),
+            needed,
+            &raw mut needed,
+        )
+    };
+    if ok == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: the call succeeded, so `buffer` starts with a `TOKEN_USER` whose SID is valid for
+    // as long as `buffer` is.
+    let sid = unsafe { (*buffer.as_ptr().cast::<TOKEN_USER>()).User.Sid };
+    // SAFETY: `sid` is a valid SID.
+    let length = unsafe { GetLengthSid(sid) };
+    let mut copy = vec![0u32; (length as usize).div_ceil(size_of::<u32>())];
+    // SAFETY: `copy` is writable for at least the `length` bytes passed, and `sid` is a valid SID
+    // of that length.
+    if unsafe { CopySid(length, copy.as_mut_ptr().cast(), sid) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(User { sid: copy })
+}
+
+/// Who owns `file`, which must be open with `READ_CONTROL` access, or `None` if no owner is
+/// set.
+fn owner(file: &File, user: &User) -> io::Result<Option<FileOwner>> {
+    if !records_owners(file)? {
+        return Ok(Some(FileOwner::Unrecorded));
+    }
+    let mut owner: PSID = ptr::null_mut();
+    let mut descriptor: PSECURITY_DESCRIPTOR = ptr::null_mut();
+    // SAFETY: `file` is open with `READ_CONTROL` access, `owner` and `descriptor` are writable,
+    // and the outputs for the group and access lists may be null since they aren't asked for.
+    let error = unsafe {
+        GetSecurityInfo(
+            file.as_raw_handle(),
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION,
+            &raw mut owner,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            ptr::null_mut(),
+            &raw mut descriptor,
+        )
+    };
+    if error != ERROR_SUCCESS {
+        return Err(io::Error::from_raw_os_error(error.cast_signed()));
+    }
+    let class = (!owner.is_null()).then(|| classify(owner, user));
+    // SAFETY: `GetSecurityInfo` allocated `descriptor` for the caller to free with `LocalFree`.
+    // `owner` points into it and isn't used after this.
+    unsafe { LocalFree(descriptor) };
+    Ok(class)
+}
+
+/// Whether the volume `file` is on records owners. FAT and exFAT drives don't, and Windows
+/// reports a made-up owner for their files.
+fn records_owners(file: &File) -> io::Result<bool> {
+    let mut flags = 0;
+    // SAFETY: `file` is an open handle and `flags` is writable. The other outputs are null with
+    // no size, so nothing else is written.
+    let ok = unsafe {
+        GetVolumeInformationByHandleW(
+            file.as_raw_handle(),
+            ptr::null_mut(),
+            0,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            &raw mut flags,
+            ptr::null_mut(),
+            0,
+        )
+    };
+    if ok == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(flags & FILE_PERSISTENT_ACLS != 0)
+    }
+}
+
+/// `sid` must be a valid SID.
+fn classify(sid: PSID, user: &User) -> FileOwner {
+    let is = |kind: WELL_KNOWN_SID_TYPE| {
+        // SAFETY: `sid` is a valid SID.
+        unsafe { IsWellKnownSid(sid, kind) != 0 }
+    };
+    let is_user = || {
+        // SAFETY: `sid` and the user's SID are valid SIDs.
+        unsafe { EqualSid(sid, user.sid()) != 0 }
+    };
+    if is(WinLocalSystemSid)
+        || is(WinLocalServiceSid)
+        || is(WinNetworkServiceSid)
+        || is_service(sid)
+    {
+        FileOwner::System
+    } else if is(WinBuiltinAdministratorsSid) {
+        FileOwner::Administrators
+    } else if is_user() {
+        FileOwner::CurrentUser
+    } else {
+        FileOwner::Other
+    }
+}
+
+/// Whether `sid`, a valid SID, is a service's own account, S-1-5-80-…, such as
+/// `NT SERVICE\TrustedInstaller`, which owns most of the Windows folder.
+fn is_service(sid: PSID) -> bool {
+    // SAFETY: `sid` is a valid SID, so its authority and count of subauthorities can be read.
+    let (authority, count) = unsafe {
+        (
+            (*GetSidIdentifierAuthority(sid)).Value,
+            *GetSidSubAuthorityCount(sid),
+        )
+    };
+    authority == SECURITY_NT_AUTHORITY.Value
+        && count > 0
+        // SAFETY: `sid` is a valid SID with at least one subauthority.
+        && unsafe { *GetSidSubAuthority(sid, 0) } == SECURITY_SERVICE_ID_BASE_RID.cast_unsigned()
 }
 
 /// `%TEMP%` can name folders by their 8.3 short names, like `C:\Users\RUNNER~1\...`, but folder
@@ -188,7 +374,8 @@ fn query<T: HandleInfo>(file: &File) -> io::Result<T> {
     }
 }
 
-pub(crate) fn is_elevated() -> io::Result<bool> {
+/// The process's access token, open for queries.
+fn process_token() -> io::Result<OwnedHandle> {
     let mut token: HANDLE = ptr::null_mut();
     // SAFETY: `GetCurrentProcess` returns a pseudo-handle that needs no closing, and `token` is
     // writable for the duration of the call.
@@ -197,8 +384,11 @@ pub(crate) fn is_elevated() -> io::Result<bool> {
     }
     // SAFETY: `OpenProcessToken` succeeded, so `token` is an open handle that nothing else
     // owns. `OwnedHandle` closes it when dropped.
-    let token = unsafe { OwnedHandle::from_raw_handle(token) };
+    Ok(unsafe { OwnedHandle::from_raw_handle(token) })
+}
 
+pub(crate) fn is_elevated() -> io::Result<bool> {
+    let token = process_token()?;
     let mut elevation = TOKEN_ELEVATION::default();
     let mut written = 0;
     // SAFETY: `token` is open with `TOKEN_QUERY` access, `elevation` is a writable

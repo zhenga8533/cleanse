@@ -63,8 +63,11 @@ blocks, including any new kind of concern until it's deliberately classified.
 6. **Cloud sync.** OneDrive, iCloud Drive, Dropbox, and Google Drive folders are protected by
    default because deletions sync to the cloud and other devices. Placeholder file contents are
    never read, since that would download them.
-7. **Ownership and elevation.** Other users' files are blocked, and the main app refuses to
-   apply a plan while running as administrator or root.
+7. **Ownership and elevation.** An item must belong to the account Cleanse runs as, or on
+   Windows to the Administrators group, which owns what that account's elevated programs make.
+   Items another account or the operating system owns are blocked, and so are items whose owner
+   can't be read. Drives that don't record owners, such as FAT and exFAT, pass this gate. The
+   main app refuses to apply a plan while running as administrator or root.
 
 Every match is measured in one walk that doesn't follow links: its size, file count, newest
 modification time, and anything inside that couldn't be read, is another filesystem, looks like
@@ -89,7 +92,8 @@ a large file is measured again the same way, against the size in the settings th
 
 ### Not covered yet
 
-- **Other users' files**: need an ownership check.
+- **Owners on network shares and in WSL** are whatever the server reports, which may not be the
+  account Cleanse runs as, so items there may be kept as another account's.
 - **Owners started another way**: programs are recognized by name, so Claude Code installed
   with npm, which runs as `node`, isn't recognized as running. Recent modification still
   blocks folders it's writing to.

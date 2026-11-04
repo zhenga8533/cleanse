@@ -162,8 +162,10 @@ pub enum Concern {
     StartupUnchecked,
     /// The item is in a cloud-synced folder, so removing it would remove it on every device.
     CloudSynced { provider: String },
-    /// The item belongs to another user.
+    /// The item belongs to another account, or to the operating system.
     OwnedByAnotherUser,
+    /// The item's owner couldn't be read, so it may belong to another account.
+    OwnerUnknown,
     /// The item's file identity couldn't be read, so it can't be re-checked before removal.
     Unverifiable,
     /// The project the item belongs to has uncommitted changes.
@@ -231,7 +233,8 @@ impl fmt::Display for Concern {
                 f,
                 "Synced by {provider}, so removing it would remove it on every device"
             ),
-            Self::OwnedByAnotherUser => f.write_str("Belongs to another user"),
+            Self::OwnedByAnotherUser => f.write_str("Belongs to another account"),
+            Self::OwnerUnknown => f.write_str("Its owner couldn't be read"),
             Self::Unverifiable => f.write_str(
                 "Its file identity couldn't be read, so it can't be re-checked before removal",
             ),
@@ -378,6 +381,7 @@ mod tests {
                 app: "Claude Code".into(),
             },
             Concern::OwnedByAnotherUser,
+            Concern::OwnerUnknown,
             Concern::Unverifiable,
             Concern::ChangedRecently {
                 days_ago: 2,

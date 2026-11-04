@@ -1,8 +1,8 @@
 //! Read-only, per-OS filesystem facts behind a single `Probe` trait.
 //!
-//! File identity, link and reparse-point detection, cloud-placeholder state, allocated size,
-//! known folders, and elevation live here so that all `cfg` and `unsafe` code sits in one
-//! audited place. Nothing in this crate may modify the filesystem.
+//! File identity, ownership, link and reparse-point detection, cloud-placeholder state,
+//! allocated size, known folders, and elevation live here so that all `cfg` and `unsafe` code
+//! sits in one audited place. Nothing in this crate may modify the filesystem.
 
 #![warn(clippy::undocumented_unsafe_blocks)]
 
@@ -83,6 +83,25 @@ pub struct FileFacts {
     pub cloud_synced: bool,
     /// Some or all of the data isn't stored on this device, and reading it would download it.
     pub offline: bool,
+    /// Who owns it, or `None` if that couldn't be read.
+    pub owner: Option<FileOwner>,
+}
+
+/// Who owns a file or directory, as far as deciding whether Cleanse may remove it goes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FileOwner {
+    /// The operating system: root on Unix, and on Windows `SYSTEM`, `LOCAL SERVICE`,
+    /// `NETWORK SERVICE`, or a service's own account, such as `NT SERVICE\TrustedInstaller`.
+    System,
+    /// The Administrators group, which by default owns what an administrator's elevated programs
+    /// create on Windows.
+    Administrators,
+    /// The account this process runs as.
+    CurrentUser,
+    /// The volume doesn't record owners, as FAT and exFAT drives don't.
+    Unrecorded,
+    /// Any other account.
+    Other,
 }
 
 /// What a directory listing's metadata says about an entry, without extra system calls. Meant
@@ -156,14 +175,17 @@ impl KnownFolders {
 pub struct System {
     known_folders: KnownFolders,
     elevated: bool,
+    user: os::User,
 }
 
 impl System {
-    /// Reads the known folders and the process's elevation once, up front.
+    /// Reads the known folders, the process's elevation, and the account it runs as once, up
+    /// front.
     pub fn new() -> io::Result<Self> {
         Ok(Self {
             known_folders: KnownFolders::current(),
             elevated: os::is_elevated()?,
+            user: os::current_user()?,
         })
     }
 }
@@ -189,7 +211,7 @@ impl System {
 
 impl Probe for System {
     fn inspect(&self, path: &Path) -> io::Result<FileFacts> {
-        os::inspect(path)
+        os::inspect(path, &self.user)
     }
 
     fn known_folders(&self) -> &KnownFolders {
