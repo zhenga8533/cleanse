@@ -12,12 +12,25 @@ publish = false
 [package.metadata.dist]
 dist = false
 
+# On Windows its manifest asks for an administrator, which a test build of it would too, so it
+# has none: tests/program.rs runs the program itself.
+[[bin]]
+name = "cleanse-elevate"
+path = "src/main.rs"
+test = false
+
 [dependencies]
 cleanse-desktop-views.workspace = true
 cleanse-engine.workspace = true
 cleanse-model.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+cleanse-platform = { workspace = true, features = ["privileged"] }
+
+[build-dependencies]
+static_vcruntime.workspace = true
 
 [dev-dependencies]
 cleanse-engine = { workspace = true, features = ["fake"] }

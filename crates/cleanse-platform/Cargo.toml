@@ -10,8 +10,8 @@ license.workspace = true
 # Exposes `FakeProbe` and `StagedSystem` so other crates' tests can stage cloud placeholders, hard
 # links, owners, and elevation that are impractical to create for real.
 fake = []
-# The changes system cleanup makes, such as creating its private data folder. Only cleanse-exec
-# turns this on (ADR 0010).
+# What only system cleanup does, such as creating its private data folder, and the desktop app's
+# pipes to its elevated helper. Only cleanse-exec and the helper turn this on (ADR 0010).
 privileged = []
 
 [dependencies]
@@ -29,7 +29,11 @@ windows-sys = { workspace = true, features = [
     "Win32_Security_Authorization",
     "Win32_Storage_CloudFilters",
     "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Pipes",
     "Win32_System_Registry",
+    "Win32_System_RemoteDesktop",
     "Win32_System_SystemInformation",
     "Win32_System_SystemServices",
     "Win32_System_Threading",
