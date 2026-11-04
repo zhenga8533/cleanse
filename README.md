@@ -15,6 +15,77 @@ removes anything you haven't approved.
 > installers for both, not yet signed. [System cleanup](#system-cleanup) is on `main`, for the
 > next release.
 
+## Install
+
+Each [release](https://github.com/zhenga8533/cleanse/releases/latest) has the command line and the
+desktop app for Windows, macOS, and Linux. Every file has a `.sha256` checksum and build
+provenance, and [Checking a release](docs/src/releasing.md#checking-a-release) shows how to check
+them.
+
+### Command line
+
+On macOS and Linux:
+
+```sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/zhenga8533/cleanse/releases/latest/download/cleanse-cli-installer.sh | sh
+```
+
+On Windows, in PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/zhenga8533/cleanse/releases/latest/download/cleanse-cli-installer.ps1 | iex"
+```
+
+Both install the latest release's `cleanse` in Cargo's `bin` folder, `~/.cargo/bin` unless you've
+set `CARGO_HOME`, and add that folder to your `PATH`. Each release also has the binary in an
+archive for x64 Windows, Intel and Apple silicon Macs, and x64 and ARM64 Linux, or you can
+[build it from source](#building-from-source).
+
+Before using [`cleanse system`](#system-cleanup), install a copy that only administrators or root
+can change, since the installers put `cleanse` in a folder your own account can change. Download
+the archive for your system from the release and check it, then on Linux (`aarch64` in place of
+`x86_64` on ARM64):
+
+```sh
+tar -xf cleanse-cli-x86_64-unknown-linux-gnu.tar.xz
+sudo install -m 755 cleanse-cli-x86_64-unknown-linux-gnu/cleanse /usr/local/bin/
+sudo /usr/local/bin/cleanse system scan
+```
+
+On Windows, in a terminal opened with Run as administrator:
+
+```powershell
+Expand-Archive -Force cleanse-cli-x86_64-pc-windows-msvc.zip "$env:ProgramFiles\Cleanse"
+& "$env:ProgramFiles\Cleanse\cleanse.exe" system scan
+```
+
+Running that copy by its full path, as these do, means no other `cleanse` on your path runs in its
+place.
+
+### Desktop app
+
+The desktop app does what the command line does, in a window: scan and clean, see where space
+goes, and manage the quarantine, history, and settings. Releases from v0.5.0 on include its
+installers:
+
+| System | File | Installing it |
+|---|---|---|
+| Windows 10 and 11 | `Cleanse_<version>_x64_en-US.msi` | Run it. |
+| macOS, Apple silicon and Intel | `Cleanse_<version>_universal.dmg` | Open it and drag Cleanse to Applications. |
+| Linux | `Cleanse_<version>_amd64.AppImage` | `chmod +x` it, then run it. It needs FUSE 2 (`libfuse2`). |
+| Debian and Ubuntu | `Cleanse_<version>_amd64.deb` | `sudo apt install ./Cleanse_<version>_amd64.deb` |
+
+The Linux builds need glibc 2.35 or later (Ubuntu 22.04, Debian 12) and WebKitGTK 4.1.
+
+The installers aren't signed with a publisher's certificate, and won't be before 1.0, so the first
+time you open Cleanse, your system asks you to confirm it:
+
+- **Windows:** SmartScreen says "Windows protected your PC". Choose **More info**, then **Run
+  anyway**. If Smart App Control is on, it blocks unsigned programs outright, the command line
+  included, and offers no way to allow them.
+- **macOS:** the app is ad-hoc signed, so macOS opens it once you approve it. After the first
+  attempt to open it, go to **System Settings → Privacy & Security** and choose **Open Anyway**.
+
 ## Try it
 
 ```sh
@@ -87,31 +158,8 @@ It isn't available on macOS.
 `sudo` and an administrator terminal run whichever `cleanse` comes first on your path, with full
 control. If yours is in a folder your own account can change, as the shell installer's is,
 anything you run could replace it. So for system cleanup, use a copy that only administrators or
-root can change, such as one in `/usr/local/bin` or `C:\Program Files`.
-
-## Desktop app
-
-The desktop app does what the command line does, in a window: scan and clean, see where space
-goes, and manage the quarantine, history, and settings. Releases from v0.5.0 on include its
-installers, each with a `.sha256` checksum beside it:
-
-| System | File | Installing it |
-|---|---|---|
-| Windows 10 and 11 | `Cleanse_<version>_x64_en-US.msi` | Run it. |
-| macOS, Apple silicon and Intel | `Cleanse_<version>_universal.dmg` | Open it and drag Cleanse to Applications. |
-| Linux | `Cleanse_<version>_amd64.AppImage` | `chmod +x` it, then run it. It needs FUSE 2 (`libfuse2`). |
-| Debian and Ubuntu | `Cleanse_<version>_amd64.deb` | `sudo apt install ./Cleanse_<version>_amd64.deb` |
-
-The Linux builds need glibc 2.35 or later (Ubuntu 22.04, Debian 12) and WebKitGTK 4.1.
-
-The installers aren't signed with a publisher's certificate yet, so the first time you open
-Cleanse, your system asks you to confirm it:
-
-- **Windows:** SmartScreen says "Windows protected your PC". Choose **More info**, then **Run
-  anyway**. If Smart App Control is on, it blocks unsigned apps outright, and the command line is
-  the way to use Cleanse until the installers are signed.
-- **macOS:** the app is ad-hoc signed, so macOS opens it once you approve it. After the first
-  attempt to open it, go to **System Settings → Privacy & Security** and choose **Open Anyway**.
+root can change, such as one in `/usr/local/bin` or `C:\Program Files`, as
+[Install](#command-line) shows.
 
 ## What makes it different
 
@@ -164,7 +212,8 @@ Where a native tool is the right answer, Cleanse points you to it instead: `pnpm
 | M2 · v0.2 | Cleanup with quarantine, restore, a journal, and saved plans; AI agent and browser cache rules |
 | M3 · v0.3 | Removing files as well as folders, for temp files, logs, and crash dumps; disk analysis; large files and installers for review; advice for tools that clean themselves; CLI feature-complete |
 | M4 · v0.5 | Desktop app (Tauri + React): scan and clean, disk usage with a treemap, quarantine, history, and settings; installers for Windows, macOS, and Linux |
-| M5 · v1.0 | Elevated system cleanup on Windows and Linux, signed builds, package managers (current) |
+| M5 · v1.0 | Elevated system cleanup on Windows and Linux, package managers (current) |
+| After 1.0 | Signed builds. Until then, Windows builds are unsigned and macOS builds are ad-hoc signed. |
 
 The design is described in the [architecture](docs/src/architecture.md) and
 [safety model](docs/src/safety-model.md) docs.

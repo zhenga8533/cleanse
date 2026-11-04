@@ -93,6 +93,12 @@ The reasoning is in the [decision records](docs/src/adr/README.md).
 - Keep each PR focused, add tests for behavior changes, and say how you tested it, including on
   which operating systems.
 
+## Releases
+
+Maintainers release by tagging `main`. [docs/src/releasing.md](docs/src/releasing.md) covers
+preparing a release, what the release workflows do, checking a release, and what to do when one
+fails.
+
 ## Changes that need extra care
 
 Safety checks (`crates/cleanse-core/src/safety/`), plan execution (`crates/cleanse-exec/`), AI

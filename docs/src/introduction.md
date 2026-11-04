@@ -12,3 +12,4 @@ is being built milestone by milestone; each page says what is implemented.
 - [Safety model](safety-model.md): how Cleanse decides what it may touch.
 - [Rules](rules.md): how cleanup knowledge is written down.
 - [Decision records](adr/README.md): the significant choices and their trade-offs.
+- [Releasing](releasing.md): how a release is made and checked, and what to do when one fails.
