@@ -16,7 +16,7 @@ use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use cleanse_model::{Candidate, CandidateId, Concern, EntryKind, FileIdentity, Match};
-use cleanse_platform::Probe;
+use cleanse_platform::{FileOwner, Probe};
 
 pub(crate) use policy::key;
 pub use policy::{Protected, ProtectedPolicy, Reach};
@@ -107,6 +107,20 @@ impl<'p> Assessor<'p> {
         }
         if !self.inside_roots(path) {
             concerns.push(Concern::OutsideScanRoots);
+        }
+        // Without facts, the item is already Unverifiable.
+        if let Some(facts) = facts {
+            match facts.owner {
+                None => concerns.push(Concern::OwnerUnknown),
+                Some(FileOwner::System | FileOwner::Other) => {
+                    concerns.push(Concern::OwnedByAnotherUser);
+                }
+                // Administrators own what the user's own elevated programs make on Windows, and
+                // some drives don't record owners at all.
+                Some(
+                    FileOwner::CurrentUser | FileOwner::Administrators | FileOwner::Unrecorded,
+                ) => {}
+            }
         }
         match &detection.git {
             GitStatus::Known(git) if git.has_tracked_files => concerns.push(Concern::TrackedByGit),

@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime};
 
 use cleanse_model::{EntryKind, FileIdentity};
 
-use crate::{FakeProbe, FileFacts, KnownFolders, Probe, System, process_name};
+use crate::{FakeProbe, FileFacts, FileOwner, KnownFolders, Probe, System, process_name};
 
 #[cfg(unix)]
 fn link_dir(target: &Path, link: &Path) {
@@ -151,6 +151,139 @@ fn recognizes_a_downloaded_cloud_file_as_synced() {
 }
 
 #[test]
+fn files_this_process_makes_belong_to_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("mine");
+    fs::write(&path, "x").unwrap();
+    let probe = system();
+
+    let owner = probe.inspect(&path).unwrap().owner;
+
+    // An administrator's elevated programs make files the Administrators group owns, unless a
+    // security policy gives them to the administrator instead.
+    if cfg!(windows) && probe.is_elevated() {
+        assert!(
+            matches!(
+                owner,
+                Some(FileOwner::Administrators | FileOwner::CurrentUser)
+            ),
+            "{owner:?}"
+        );
+    } else {
+        assert_eq!(owner, Some(FileOwner::CurrentUser));
+    }
+}
+
+/// `NT SERVICE\TrustedInstaller` owns the Windows folder, and root owns `/`.
+#[test]
+fn the_operating_system_owns_its_own_folders() {
+    let folder = if cfg!(windows) {
+        std::env::var_os("SystemRoot").unwrap().into()
+    } else {
+        std::path::PathBuf::from("/")
+    };
+
+    assert_eq!(
+        system().inspect(&folder).unwrap().owner,
+        Some(FileOwner::System)
+    );
+}
+
+/// Giving a file to another account takes an administrator. CI's Windows runners are one.
+#[cfg(windows)]
+fn elevated_or_skip(probe: &System) -> bool {
+    if probe.is_elevated() {
+        return true;
+    }
+    assert!(
+        std::env::var_os("CI").is_none(),
+        "CI's Windows runners run as an administrator"
+    );
+    eprintln!("skipped: needs an administrator");
+    false
+}
+
+#[cfg(windows)]
+fn icacls(path: &Path, args: &[&str]) {
+    let status = std::process::Command::new("icacls")
+        .arg(path)
+        .args(args)
+        .stdout(std::process::Stdio::null())
+        .status()
+        .unwrap();
+    assert!(status.success(), "icacls {args:?}");
+}
+
+#[cfg(windows)]
+#[test]
+fn reads_owners_an_administrator_set() {
+    let probe = system();
+    if !elevated_or_skip(&probe) {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    // SYSTEM, LOCAL SERVICE, TrustedInstaller, and the Users group.
+    let owners = [
+        ("S-1-5-18", FileOwner::System),
+        ("S-1-5-19", FileOwner::System),
+        (
+            "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464",
+            FileOwner::System,
+        ),
+        ("S-1-5-32-545", FileOwner::Other),
+    ];
+
+    for (sid, owner) in owners {
+        let path = dir.path().join(sid);
+        fs::write(&path, "x").unwrap();
+        icacls(&path, &["/setowner", &format!("*{sid}")]);
+
+        assert_eq!(probe.inspect(&path).unwrap().owner, Some(owner), "{sid}");
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn an_owner_that_cant_be_read_is_unknown() {
+    let probe = system();
+    if !elevated_or_skip(&probe) {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("private");
+    fs::write(&path, "x").unwrap();
+    // Owners may always read their own file's permissions, so the file goes to SYSTEM first, and
+    // then everyone else is denied reading them.
+    icacls(&path, &["/setowner", "*S-1-5-18"]);
+    icacls(&path, &["/deny", "*S-1-1-0:(RC)"]);
+
+    let facts = probe.inspect(&path).unwrap();
+
+    assert_eq!(facts.kind, EntryKind::File);
+    // Git Bash turns on the backup privilege, which lets an administrator read any file's
+    // permissions, and processes started from it inherit that.
+    let expected = if backup_privilege_on() {
+        Some(FileOwner::System)
+    } else {
+        None
+    };
+    assert_eq!(facts.owner, expected);
+}
+
+#[cfg(windows)]
+fn backup_privilege_on() -> bool {
+    let output = std::process::Command::new("whoami")
+        .arg("/priv")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    String::from_utf8_lossy(&output.stdout).lines().any(|line| {
+        let mut words = line.split_whitespace();
+        words.next() == Some("SeBackupPrivilege") && words.last() == Some("Enabled")
+    })
+}
+
+#[test]
 fn missing_paths_are_not_found() {
     let dir = tempfile::tempdir().unwrap();
 
@@ -203,6 +336,7 @@ fn the_fake_answers_only_what_it_was_told() {
         allocated: 0,
         cloud_synced: true,
         offline: true,
+        owner: Some(FileOwner::Other),
     };
     let folders = KnownFolders {
         temp: "/fake/temp".into(),

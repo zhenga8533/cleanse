@@ -6,13 +6,30 @@ use std::path::{Path, PathBuf};
 
 use cleanse_model::{EntryKind, FileIdentity};
 
-use crate::{FileFacts, ListedFacts};
+use crate::{FileFacts, FileOwner, ListedFacts};
 
 /// `st_blocks` counts 512-byte units on Linux and macOS, whatever the filesystem's block size.
 const STAT_BLOCK_BYTES: u64 = 512;
 
-pub(crate) fn inspect(path: &Path) -> io::Result<FileFacts> {
+/// The account this process runs as: its effective user ID, which owns the files it creates.
+#[derive(Debug)]
+pub(crate) struct User(u32);
+
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "matches the Windows version, which can fail"
+)]
+pub(crate) fn current_user() -> io::Result<User> {
+    Ok(User(rustix::process::geteuid().as_raw()))
+}
+
+pub(crate) fn inspect(path: &Path, user: &User) -> io::Result<FileFacts> {
     let metadata = fs::symlink_metadata(path)?;
+    let owner = match metadata.uid() {
+        0 => FileOwner::System,
+        uid if uid == user.0 => FileOwner::CurrentUser,
+        _ => FileOwner::Other,
+    };
     Ok(FileFacts {
         identity: FileIdentity {
             volume: metadata.dev(),
@@ -23,6 +40,7 @@ pub(crate) fn inspect(path: &Path) -> io::Result<FileFacts> {
         allocated: metadata.blocks() * STAT_BLOCK_BYTES,
         cloud_synced: false,
         offline: is_dataless(&metadata),
+        owner: Some(owner),
     })
 }
 

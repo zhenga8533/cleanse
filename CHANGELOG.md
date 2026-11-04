@@ -6,6 +6,13 @@ All notable changes to Cleanse are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- Items that belong to another account or to the operating system are kept, as are items whose
+  owner can't be read. Before, they were offered like any other. On Windows, items the
+  Administrators group owns still count as yours, since that's who owns what you make in an
+  elevated program. Drives that don't record owners, such as FAT and exFAT, aren't affected.
+
 ## [0.5.0] - 2026-11-03
 
 The desktop app. Cleanse now comes as an app for Windows, macOS, and Linux as well as a command

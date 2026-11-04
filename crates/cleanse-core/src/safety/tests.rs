@@ -11,7 +11,7 @@ use std::process::Command;
 use std::time::{Duration, SystemTime};
 
 use cleanse_model::{Candidate, CandidateId, Category, Concern, EntryKind, FileIdentity, Risk};
-use cleanse_platform::{FakeProbe, FileFacts, KnownFolders, Probe, System};
+use cleanse_platform::{FakeProbe, FileFacts, FileOwner, KnownFolders, Probe, System};
 use proptest::prelude::*;
 
 use super::{Assessor, Protected, ProtectedPolicy, Reach};
@@ -155,6 +155,7 @@ fn protection_follows_file_identity_through_other_spellings() {
             allocated: 0,
             cloud_synced: false,
             offline: false,
+            owner: Some(FileOwner::CurrentUser),
         },
     );
     let policy = ProtectedPolicy::new(
@@ -660,6 +661,7 @@ fn dir_facts() -> FileFacts {
         allocated: 0,
         cloud_synced: false,
         offline: false,
+        owner: Some(FileOwner::CurrentUser),
     }
 }
 
@@ -686,6 +688,37 @@ fn cloud_synced_folders_are_protected() {
             provider: "a cloud storage service".into()
         }]
     );
+}
+
+#[test]
+fn only_what_the_user_or_administrators_own_can_be_removed() {
+    let root = tempfile::tempdir().unwrap();
+    write(&root.path().join("app/package.json"), "{}");
+    let node_modules = root.path().join("app/node_modules");
+    write(&node_modules.join("x/index.js"), "x");
+    let owners = [
+        (Some(FileOwner::CurrentUser), vec![]),
+        (Some(FileOwner::Administrators), vec![]),
+        (Some(FileOwner::Unrecorded), vec![]),
+        (Some(FileOwner::System), vec![Concern::OwnedByAnotherUser]),
+        (Some(FileOwner::Other), vec![Concern::OwnedByAnotherUser]),
+        (None, vec![Concern::OwnerUnknown]),
+    ];
+
+    for (owner, concerns) in owners {
+        let probe = probe_reporting(
+            root.path(),
+            &node_modules,
+            FileFacts {
+                owner,
+                ..dir_facts()
+            },
+        );
+
+        let candidates = assess_all(root.path(), &probe);
+
+        assert_eq!(only(&candidates).concerns(), concerns, "{owner:?}");
+    }
 }
 
 #[test]
