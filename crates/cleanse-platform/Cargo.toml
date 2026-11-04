@@ -7,9 +7,12 @@ rust-version.workspace = true
 license.workspace = true
 
 [features]
-# Exposes `FakeProbe` so other crates' tests can stage cloud placeholders, hard links, and
-# elevation that are impractical to create for real.
+# Exposes `FakeProbe` and `StagedSystem` so other crates' tests can stage cloud placeholders, hard
+# links, owners, and elevation that are impractical to create for real.
 fake = []
+# The changes system cleanup makes, such as creating its private data folder. Only cleanse-exec
+# turns this on (ADR 0010).
+privileged = []
 
 [dependencies]
 cleanse-model.workspace = true

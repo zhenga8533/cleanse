@@ -9,7 +9,7 @@ license.workspace = true
 [dependencies]
 cleanse-core.workspace = true
 cleanse-model.workspace = true
-cleanse-platform.workspace = true
+cleanse-platform = { workspace = true, features = ["privileged"] }
 serde.workspace = true
 serde_json.workspace = true
 

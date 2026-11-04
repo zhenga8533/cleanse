@@ -2,12 +2,15 @@
 //!
 //! File identity, ownership, link and reparse-point detection, cloud-placeholder state,
 //! allocated size, known folders, and elevation live here so that all `cfg` and `unsafe` code
-//! sits in one audited place. Nothing in this crate may modify the filesystem.
+//! sits in one audited place. Nothing in this crate may modify the filesystem, apart from the
+//! [`privileged`] module, behind its feature.
 
 #![warn(clippy::undocumented_unsafe_blocks)]
 
 #[cfg(any(test, feature = "fake"))]
 mod fake;
+#[cfg(any(test, feature = "privileged"))]
+pub mod privileged;
 #[cfg(unix)]
 mod unix;
 #[cfg(windows)]
@@ -27,7 +30,7 @@ use std::time::{Duration, SystemTime};
 use cleanse_model::{EntryKind, FileIdentity};
 
 #[cfg(any(test, feature = "fake"))]
-pub use fake::FakeProbe;
+pub use fake::{FakeProbe, StagedSystem};
 #[cfg(unix)]
 use unix as os;
 #[cfg(windows)]
@@ -54,6 +57,10 @@ pub trait Probe: Send + Sync {
 
     /// When the computer last started. No program running now started before then.
     fn booted_at(&self) -> io::Result<SystemTime>;
+
+    /// Whether the folder at `path` is a real folder, not a link, that only Administrators and
+    /// SYSTEM, or root, can change. System cleanup keeps its journal and quarantine only in one.
+    fn is_private_dir(&self, path: &Path) -> io::Result<bool>;
 }
 
 /// A program's process name for comparing: lowercase, without a trailing `.exe`, so `Claude.exe`
@@ -189,6 +196,19 @@ impl SystemFolders {
     pub fn current() -> io::Result<Self> {
         os::system_folders()
     }
+
+    /// Where system cleanup keeps its journal and quarantine: `ProgramData\Cleanse` on Windows and
+    /// `/var/lib/cleanse` on Linux.
+    pub fn cleanse_data(&self) -> Option<PathBuf> {
+        self.program_data
+            .as_ref()
+            .map(|folder| folder.join("Cleanse"))
+            .or_else(|| {
+                self.var
+                    .as_ref()
+                    .map(|folder| folder.join("lib").join("cleanse"))
+            })
+    }
 }
 
 /// The real platform.
@@ -260,5 +280,9 @@ impl Probe for System {
     fn booted_at(&self) -> io::Result<SystemTime> {
         let seconds = sysinfo::System::boot_time().map_err(io::Error::other)?;
         Ok(SystemTime::UNIX_EPOCH + Duration::from_secs(seconds))
+    }
+
+    fn is_private_dir(&self, path: &Path) -> io::Result<bool> {
+        os::is_private_dir(path)
     }
 }

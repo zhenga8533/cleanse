@@ -10,9 +10,11 @@ use cleanse_model::{Outcome, Plan, PlanItem, Risk};
 
 use cleanse_model::{Concern, RuleId};
 
+use cleanse_core::rules::Scope;
+
 use super::{
-    Config, Engine, Explanation, KnownFolders, NodeKind, Probe, Progress, RuleSet, System,
-    removable_under,
+    ApplyError, Cleanup, Config, Engine, Explanation, KnownFolders, Mode, NodeKind, Probe,
+    Progress, RuleSet, System, SystemFolders, removable_under,
 };
 
 /// Writes a file dated a day ago, so it doesn't count as recent activity.
@@ -392,4 +394,94 @@ fn excluded_folders_are_kept_and_turned_off_rules_match_nothing() {
         "{:#?}",
         unmatched.candidates
     );
+}
+
+#[test]
+fn the_system_engine_uses_only_system_rules_and_no_settings() {
+    let engine = Engine::new_system().unwrap();
+    let user = Engine::new().unwrap();
+
+    assert_eq!(engine.mode(), Mode::System);
+    assert_eq!(engine.rules().scope(), Scope::System);
+    assert_eq!(engine.config_path(), None);
+    let elevated = engine.system().is_elevated();
+    let can_change = engine.check_can_change();
+    // macOS has no system folders, so nowhere for system cleanup's data.
+    let expected = if cfg!(target_os = "macos") {
+        matches!(can_change, Err(ApplyError::DataFolder(_)))
+    } else if elevated {
+        can_change.is_ok()
+    } else {
+        matches!(can_change, Err(ApplyError::NotElevated))
+    };
+    assert!(expected, "{can_change:?}");
+    assert_eq!(user.mode(), Mode::User);
+    assert_eq!(user.check_can_change().is_ok(), !elevated);
+}
+
+/// A system engine whose system folders are under `root`, named after their bases.
+fn system_engine(root: &Path) -> Engine {
+    let folders = SystemFolders {
+        system_root: Some(root.join("system_root")),
+        program_data: Some(root.join("program_data")),
+        var: Some(root.join("var")),
+    };
+    Engine {
+        rules: RuleSet::builtin_system().unwrap(),
+        config_path: None,
+        data_dir: folders.cleanse_data(),
+        cleanup: Cleanup::System { folders },
+        ..Engine::new().unwrap()
+    }
+}
+
+#[test]
+fn a_system_scan_looks_only_directly_inside_the_folders_the_rules_name() {
+    let fixture = tempfile::tempdir().unwrap();
+    let root = std::path::absolute(fixture.path()).unwrap();
+    for file in [
+        "system_root/Temp/setup.log",
+        "system_root/Temp/folder/inside.log",
+        "system_root/System32/MEMORY.DMP",
+        "system_root/Logs/Temp/setup.log",
+        "var/crash/_usr_bin_app.0.crash",
+        "var/crash/old/_usr_bin_app.0.crash",
+        "var/lib/_usr_bin_app.0.crash",
+    ] {
+        write_old(&root.join(file), "x");
+    }
+    let engine = system_engine(&root);
+    let roots = engine.default_roots();
+
+    let scan = engine
+        .scan(&roots, &|_| {}, &AtomicBool::new(false))
+        .unwrap();
+
+    let relative = |path: &Path| {
+        let parts: Vec<String> = path
+            .strip_prefix(&root)
+            .unwrap()
+            .iter()
+            .map(|part| part.to_string_lossy().into_owned())
+            .collect();
+        parts.join("/")
+    };
+    let scanned: Vec<String> = scan.roots.iter().map(|path| relative(path)).collect();
+    let found: Vec<String> = scan
+        .candidates
+        .iter()
+        .map(|candidate| relative(&candidate.found.path))
+        .collect();
+    let (expected_roots, expected_found): (&[&str], &[&str]) = if cfg!(windows) {
+        (
+            &["system_root", "system_root/Temp"],
+            &["system_root/Temp/folder", "system_root/Temp/setup.log"],
+        )
+    } else if cfg!(target_os = "linux") {
+        (&["var/crash"], &["var/crash/_usr_bin_app.0.crash"])
+    } else {
+        (&[], &[])
+    };
+    assert_eq!(scanned, expected_roots);
+    assert_eq!(found, expected_found);
 }

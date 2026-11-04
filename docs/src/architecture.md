@@ -32,7 +32,7 @@ path, so it isn't stored in the tree. A plain `scan` doesn't build the tree.
 | Crate | Responsibility | May change the filesystem? |
 |---|---|---|
 | `cleanse-model` | Shared types: candidates, risk tiers, plans, journal records | No |
-| `cleanse-platform` | Per-OS facts: file identity, links and reparse points, cloud placeholders, allocated size, mounts, elevation, processes | No |
+| `cleanse-platform` | Per-OS facts: file identity, ownership, links and reparse points, cloud placeholders, allocated size, mounts, elevation, processes, system folders | Only through its `privileged` feature, which only `cleanse-exec` turns on, to create system cleanup's data folder ([ADR 0010](adr/0010-elevated-system-cleanup.md)) |
 | `cleanse-core` | Scanning, rule matching, safety evaluation, planning, analysis | No |
 | `cleanse-exec` | Executing approved plans, quarantine, journal, restore | **Yes, the only one** |
 | `cleanse-engine` | Session API with progress and cancellation; the only API front-ends use | No (delegates to exec) |
@@ -62,7 +62,9 @@ security policy, and no navigating elsewhere.
 
 ## Enforcement
 
-- Clippy's `disallowed-methods` rejects deletion, moves, writes, permission changes, and process
-  spawning outside `cleanse-exec` ([ADR 0002](adr/0002-single-mutator.md)).
+- Clippy's `disallowed-methods` rejects deletion, moves, writes, permission and ownership
+  changes, links, and process spawning outside `cleanse-exec`
+  ([ADR 0002](adr/0002-single-mutator.md)), and calls into `cleanse-platform`'s `privileged`
+  module too.
 - cargo-deny rejects HTTP client crates ([ADR 0005](adr/0005-no-network.md)).
 - `unsafe_code` is denied workspace-wide.

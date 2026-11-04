@@ -191,18 +191,98 @@ fn the_operating_system_owns_its_own_folders() {
     );
 }
 
-/// Giving a file to another account takes an administrator. CI's Windows runners are one.
-#[cfg(windows)]
+/// Giving a file to another account, or to Administrators or root, takes an administrator or root.
+/// CI's Windows runners are administrators, and CI runs the tests named `when_elevated` as root
+/// on Linux, in a job of its own.
 fn elevated_or_skip(probe: &System) -> bool {
     if probe.is_elevated() {
         return true;
     }
+    let required = if cfg!(windows) {
+        "CI"
+    } else {
+        "CLEANSE_TEST_AS_ROOT"
+    };
     assert!(
-        std::env::var_os("CI").is_none(),
-        "CI's Windows runners run as an administrator"
+        std::env::var_os(required).is_none(),
+        "{required} is set, so this has to run as an administrator or root"
     );
-    eprintln!("skipped: needs an administrator");
+    eprintln!("skipped: needs an administrator or root");
     false
+}
+
+#[test]
+fn a_folder_anyone_made_isnt_private() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("folder");
+    fs::create_dir(&folder).unwrap();
+
+    assert!(!system().is_private_dir(&folder).unwrap());
+    assert!(
+        system()
+            .is_private_dir(&dir.path().join("missing"))
+            .is_err()
+    );
+}
+
+#[test]
+fn private_folders_when_elevated() {
+    let probe = system();
+    if !elevated_or_skip(&probe) {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let private = dir.path().join("private");
+
+    crate::privileged::create_private_dir(&private).unwrap();
+
+    assert!(probe.is_private_dir(&private).unwrap());
+    let again = crate::privileged::create_private_dir(&private).unwrap_err();
+    assert_eq!(again.kind(), io::ErrorKind::AlreadyExists);
+    // A folder made the usual way inherits permissions that let others in.
+    let ordinary = dir.path().join("ordinary");
+    fs::create_dir(&ordinary).unwrap();
+    assert!(!probe.is_private_dir(&ordinary).unwrap());
+    let link = dir.path().join("link");
+    link_dir(&private, &link);
+    assert!(!probe.is_private_dir(&link).unwrap());
+    let given = dir.path().join("given");
+    crate::privileged::create_private_dir(&given).unwrap();
+    give_away(&given);
+    assert!(!probe.is_private_dir(&given).unwrap());
+}
+
+/// Gives `path` to the Users group.
+#[cfg(windows)]
+fn give_away(path: &Path) {
+    icacls(path, &["/setowner", "*S-1-5-32-545"]);
+}
+
+/// Gives `path` to `nobody`.
+#[cfg(unix)]
+fn give_away(path: &Path) {
+    std::os::unix::fs::chown(path, Some(65534), None).unwrap();
+}
+
+/// Someone who can change a folder above a private one can move it away and put another there.
+#[cfg(unix)]
+#[test]
+fn a_private_folder_inside_one_others_can_change_isnt_private_when_elevated() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let probe = system();
+    if !elevated_or_skip(&probe) {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let exposed = dir.path().join("exposed");
+    fs::create_dir(&exposed).unwrap();
+    fs::set_permissions(&exposed, fs::Permissions::from_mode(0o777)).unwrap();
+    let private = exposed.join("private");
+
+    crate::privileged::create_private_dir(&private).unwrap();
+
+    assert!(!probe.is_private_dir(&private).unwrap());
 }
 
 #[cfg(windows)]

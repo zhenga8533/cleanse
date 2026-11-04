@@ -20,7 +20,7 @@ use std::time::{Duration, Instant, SystemTime};
 use cleanse_core::analyze::Leaf;
 use cleanse_core::config::ConfigError;
 use cleanse_core::rules::{Detection, Listed, Matcher};
-use cleanse_core::safety::{Assessor, ProtectedPolicy};
+use cleanse_core::safety::{Assessor, ProtectedPolicy, SystemRoots, scan_folders};
 use cleanse_core::scan::{Descend, DirFiles, distinct_roots, walk_with};
 use cleanse_exec::Executor;
 use cleanse_model::{Candidate, CandidateId, Concern, Plan, QuarantineEntry, Risk};
@@ -35,7 +35,7 @@ pub use cleanse_exec::{
     Action, Applied, ApplyError, Handled, History, Leftover, Listing, PlanFileError, Run,
     load_plan, save_plan,
 };
-pub use cleanse_platform::{KnownFolders, Probe, System};
+pub use cleanse_platform::{KnownFolders, Probe, System, SystemFolders};
 pub use session::{
     Cleaned, Explained, Finished, FolderEntry, FolderView, HandledEntries, Page, RuleSummary,
     ScanId, SectionSummary, Session, SessionError, Summary,
@@ -92,18 +92,39 @@ pub fn cloud_sync_detection() -> &'static str {
     }
 }
 
+/// Which cleanup an [`Engine`] is for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+    /// The user's own files. Nothing is changed while elevated.
+    User,
+    /// The operating system's folders, changed only while elevated (ADR 0010).
+    System,
+}
+
 /// The rules and platform a session works with.
 #[derive(Debug)]
 pub struct Engine {
-    /// The built-in rules, minus those the settings turn off.
+    /// The built-in rules, minus those the settings turn off. For system cleanup, the built-in
+    /// system rules.
     rules: RuleSet,
     system: System,
+    /// For system cleanup, the defaults: it reads no settings file.
     config: Config,
     /// Where the settings file is, if the system has a folder for app settings.
     config_path: Option<PathBuf>,
     /// Cleanse's data folder, which holds the journal and the quarantine, if the system has a
-    /// folder for app data.
+    /// folder for app data. System cleanup has its own.
     data_dir: Option<PathBuf>,
+    cleanup: Cleanup,
+}
+
+#[derive(Debug)]
+enum Cleanup {
+    User,
+    /// In the folders the operating system reports.
+    System {
+        folders: SystemFolders,
+    },
 }
 
 #[derive(Debug)]
@@ -211,7 +232,37 @@ impl Engine {
             config,
             config_path,
             data_dir,
+            cleanup: Cleanup::User,
         })
+    }
+
+    /// System cleanup's engine (ADR 0010): the built-in system rules, in the folders the
+    /// operating system reports. It reads no settings file, scans only what's directly in the
+    /// folders the rules name, and changes nothing unless elevated.
+    pub fn new_system() -> Result<Self, EngineError> {
+        let system = System::new()?;
+        let folders = SystemFolders::current()?;
+        Ok(Self {
+            rules: RuleSet::builtin_system()?,
+            system,
+            config: Config::default(),
+            config_path: None,
+            data_dir: folders.cleanse_data(),
+            cleanup: Cleanup::System { folders },
+        })
+    }
+
+    pub fn mode(&self) -> Mode {
+        match self.cleanup {
+            Cleanup::User => Mode::User,
+            Cleanup::System { .. } => Mode::System,
+        }
+    }
+
+    /// Why nothing can be changed now, if so: the user's cleanup changes nothing while elevated,
+    /// and system cleanup only while elevated.
+    pub fn check_can_change(&self) -> Result<(), ApplyError> {
+        self.executor()?.check_can_change()
     }
 
     pub fn rules(&self) -> &RuleSet {
@@ -231,13 +282,23 @@ impl Engine {
     }
 
     /// What's scanned when no folders are given: the home folder, which holds the user's
-    /// projects as well as the caches the rules know about.
+    /// projects as well as the caches the rules know about. For system cleanup, the folders the
+    /// system rules name items directly inside, where they exist.
     pub fn default_roots(&self) -> Vec<PathBuf> {
-        self.system.known_folders().home.iter().cloned().collect()
+        match &self.cleanup {
+            Cleanup::User => self.system.known_folders().home.iter().cloned().collect(),
+            Cleanup::System { folders } => scan_folders(&self.rules, folders)
+                .into_iter()
+                .filter(|folder| {
+                    fs::symlink_metadata(folder).is_ok_and(|metadata| metadata.is_dir())
+                })
+                .collect(),
+        }
     }
 
     /// Finds what the rules recognize under `roots` and runs the safety checks on it. Nothing
-    /// is modified. Setting `cancel` stops the scan early with partial results.
+    /// is modified. Setting `cancel` stops the scan early with partial results. System cleanup
+    /// only looks directly inside each root, and never deeper apart from measuring what it finds.
     pub fn scan(
         &self,
         roots: &[PathBuf],
@@ -292,7 +353,24 @@ impl Engine {
         L: Fn(PathBuf, DirFiles) + Sync,
     {
         let started = Instant::now();
-        let roots = distinct_roots(roots)?;
+        let roots = match self.cleanup {
+            Cleanup::User => distinct_roots(roots)?,
+            // A folder inside another is listed as well, since nothing below the other is.
+            Cleanup::System { .. } => {
+                let mut distinct: Vec<PathBuf> = Vec::new();
+                for root in roots {
+                    let root = path::absolute(root)?;
+                    if !distinct.contains(&root) {
+                        distinct.push(root);
+                    }
+                }
+                distinct
+            }
+        };
+        let descend = match self.cleanup {
+            Cleanup::User => Descend::Yes,
+            Cleanup::System { .. } => Descend::No,
+        };
         let matcher = self.matcher();
 
         let entries = AtomicU64::new(0);
@@ -317,7 +395,7 @@ impl Engine {
                             .insert(detection.path.clone(), detection);
                         Descend::No
                     }
-                    None => Descend::Yes,
+                    None => descend,
                 }
             };
             let report = walk_with(root, visit, &listed).map_err(|error| {
@@ -330,11 +408,7 @@ impl Engine {
             other_filesystems.extend(report.other_filesystems);
         }
 
-        let policy = ProtectedPolicy::for_system(
-            self.system.known_folders(),
-            &self.system,
-            &self.config.exclude,
-        );
+        let policy = self.policy();
         // A large file is only a match because of its size, so one where nothing may be removed,
         // like Windows' own folders or a folder excluded in the settings, isn't worth listing as
         // kept.
@@ -347,7 +421,9 @@ impl Engine {
                     || policy.check(&detection.path, None, &[]).is_none()
             })
             .collect();
-        let assessor = Assessor::new(&self.system, policy, &roots, SystemTime::now())?;
+        // Checking who owns everything inside every item would make a system scan take minutes
+        // where an item holds hundreds of thousands of files, so that waits until removal.
+        let assessor = self.assessor(policy, &roots, false)?;
         let done = AtomicUsize::new(0);
         let total = detections.len();
         let candidates: Vec<Candidate> = detections
@@ -381,9 +457,8 @@ impl Engine {
     pub fn explain(&self, path: &Path) -> io::Result<Explanation<'_>> {
         let path = path::absolute(path)?;
         fs::symlink_metadata(&path)?;
-        let folders = self.system.known_folders();
         let matcher = self.matcher();
-        let policy = ProtectedPolicy::for_system(folders, &self.system, &self.config.exclude);
+        let policy = self.policy();
 
         let detection = path.ancestors().find_map(|ancestor| {
             let metadata = fs::symlink_metadata(ancestor).ok()?;
@@ -398,12 +473,7 @@ impl Engine {
 
         // The scan root would be the folder around the match.
         let root = detection.path.parent().unwrap_or(&detection.path);
-        let assessor = Assessor::new(
-            &self.system,
-            policy,
-            &[root.to_path_buf()],
-            SystemTime::now(),
-        )?;
+        let assessor = self.assessor(policy, &[root.to_path_buf()], true)?;
         Ok(Explanation::Matched {
             candidate: Box::new(assessor.assess(CandidateId(0), &detection)),
             rule: detection.rule,
@@ -456,6 +526,9 @@ impl Engine {
     }
 
     fn executor(&self) -> Result<Executor<'_>, ApplyError> {
+        if let Cleanup::System { folders } = &self.cleanup {
+            return Executor::system(&self.rules, &self.system, folders.clone());
+        }
         let data_dir = self.data_dir.clone().ok_or_else(|| {
             ApplyError::Journal(io::Error::new(
                 io::ErrorKind::NotFound,
@@ -471,11 +544,52 @@ impl Engine {
     }
 
     fn matcher(&self) -> Matcher<'_> {
-        Matcher::new(
-            self.rules.rules(),
-            self.system.known_folders(),
-            Os::current(),
-        )
-        .with_large_files(self.config.large_file_size)
+        match &self.cleanup {
+            Cleanup::User => Matcher::new(
+                self.rules.rules(),
+                self.system.known_folders(),
+                Os::current(),
+            )
+            .with_large_files(self.config.large_file_size),
+            Cleanup::System { folders } => {
+                Matcher::system(self.rules.rules(), folders, Os::current())
+            }
+        }
+    }
+
+    fn policy(&self) -> ProtectedPolicy {
+        match &self.cleanup {
+            Cleanup::User => ProtectedPolicy::for_system(
+                self.system.known_folders(),
+                &self.system,
+                &self.config.exclude,
+            ),
+            Cleanup::System { folders } => {
+                ProtectedPolicy::for_system_cleanup(folders, &self.system)
+            }
+        }
+    }
+
+    /// The user's cleanup checks that items are inside `roots`. System cleanup checks the
+    /// system folders instead, now, and, if `thorough`, who owns everything inside each item.
+    fn assessor(
+        &self,
+        policy: ProtectedPolicy,
+        roots: &[PathBuf],
+        thorough: bool,
+    ) -> io::Result<Assessor<'_>> {
+        let now = SystemTime::now();
+        match &self.cleanup {
+            Cleanup::User => Assessor::new(&self.system, policy, roots, now),
+            Cleanup::System { folders } => {
+                let roots = SystemRoots::verify(&self.rules, folders, &self.system);
+                let assessor = Assessor::system(&self.system, policy, roots, now);
+                Ok(if thorough {
+                    assessor.thorough()
+                } else {
+                    assessor
+                })
+            }
+        }
     }
 }

@@ -21,7 +21,7 @@ use cleanse_platform::{FileFacts, FileOwner, Probe};
 
 pub(crate) use policy::key;
 pub use policy::{Protected, ProtectedPolicy, Reach};
-pub use system::SystemRoots;
+pub use system::{SystemRoots, scan_folders};
 
 use crate::git::GitStatus;
 use crate::rules::{Detection, Target};
@@ -54,7 +54,8 @@ enum Cleanup {
     /// The user's, of the folders being scanned, compared like [`policy::key`].
     User { roots: Vec<Vec<String>> },
     /// The system's, of items directly inside the system folders that checked out.
-    System { roots: SystemRoots },
+    /// `thorough` also reads who owns every entry inside each item.
+    System { roots: SystemRoots, thorough: bool },
 }
 
 impl<'p> Assessor<'p> {
@@ -85,6 +86,9 @@ impl<'p> Assessor<'p> {
     /// Checks system cleanup's items, with `policy` from
     /// [`ProtectedPolicy::for_system_cleanup`] and the system folders `roots` that checked out.
     /// Recent activity is measured back from `now`.
+    ///
+    /// Only what folder listings show is checked inside each item: links and special files, and
+    /// hard links on Unix. [`Assessor::thorough`] checks the rest.
     pub fn system(
         probe: &'p dyn Probe,
         policy: ProtectedPolicy,
@@ -94,7 +98,10 @@ impl<'p> Assessor<'p> {
         Self {
             probe,
             policy,
-            cleanup: Cleanup::System { roots },
+            cleanup: Cleanup::System {
+                roots,
+                thorough: false,
+            },
             home: None,
             now,
             identities: Mutex::default(),
@@ -103,16 +110,38 @@ impl<'p> Assessor<'p> {
         }
     }
 
+    /// For system cleanup, also reads who owns every entry inside each item, and its hard links
+    /// on Windows. That takes a file handle per entry, which can take minutes for an item with
+    /// hundreds of thousands of files, so system cleanup does it right before removing an item
+    /// rather than when scanning (ADR 0010).
+    #[must_use]
+    pub fn thorough(mut self) -> Self {
+        if let Cleanup::System { thorough, .. } = &mut self.cleanup {
+            *thorough = true;
+        }
+        self
+    }
+
+    /// The system folders system cleanup checks `detection` against, and whether it reads who
+    /// owns everything inside, or `None` if its own gates don't apply.
+    fn system_gates(&self, detection: &Detection<'_>) -> Option<(&SystemRoots, bool)> {
+        match &self.cleanup {
+            // Nothing a `protected` rule matches is ever removed, so they're only for the rest.
+            Cleanup::System { roots, thorough } if detection.rule.risk != Risk::Protected => {
+                Some((roots, *thorough))
+            }
+            Cleanup::User { .. } | Cleanup::System { .. } => None,
+        }
+    }
+
     pub fn assess(&self, id: CandidateId, detection: &Detection<'_>) -> Candidate {
         let path = &detection.path;
-        // Nothing a `protected` rule matches is ever removed, so system cleanup's own gates are
-        // only for the rest.
-        let system_roots = match &self.cleanup {
-            Cleanup::System { roots } if detection.rule.risk != Risk::Protected => Some(roots),
-            Cleanup::User { .. } | Cleanup::System { .. } => None,
-        };
-        let measured = match system_roots {
-            Some(_) => measure_with(path, |entry| system::entry_concern(self.probe, entry)),
+        let system_gates = self.system_gates(detection);
+        let system_roots = system_gates.map(|(roots, _)| roots);
+        let measured = match system_gates {
+            Some((_, thorough)) => measure_with(path, |entry| {
+                system::entry_concern(self.probe, entry, thorough)
+            }),
             None => measure(path),
         };
         let mut measurement = measured.as_ref().cloned().unwrap_or_default();

@@ -31,7 +31,7 @@ impl SystemRoots {
     pub fn verify(rules: &RuleSet, folders: &SystemFolders, probe: &dyn Probe) -> Self {
         let mut checked = HashMap::new();
         let mut verified: Vec<(Vec<String>, FileIdentity)> = Vec::new();
-        for (base, names) in fixed_folders(rules, folders) {
+        for (base, names) in fixed_folders(rules, folders, true) {
             let mut folder = base.to_path_buf();
             let mut identity = system_folder(probe, &mut checked, &folder);
             for name in names {
@@ -50,7 +50,7 @@ impl SystemRoots {
 
     /// Whether `path` is directly inside one of the folders, and that's still the folder that
     /// was checked.
-    pub(super) fn holds(&self, path: &Path, probe: &dyn Probe) -> bool {
+    pub fn holds(&self, path: &Path, probe: &dyn Probe) -> bool {
         let Some(parent) = path.parent() else {
             return false;
         };
@@ -64,16 +64,34 @@ impl SystemRoots {
     }
 }
 
-/// Each folder that a location of a system rule that removes things, on this OS, is directly
-/// inside: its base folder, and the names below that.
+/// The folders a system scan lists: each folder a location of `rules` on this OS is directly
+/// inside, once, in the order the rules name them. The scan reads what's directly in each, and
+/// nothing deeper apart from measuring what it finds.
+pub fn scan_folders(rules: &RuleSet, folders: &SystemFolders) -> Vec<PathBuf> {
+    let mut scanned: Vec<PathBuf> = Vec::new();
+    for (base, names) in fixed_folders(rules, folders, false) {
+        let mut folder = base.to_path_buf();
+        folder.extend(names);
+        if !scanned.contains(&folder) {
+            scanned.push(folder);
+        }
+    }
+    scanned
+}
+
+/// Each folder that a location of a system rule on this OS is directly inside, or only those of
+/// rules that remove things if `removing`: its base folder, and the names below that.
 fn fixed_folders<'a>(
     rules: &'a RuleSet,
     folders: &'a SystemFolders,
+    removing: bool,
 ) -> impl Iterator<Item = (&'a Path, Vec<&'a str>)> {
     rules
         .rules()
         .iter()
-        .filter(|rule| rule.scope == Scope::System && rule.risk != Risk::Protected)
+        .filter(move |rule| {
+            rule.scope == Scope::System && (!removing || rule.risk != Risk::Protected)
+        })
         .filter_map(|rule| match &rule.target {
             Target::KnownLocation { locations, .. } => Some(locations),
             Target::ProjectArtifact { .. } | Target::LargeFile {} => None,
@@ -133,9 +151,19 @@ pub(super) fn item_concerns(
 }
 
 /// What's wrong with `entry`, inside an item that system cleanup could remove, if anything.
-pub(super) fn entry_concern(probe: &dyn Probe, entry: &Entry<'_>) -> Option<Concern> {
+/// Unless `thorough`, only what the folder's listing shows is checked: links and special files,
+/// and hard links on Unix, which the measurement counts. Who owns the entry, and its hard links
+/// on Windows, take opening it.
+pub(super) fn entry_concern(
+    probe: &dyn Probe,
+    entry: &Entry<'_>,
+    thorough: bool,
+) -> Option<Concern> {
     if !matches!(entry.kind, EntryKind::File | EntryKind::Dir) {
         return Some(Concern::LinksInside);
+    }
+    if !thorough {
+        return None;
     }
     let Ok(facts) = probe.inspect(entry.path) else {
         return Some(Concern::ContentsNotSystemOwned);

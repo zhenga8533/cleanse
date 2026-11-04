@@ -1,13 +1,15 @@
 //! The only crate permitted to change the filesystem.
 //!
 //! Executes an approved plan item by item, re-validating each item through the safety gates
-//! immediately before acting, and records every outcome in an append-only journal.
+//! immediately before acting, and records every outcome in an append-only journal. The user's
+//! cleanup and system cleanup each have an executor of their own (ADR 0010).
 
 mod delete;
 mod history;
 mod journal;
 mod plan_file;
 mod quarantine;
+mod system;
 
 #[cfg(test)]
 mod tests;
@@ -22,17 +24,18 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 
 use cleanse_core::config::Config;
-use cleanse_core::rules::{Listed, Matcher, Os, RuleSet};
-use cleanse_core::safety::{Assessor, ProtectedPolicy};
+use cleanse_core::rules::{Listed, Matcher, Os, RuleSet, Scope};
+use cleanse_core::safety::{Assessor, ProtectedPolicy, SystemRoots};
 use cleanse_core::scan::measure;
 use cleanse_model::{
     Candidate, CandidateId, Concern, Disposal, EntryOutcome, Outcome, Plan, PlanItem,
     QuarantineEntry, Risk, SkipReason,
 };
-use cleanse_platform::Probe;
+use cleanse_platform::{Probe, SystemFolders, privileged};
 
 use journal::{Journal, Record};
 use quarantine::Quarantine;
+use system::Targets;
 
 pub use history::{History, Leftover, Run};
 pub use journal::Action;
@@ -43,8 +46,16 @@ pub use quarantine::Listing;
 pub struct Executor<'a> {
     rules: &'a RuleSet,
     probe: &'a dyn Probe,
-    config: &'a Config,
+    cleanup: Cleanup<'a>,
     data_dir: PathBuf,
+}
+
+/// Which cleanup an [`Executor`] carries out.
+enum Cleanup<'a> {
+    /// The user's, with their settings.
+    User { config: &'a Config },
+    /// The system's, in the folders the operating system reports.
+    System { folders: SystemFolders },
 }
 
 /// What applying a plan did.
@@ -71,6 +82,14 @@ pub enum ApplyError {
     /// Elevation would let Cleanse remove files the user's own account couldn't, such as other
     /// users' files, so it refuses.
     Elevated,
+    /// System cleanup changes things only as an administrator or root.
+    NotElevated,
+    /// The rules are for the other cleanup: system cleanup uses only system rules, and the user's
+    /// cleanup only the user's.
+    WrongRules,
+    /// System cleanup's data folder couldn't be made, or someone other than Administrators and
+    /// SYSTEM, or root, can change it.
+    DataFolder(io::Error),
     /// The journal couldn't be started.
     Journal(io::Error),
     /// The safety checks couldn't be set up.
@@ -84,6 +103,17 @@ impl fmt::Display for ApplyError {
                 "Cleanse doesn't change anything while running as an administrator or root, \
                  because that could remove files your own account can't. Run it again \
                  without elevation.",
+            ),
+            Self::NotElevated => f.write_str(
+                "System cleanup changes things only as an administrator or root. Run it again \
+                 from an administrator terminal, or with sudo.",
+            ),
+            Self::WrongRules => {
+                f.write_str("these rules are for the other kind of cleanup, so nothing was changed")
+            }
+            Self::DataFolder(error) => write!(
+                f,
+                "system cleanup's data folder can't be used, so nothing was changed: {error}"
             ),
             Self::Journal(error) => {
                 write!(
@@ -114,23 +144,114 @@ impl<'a> Executor<'a> {
         Self {
             rules,
             probe,
-            config,
+            cleanup: Cleanup::User { config },
             data_dir,
         }
     }
 
-    /// Refuses while elevated, then starts the journal for a run.
+    /// System cleanup's executor (ADR 0010), for system `rules` in the system's `folders`. Its
+    /// journal and quarantine are in a data folder of its own there, which only Administrators
+    /// and SYSTEM, or root, can change. It reads no settings, and only the items of a plan.
+    pub fn system(
+        rules: &'a RuleSet,
+        probe: &'a dyn Probe,
+        folders: SystemFolders,
+    ) -> Result<Self, ApplyError> {
+        let data_dir = folders.cleanse_data().ok_or_else(|| {
+            ApplyError::DataFolder(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "this system has no folder for system cleanup's data",
+            ))
+        })?;
+        Ok(Self {
+            rules,
+            probe,
+            cleanup: Cleanup::System { folders },
+            data_dir,
+        })
+    }
+
+    /// Why nothing can be changed now, if so: the user's cleanup refuses to run elevated, and
+    /// system cleanup only runs elevated, and each only with its own rules.
+    pub fn check_can_change(&self) -> Result<(), ApplyError> {
+        let (scope, elevation) = match self.cleanup {
+            Cleanup::User { .. } => (Scope::User, !self.probe.is_elevated()),
+            Cleanup::System { .. } => (Scope::System, self.probe.is_elevated()),
+        };
+        if !elevation {
+            return Err(match self.cleanup {
+                Cleanup::User { .. } => ApplyError::Elevated,
+                Cleanup::System { .. } => ApplyError::NotElevated,
+            });
+        }
+        if self.rules.scope() != scope {
+            return Err(ApplyError::WrongRules);
+        }
+        Ok(())
+    }
+
+    /// Checks that a run may change anything, makes sure system cleanup's data folder is
+    /// private, then starts the journal for the run.
     fn start(
         &self,
         action: Action,
         roots: &[PathBuf],
         items: usize,
     ) -> Result<Journal, ApplyError> {
-        if self.probe.is_elevated() {
-            return Err(ApplyError::Elevated);
+        self.check_can_change()?;
+        if let Cleanup::System { .. } = self.cleanup {
+            self.prepare_data_folder()?;
         }
         Journal::start(&self.data_dir.join("journal"), action, roots, items)
             .map_err(ApplyError::Journal)
+    }
+
+    /// Creates system cleanup's data folder if it's missing, then checks that only
+    /// Administrators and SYSTEM, or root, can change it. Anyone can create folders in
+    /// `ProgramData`, so one someone else made first is refused, never repaired.
+    fn prepare_data_folder(&self) -> Result<(), ApplyError> {
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "cleanse-exec creates system cleanup's data folder (ADR 0010)"
+        )]
+        let created = privileged::create_private_dir(&self.data_dir);
+        match created {
+            Err(error) if error.kind() != io::ErrorKind::AlreadyExists => {
+                Err(ApplyError::DataFolder(error))
+            }
+            Ok(()) | Err(_) => self.check_data_folder().map_err(ApplyError::DataFolder),
+        }
+    }
+
+    /// For system cleanup, whether its data folder exists, refusing one that others can change.
+    fn data_folder_exists(&self) -> io::Result<bool> {
+        match self.cleanup {
+            Cleanup::User { .. } => Ok(true),
+            Cleanup::System { .. } => match self.check_data_folder() {
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+                checked => checked.map(|()| true),
+            },
+        }
+    }
+
+    fn check_data_folder(&self) -> io::Result<()> {
+        if self.probe.is_private_dir(&self.data_dir)? {
+            Ok(())
+        } else {
+            Err(io::Error::other(format!(
+                "accounts other than Administrators and SYSTEM, or root, can change {}, so \
+                 system cleanup won't use it. If no one you trust made it, remove it.",
+                self.data_dir.display()
+            )))
+        }
+    }
+
+    /// For system cleanup, the places it may put back or finish removing items.
+    fn targets(&self) -> Option<Targets<'a>> {
+        match &self.cleanup {
+            Cleanup::User { .. } => None,
+            Cleanup::System { folders } => Some(Targets::new(self.rules, folders, self.probe)),
+        }
     }
 
     fn quarantine(&self) -> Quarantine {
@@ -146,17 +267,30 @@ impl<'a> Executor<'a> {
         progress: &dyn Fn(usize),
         cancel: &AtomicBool,
     ) -> Result<Applied, ApplyError> {
-        if self.probe.is_elevated() {
-            return Err(ApplyError::Elevated);
-        }
-        let folders = self.probe.known_folders();
-        let matcher = Matcher::new(self.rules.rules(), folders, Os::current())
-            .with_large_files(self.config.large_file_size);
-        let policy = ProtectedPolicy::for_system(folders, self.probe, &self.config.exclude);
+        self.check_can_change()?;
         // Files modified after this count as modified moments ago, however long the run takes.
-        let assessor = Assessor::new(self.probe, policy, &plan.roots, SystemTime::now())
-            .map_err(ApplyError::Io)?;
-        let mut journal = self.start(Action::Apply, &plan.roots, plan.items.len())?;
+        let now = SystemTime::now();
+        let (matcher, assessor, roots) = match &self.cleanup {
+            Cleanup::User { config } => {
+                let folders = self.probe.known_folders();
+                let matcher = Matcher::new(self.rules.rules(), folders, Os::current())
+                    .with_large_files(config.large_file_size);
+                let policy = ProtectedPolicy::for_system(folders, self.probe, &config.exclude);
+                let assessor =
+                    Assessor::new(self.probe, policy, &plan.roots, now).map_err(ApplyError::Io)?;
+                (matcher, assessor, plan.roots.as_slice())
+            }
+            // The plan's roots are ignored: system cleanup only removes what's directly inside
+            // the system folders it checks, which it checks again now.
+            Cleanup::System { folders } => {
+                let matcher = Matcher::system(self.rules.rules(), folders, Os::current());
+                let policy = ProtectedPolicy::for_system_cleanup(folders, self.probe);
+                let roots = SystemRoots::verify(self.rules, folders, self.probe);
+                let assessor = Assessor::system(self.probe, policy, roots, now).thorough();
+                (matcher, assessor, &[][..])
+            }
+        };
+        let mut journal = self.start(Action::Apply, roots, plan.items.len())?;
 
         let mut journal_ok = true;
         let mut outcomes = Vec::with_capacity(plan.items.len());
@@ -266,6 +400,9 @@ impl<'a> Executor<'a> {
 
     /// What the journal says Cleanse has done, and what's left of removals that didn't finish.
     pub fn history(&self) -> io::Result<History> {
+        if !self.data_folder_exists()? {
+            return Ok(History::default());
+        }
         history::read(&self.data_dir.join("journal"), self.probe)
     }
 
@@ -273,6 +410,7 @@ impl<'a> Executor<'a> {
     /// holds the item that was approved.
     pub fn finish(&self, leftovers: &[Leftover]) -> Result<Applied, ApplyError> {
         let mut journal = self.start(Action::Finish, &[], leftovers.len())?;
+        let targets = self.targets();
         let mut journal_ok = true;
         let mut outcomes = Vec::with_capacity(leftovers.len());
         for leftover in leftovers {
@@ -287,6 +425,11 @@ impl<'a> Executor<'a> {
                 skipped(SkipReason::JournalUnavailable)
             } else if !history::still_there(self.probe, leftover) {
                 skipped(SkipReason::Gone)
+            } else if targets
+                .as_ref()
+                .is_some_and(|targets| !targets.allow(&leftover.original, leftover.kind))
+            {
+                skipped(SkipReason::NoLongerMatches)
             } else if journal.record(&removing).is_err() {
                 journal_ok = false;
                 skipped(SkipReason::JournalUnavailable)
@@ -318,12 +461,31 @@ impl<'a> Executor<'a> {
 
     /// What's in quarantine.
     pub fn quarantined(&self) -> io::Result<Listing> {
+        if !self.data_folder_exists()? {
+            return Ok(Listing::default());
+        }
         self.quarantine().list()
     }
 
-    /// Moves each entry back to where it was, unless something is there now.
+    /// Moves each entry back to where it was, unless something is there now. System cleanup
+    /// also puts an item back only where a system rule names one, directly inside a system
+    /// folder that checks out.
     pub fn restore(&self, entries: &[QuarantineEntry]) -> Result<Handled, ApplyError> {
-        self.each_entry(Action::Restore, entries, Quarantine::restore)
+        let targets = self.targets();
+        self.each_entry(Action::Restore, entries, |quarantine, entry| {
+            if let Some(targets) = &targets
+                && !targets.allow(&entry.original, entry.kind)
+            {
+                return EntryOutcome::Failed {
+                    error: format!(
+                        "{} isn't somewhere system cleanup removes things from, so it was left \
+                         in quarantine",
+                        entry.original.display()
+                    ),
+                };
+            }
+            quarantine.restore(entry)
+        })
     }
 
     /// Deletes each entry for good.
@@ -335,7 +497,7 @@ impl<'a> Executor<'a> {
         &self,
         action: Action,
         entries: &[QuarantineEntry],
-        handle: fn(&Quarantine, &QuarantineEntry) -> EntryOutcome,
+        handle: impl Fn(&Quarantine, &QuarantineEntry) -> EntryOutcome,
     ) -> Result<Handled, ApplyError> {
         let mut journal = self.start(action, &[], entries.len())?;
         let quarantine = self.quarantine();
