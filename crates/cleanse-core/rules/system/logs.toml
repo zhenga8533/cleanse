@@ -1,0 +1,26 @@
+# systemd's journal keeps the system's logs in /var/log/journal, up to 10% of the drive and 4 GiB
+# at most, unless it's configured otherwise. `journalctl --vacuum-size=` removes the oldest
+# archived journal files until they take less than the size given, and never the ones in use.
+# https://www.freedesktop.org/software/systemd/man/latest/journald.conf.html
+# https://www.freedesktop.org/software/systemd/man/latest/journalctl.html
+[[rule]]
+id = "systemd.journal"
+scope = "system"
+name = "The systemd journal"
+category = "logs"
+risk = "protected"
+explain = "The system's logs, which systemd keeps until they reach their size limit. journalctl's own command removes the oldest of them."
+advise = "sudo journalctl --vacuum-size=500M"
+
+[rule.match]
+kind = "known_location"
+locations = [{ os = "linux", base = "var", path = "log/journal" }]
+
+[[rule.test]]
+os = "linux"
+tree = ["var/log/journal/0123456789abcdef0123456789abcdef/system.journal"]
+matches = ["var/log/journal"]
+
+[[rule.test]]
+tree = ["var/log/syslog", "var/log/apt/history.log"]
+matches = []

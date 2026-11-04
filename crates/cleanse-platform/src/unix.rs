@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use cleanse_model::{EntryKind, FileIdentity};
 
-use crate::{FileFacts, FileOwner, ListedFacts};
+use crate::{FileFacts, FileOwner, ListedFacts, SystemFolders};
 
 /// `st_blocks` counts 512-byte units on Linux and macOS, whatever the filesystem's block size.
 const STAT_BLOCK_BYTES: u64 = 512;
@@ -46,6 +46,18 @@ pub(crate) fn inspect(path: &Path, user: &User) -> io::Result<FileFacts> {
 
 pub(crate) fn temp_dir() -> PathBuf {
     env::temp_dir()
+}
+
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "matches the Windows version, which can fail"
+)]
+pub(crate) fn system_folders() -> io::Result<SystemFolders> {
+    Ok(SystemFolders {
+        system_root: None,
+        program_data: None,
+        var: cfg!(target_os = "linux").then(|| PathBuf::from("/var")),
+    })
 }
 
 pub(crate) fn listed_facts(metadata: &Metadata) -> ListedFacts {

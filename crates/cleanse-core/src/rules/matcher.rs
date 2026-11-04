@@ -7,9 +7,9 @@ use std::path::{self, Component, Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
 use cleanse_model::{EntryKind, Evidence};
-use cleanse_platform::{KnownFolders, listed_facts};
+use cleanse_platform::{KnownFolders, SystemFolders, listed_facts};
 
-use super::{Base, Entry, Os, Rule, Target};
+use super::{Base, Entry, Location, Os, Rule, Scope, Target};
 use crate::TOMBSTONE_PREFIX;
 use crate::git::{GitInfo, GitStatus};
 use crate::scan::{Descend, WalkReport, walk};
@@ -52,7 +52,7 @@ pub struct Detection<'r> {
 }
 
 /// Matches files and directories against a set of rules, with known locations resolved for one
-/// user and OS.
+/// user and OS, or for system cleanup.
 #[derive(Debug)]
 pub struct Matcher<'r> {
     artifacts: Vec<&'r Rule>,
@@ -63,7 +63,8 @@ pub struct Matcher<'r> {
     /// or with a name none of them has is ruled out before its whole path is compared.
     file_locations: Vec<(usize, String)>,
     large_files: Option<LargeFiles<'r>>,
-    git: GitInfo,
+    /// `None` in system cleanup, which doesn't read Git.
+    git: Option<GitInfo>,
 }
 
 /// A known location with a `*` in its path, so it's compared name by name below its base.
@@ -88,58 +89,96 @@ struct LargeFiles<'r> {
 }
 
 impl<'r> Matcher<'r> {
-    /// Locations whose base folder isn't defined on this system are left out.
+    /// Matches user rules, with the user's folders. System rules are left out, as are locations
+    /// whose base folder isn't defined on this system.
     pub fn new(rules: impl IntoIterator<Item = &'r Rule>, folders: &KnownFolders, os: Os) -> Self {
-        let mut artifacts = Vec::new();
-        let mut locations = HashMap::new();
-        let mut patterns = Vec::new();
-        let mut file_locations = Vec::new();
-        let mut large_files = None;
-        for rule in rules {
+        let mut matcher = Self::empty(Some(GitInfo::new()));
+        for rule in rules.into_iter().filter(|rule| rule.scope == Scope::User) {
             match &rule.target {
-                Target::ProjectArtifact { .. } => artifacts.push(rule),
+                Target::ProjectArtifact { .. } => matcher.artifacts.push(rule),
                 Target::LargeFile {} => {
-                    large_files = Some(LargeFiles {
+                    matcher.large_files = Some(LargeFiles {
                         rule,
                         min: u64::MAX,
                         app_data: app_data_folders(folders, os),
                         home: folders.home.as_deref().map(location_key),
                     });
                 }
-                Target::KnownLocation {
-                    locations: specs,
-                    entry,
-                } => {
-                    for spec in specs.iter().filter(|spec| spec.os == os) {
-                        let Some(base) = base_folder(folders, spec.base) else {
-                            continue;
-                        };
-                        if entry.allows(EntryKind::File) {
-                            let depth = join_relative(base, &spec.path).components().count();
-                            let name = spec.path.rsplit('/').next().unwrap_or_default();
-                            file_locations.push((depth, fold_name(name)));
-                        }
-                        if spec.path.contains('*') {
-                            patterns.push(Pattern {
-                                base: location_key(base),
-                                names: spec.path.split('/').map(fold_name).collect(),
-                                rule,
-                            });
-                        } else {
-                            locations.insert(location_key(&join_relative(base, &spec.path)), rule);
-                        }
-                    }
+                Target::KnownLocation { locations, entry } => {
+                    matcher.add_locations(rule, locations, *entry, os, |base| {
+                        base_folder(folders, base)
+                    });
                 }
             }
         }
-        Self {
-            artifacts,
-            locations,
-            patterns,
-            file_locations,
-            large_files,
-            git: GitInfo::new(),
+        matcher
+    }
+
+    /// Matches system rules, with system cleanup's folders, and leaves every other rule out.
+    /// Git isn't read: system cleanup reads nothing the user could have written, and anyone can
+    /// create a repository above a system folder.
+    pub fn system(
+        rules: impl IntoIterator<Item = &'r Rule>,
+        folders: &SystemFolders,
+        os: Os,
+    ) -> Self {
+        let mut matcher = Self::empty(None);
+        for rule in rules.into_iter().filter(|rule| rule.scope == Scope::System) {
+            if let Target::KnownLocation { locations, entry } = &rule.target {
+                matcher.add_locations(rule, locations, *entry, os, |base| {
+                    system_base_folder(folders, base)
+                });
+            }
         }
+        matcher
+    }
+
+    fn empty(git: Option<GitInfo>) -> Self {
+        Self {
+            artifacts: Vec::new(),
+            locations: HashMap::new(),
+            patterns: Vec::new(),
+            file_locations: Vec::new(),
+            large_files: None,
+            git,
+        }
+    }
+
+    /// Adds `rule`'s locations on `os` whose base folder `base_folder` defines.
+    fn add_locations<'f>(
+        &mut self,
+        rule: &'r Rule,
+        locations: &[Location],
+        entry: Entry,
+        os: Os,
+        base_folder: impl Fn(Base) -> Option<&'f Path>,
+    ) {
+        for spec in locations.iter().filter(|spec| spec.os == os) {
+            let Some(base) = base_folder(spec.base) else {
+                continue;
+            };
+            if entry.allows(EntryKind::File) {
+                let depth = join_relative(base, &spec.path).components().count();
+                let name = spec.path.rsplit('/').next().unwrap_or_default();
+                self.file_locations.push((depth, fold_name(name)));
+            }
+            if spec.path.contains('*') {
+                self.patterns.push(Pattern {
+                    base: location_key(base),
+                    names: spec.path.split('/').map(fold_name).collect(),
+                    rule,
+                });
+            } else {
+                self.locations
+                    .insert(location_key(&join_relative(base, &spec.path)), rule);
+            }
+        }
+    }
+
+    fn git_status(&self, path: &Path, kind: EntryKind) -> GitStatus {
+        self.git
+            .as_ref()
+            .map_or(GitStatus::NotChecked, |git| git.status(path, kind))
     }
 
     /// Makes the `large_file` rule, if there is one, match files taking at least `min` bytes on
@@ -194,7 +233,7 @@ impl<'r> Matcher<'r> {
                 path: path.to_path_buf(),
                 kind,
                 evidence: Vec::new(),
-                git: self.git.status(path, kind),
+                git: self.git_status(path, kind),
             });
         }
         if kind != EntryKind::Dir {
@@ -220,7 +259,7 @@ impl<'r> Matcher<'r> {
                 return None;
             }
             let mut evidence = artifact_evidence(path, parent, markers, contains)?;
-            let git = git.get_or_init(|| self.git.status(path, kind));
+            let git = git.get_or_init(|| self.git_status(path, kind));
             let ignored = matches!(git, GitStatus::Known(facts) if facts.ignored);
             if *require_git_ignored && !ignored {
                 return None;
@@ -369,6 +408,21 @@ pub(crate) fn base_folder(folders: &KnownFolders, base: Base) -> Option<&Path> {
             .downloads
             .as_deref()
             .filter(|downloads| folders.home.as_deref() != Some(*downloads)),
+        Base::SystemRoot | Base::ProgramData | Base::Var => None,
+    }
+}
+
+fn system_base_folder(folders: &SystemFolders, base: Base) -> Option<&Path> {
+    match base {
+        Base::SystemRoot => folders.system_root.as_deref(),
+        Base::ProgramData => folders.program_data.as_deref(),
+        Base::Var => folders.var.as_deref(),
+        Base::Home
+        | Base::Cache
+        | Base::Config
+        | Base::DataLocal
+        | Base::Temp
+        | Base::Downloads => None,
     }
 }
 

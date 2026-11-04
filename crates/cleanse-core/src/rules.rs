@@ -18,7 +18,7 @@ use serde::Deserialize;
 
 pub use matcher::{Detection, Listed, Matcher};
 pub(crate) use matcher::{base_folder, wildcard_match};
-pub use schema::{Base, Entry, Location, Os, Rule, RuleTest, Target};
+pub use schema::{Base, Entry, Location, Os, Rule, RuleTest, Scope, Target};
 
 /// The rule files that ship with Cleanse, embedded at build time. A test checks that this list
 /// matches the files in `rules/`.
@@ -60,10 +60,32 @@ const BUILTIN: &[(&str, &str)] = &[
     ),
 ];
 
-/// A validated collection of rules with unique ids.
+/// The system rules that ship with Cleanse, which only system cleanup loads. A test checks that
+/// this list matches the files in `rules/system/`.
+const BUILTIN_SYSTEM: &[(&str, &str)] = &[
+    (
+        "system/crash-reports.toml",
+        include_str!("../rules/system/crash-reports.toml"),
+    ),
+    (
+        "system/logs.toml",
+        include_str!("../rules/system/logs.toml"),
+    ),
+    (
+        "system/temp.toml",
+        include_str!("../rules/system/temp.toml"),
+    ),
+    (
+        "system/updates.toml",
+        include_str!("../rules/system/updates.toml"),
+    ),
+];
+
+/// A validated collection of rules with unique ids, all for one [`Scope`].
 #[derive(Clone, Debug)]
 pub struct RuleSet {
     rules: Vec<Rule>,
+    scope: Scope,
 }
 
 impl RuleSet {
@@ -72,8 +94,28 @@ impl RuleSet {
         Self::from_sources(BUILTIN.iter().copied())
     }
 
-    /// Parses and validates rule files given as `(file name, contents)` pairs.
+    /// The system rules that ship with Cleanse.
+    pub fn builtin_system() -> Result<Self, RuleError> {
+        Self::system_from_sources(BUILTIN_SYSTEM.iter().copied())
+    }
+
+    /// Parses and validates rule files given as `(file name, contents)` pairs. A system rule in
+    /// them is an error.
     pub fn from_sources<'a>(
+        sources: impl IntoIterator<Item = (&'a str, &'a str)>,
+    ) -> Result<Self, RuleError> {
+        Self::load(Scope::User, sources)
+    }
+
+    /// Like [`RuleSet::from_sources`], for system rules. Any other rule is an error.
+    pub fn system_from_sources<'a>(
+        sources: impl IntoIterator<Item = (&'a str, &'a str)>,
+    ) -> Result<Self, RuleError> {
+        Self::load(Scope::System, sources)
+    }
+
+    fn load<'a>(
+        scope: Scope,
         sources: impl IntoIterator<Item = (&'a str, &'a str)>,
     ) -> Result<Self, RuleError> {
         #[derive(Deserialize)]
@@ -95,6 +137,21 @@ impl RuleSet {
                     file: file.to_owned(),
                     message: format!("rule `{}`: {message}", rule.id),
                 };
+                match (scope, rule.scope) {
+                    (Scope::User, Scope::System) => {
+                        return Err(fail(
+                            "system rules are loaded only for system cleanup".into(),
+                        ));
+                    }
+                    (Scope::System, Scope::User) => {
+                        return Err(fail(
+                            "only system rules, with `scope = \"system\"`, are loaded for system \
+                             cleanup"
+                                .into(),
+                        ));
+                    }
+                    (Scope::User, Scope::User) | (Scope::System, Scope::System) => {}
+                }
                 rule.validate().map_err(fail)?;
                 if !ids.insert(rule.id.clone()) {
                     return Err(fail("another rule already uses this id".into()));
@@ -125,11 +182,15 @@ impl RuleSet {
                 rules.push(rule);
             }
         }
-        Ok(Self { rules })
+        Ok(Self { rules, scope })
     }
 
     pub fn rules(&self) -> &[Rule] {
         &self.rules
+    }
+
+    pub fn scope(&self) -> Scope {
+        self.scope
     }
 
     pub fn get(&self, id: &RuleId) -> Option<&Rule> {

@@ -124,7 +124,11 @@ impl<'p> Assessor<'p> {
         }
         match &detection.git {
             GitStatus::Known(git) if git.has_tracked_files => concerns.push(Concern::TrackedByGit),
-            GitStatus::Unreadable { .. } => concerns.push(Concern::RepositoryUnreadable),
+            // Only system cleanup leaves Git unread, and its items are never assessed as the
+            // user's, so one that is can't be shown free of tracked files.
+            GitStatus::Unreadable { .. } | GitStatus::NotChecked => {
+                concerns.push(Concern::RepositoryUnreadable);
+            }
             GitStatus::Known(_) | GitStatus::NotInRepository => {}
         }
         if is_ambiguous(detection)

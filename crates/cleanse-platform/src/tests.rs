@@ -7,7 +7,9 @@ use std::time::{Duration, SystemTime};
 
 use cleanse_model::{EntryKind, FileIdentity};
 
-use crate::{FakeProbe, FileFacts, FileOwner, KnownFolders, Probe, System, process_name};
+use crate::{
+    FakeProbe, FileFacts, FileOwner, KnownFolders, Probe, System, SystemFolders, process_name,
+};
 
 #[cfg(unix)]
 fn link_dir(target: &Path, link: &Path) {
@@ -281,6 +283,67 @@ fn backup_privilege_on() -> bool {
         let mut words = line.split_whitespace();
         words.next() == Some("SeBackupPrivilege") && words.last() == Some("Enabled")
     })
+}
+
+#[test]
+fn finds_the_system_folders() {
+    let folders = SystemFolders::current().unwrap();
+
+    if cfg!(windows) {
+        let system_root = folders.system_root.unwrap();
+        assert!(system_root.join("System32").is_dir(), "{system_root:?}");
+        assert!(folders.program_data.unwrap().is_dir());
+        assert_eq!(folders.var, None);
+    } else if cfg!(target_os = "linux") {
+        assert_eq!(folders.var.as_deref(), Some(Path::new("/var")));
+        assert_eq!((folders.system_root, folders.program_data), (None, None));
+    } else {
+        assert_eq!(folders, SystemFolders::default());
+    }
+}
+
+/// A user can set these for the elevated programs they start, through `HKCU\Environment`.
+#[cfg(windows)]
+const SYSTEM_FOLDER_VARIABLES: [&str; 5] = [
+    "SystemRoot",
+    "windir",
+    "SystemDrive",
+    "ProgramData",
+    "ALLUSERSPROFILE",
+];
+
+#[cfg(windows)]
+#[test]
+fn system_folders_dont_come_from_the_environment() {
+    let fake = std::env::temp_dir().join("cleanse-fake-windows");
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tests::print_system_folders",
+            "--ignored",
+            "--nocapture",
+        ])
+        .envs(SYSTEM_FOLDER_VARIABLES.map(|name| (name, &fake)))
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success(), "{stdout}");
+    let expected = format!("{:?}", SystemFolders::current().unwrap());
+    assert!(stdout.contains(&expected), "{expected} isn't in {stdout}");
+}
+
+#[cfg(windows)]
+#[test]
+#[ignore = "system_folders_dont_come_from_the_environment runs this with the environment changed"]
+fn print_system_folders() {
+    for name in SYSTEM_FOLDER_VARIABLES {
+        assert!(
+            std::env::var_os(name).is_some_and(|value| value.to_string_lossy().contains("fake")),
+            "{name} isn't changed"
+        );
+    }
+    println!("{:?}", SystemFolders::current().unwrap());
 }
 
 #[test]

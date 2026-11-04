@@ -1,0 +1,46 @@
+# The Windows folder's own temp folder, C:\Windows\Temp, is where installers, services, and
+# programs run as an administrator leave files, as other programs do in the user's %TEMP%. It's
+# cleaned the same way: each item directly inside is its own match, kept until nothing in it has
+# changed for 7 days, and nothing since the computer last started. See ../temp.toml for why.
+#
+# Disk Cleanup's "Temporary files" handler covers it too: under
+# HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\VolumeCaches\Temporary Files, its
+# folders are %TEMP%, %WINDIR%\Temp, and others, with files and folders kept for 7 days after
+# they were last opened. What those values mean:
+# https://learn.microsoft.com/en-us/windows/win32/lwef/disk-cleanup
+#
+# Any program can create files here, so system cleanup removes only what the system owns, and
+# never follows links (ADR 0010). C:\Windows\SystemTemp, which only SYSTEM can open, isn't
+# covered.
+[[rule]]
+id = "windows.system_temp"
+scope = "system"
+name = "Windows temporary files"
+category = "temp"
+risk = "safe"
+explain = "Files and folders that installers, services, and programs run as an administrator left in the Windows folder's temp folder. Each is kept until nothing in it has changed for 7 days, and nothing since the computer last started."
+idle_days = 7
+
+[rule.match]
+kind = "known_location"
+entry = "any"
+locations = [{ os = "windows", base = "system_root", path = "Temp/*" }]
+
+[[rule.test]]
+os = "windows"
+tree = [
+    "system_root/Temp/MSI1a2b3.LOG",
+    "system_root/Temp/setup-1234/setup.exe",
+    "system_root/Temp/empty/",
+]
+matches = ["system_root/Temp/MSI1a2b3.LOG", "system_root/Temp/empty", "system_root/Temp/setup-1234"]
+
+[[rule.test]]
+tree = [
+    "system_root/Temp/",
+    "system_root/Temp/.cleanse-tombstone-1-2-3/x",
+    "system_root/SystemTemp/setup.tmp",
+    "system_root/System32/Temp/setup.tmp",
+    "temp/setup.tmp",
+]
+matches = []

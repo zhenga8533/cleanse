@@ -1,0 +1,176 @@
+# Updates that the operating system or its package manager downloaded to install. Where the
+# package manager has its own command for clearing them, the rule points to it: the command
+# takes the package manager's lock first, so it can't remove a package out from under an install
+# that's running.
+
+# Windows Update downloads updates into C:\Windows\SoftwareDistribution\Download, installs them
+# from there, and leaves them behind. Microsoft's troubleshooting for Windows Update deletes the
+# whole SoftwareDistribution folder, with the Windows Update service stopped, so that it starts
+# over:
+# https://learn.microsoft.com/en-us/troubleshoot/windows-client/installing-updates-features-roles/additional-resources-for-windows-update
+# Rules can't stop a service, so each item is kept until nothing in it has changed for 7 days,
+# and nothing since the computer last started, and while a Windows Update worker is running. The
+# service itself runs in svchost, which every service shares, so the programs it starts stand in
+# for it: the Update Orchestrator's MoUsoCoreWorker and UsoClient, wuauclt, and the Windows
+# Modules Installer (TrustedInstaller and TiWorker), which installs updates.
+[[rule]]
+id = "windows.update_downloads"
+scope = "system"
+name = "Windows Update downloads"
+category = "package_caches"
+risk = "regenerable"
+explain = "Updates Windows Update downloaded to install. Each is kept until nothing in it has changed for 7 days, and nothing since the computer last started."
+regenerate = "Windows Update downloads again what it still needs."
+idle_days = 7
+
+[rule.owner]
+app = "Windows Update"
+processes = ["mousocoreworker", "usoclient", "wuauclt", "trustedinstaller", "tiworker"]
+
+[rule.match]
+kind = "known_location"
+entry = "any"
+locations = [{ os = "windows", base = "system_root", path = "SoftwareDistribution/Download/*" }]
+
+[[rule.test]]
+os = "windows"
+tree = [
+    "system_root/SoftwareDistribution/Download/0a1b2c3d4e5f/windows11.0-kb5031455.cab",
+    "system_root/SoftwareDistribution/Download/3f9e8d7c.cab",
+]
+matches = [
+    "system_root/SoftwareDistribution/Download/0a1b2c3d4e5f",
+    "system_root/SoftwareDistribution/Download/3f9e8d7c.cab",
+]
+
+[[rule.test]]
+tree = [
+    "system_root/SoftwareDistribution/Download/",
+    "system_root/SoftwareDistribution/DataStore/DataStore.edb",
+    "system_root/SoftwareDistribution/PostRebootEventCache.V2/x",
+]
+matches = []
+
+# Delivery Optimization keeps updates and Store apps it downloaded, to share them with other PCs.
+# It clears its cache on its own, after 3 days (DOMaxCacheAge) or once it takes 20% of the drive
+# (DOMaxCacheSize), and `Delete-DeliveryOptimizationCache -Force` clears it now:
+# https://learn.microsoft.com/en-us/windows/deployment/do/waas-delivery-optimization-reference
+# https://learn.microsoft.com/en-us/windows/deployment/do/waas-delivery-optimization-monitor
+# Microsoft documents only that the cache is on the system drive. `Get-DOConfig -Verbose` names
+# the folder, as WorkingDirectory, and on Windows 11 23H2 it's the one here. A version that keeps
+# it elsewhere matches nothing.
+[[rule]]
+id = "windows.delivery_optimization"
+scope = "system"
+name = "Delivery Optimization cache"
+category = "package_caches"
+risk = "protected"
+explain = "Updates and apps that Delivery Optimization downloaded and keeps to share with other PCs. It removes them on its own after a few days, and its own command removes them now."
+advise = "Delete-DeliveryOptimizationCache -Force"
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "windows", base = "system_root", path = "ServiceProfiles/NetworkService/AppData/Local/Microsoft/Windows/DeliveryOptimization/Cache" },
+]
+
+[[rule.test]]
+os = "windows"
+tree = [
+    "system_root/ServiceProfiles/NetworkService/AppData/Local/Microsoft/Windows/DeliveryOptimization/Cache/0a1b/content",
+]
+matches = [
+    "system_root/ServiceProfiles/NetworkService/AppData/Local/Microsoft/Windows/DeliveryOptimization/Cache",
+]
+
+[[rule.test]]
+tree = [
+    "system_root/ServiceProfiles/NetworkService/AppData/Local/Microsoft/Windows/DeliveryOptimization/Logs/dosvc.log",
+]
+matches = []
+
+# apt keeps the packages it downloaded in /var/cache/apt/archives. `apt-get clean` removes them,
+# and apt downloads one again when it needs it:
+# https://manpages.debian.org/trixie/apt/apt-get.8.en.html
+[[rule]]
+id = "apt.archives"
+scope = "system"
+name = "apt's downloaded packages"
+category = "package_caches"
+risk = "protected"
+explain = "Packages apt downloaded to install, which it keeps afterwards. apt's own command removes them, and apt downloads any it needs again."
+advise = "sudo apt-get clean"
+
+[rule.match]
+kind = "known_location"
+locations = [{ os = "linux", base = "var", path = "cache/apt/archives" }]
+
+[[rule.test]]
+os = "linux"
+tree = ["var/cache/apt/archives/curl_8.5.0-2ubuntu10_amd64.deb", "var/cache/apt/archives/lock"]
+matches = ["var/cache/apt/archives"]
+
+[[rule.test]]
+tree = ["var/cache/apt/pkgcache.bin", "var/lib/apt/lists/lock"]
+matches = []
+
+# dnf keeps the packages it downloaded only when `keepcache` is on, in /var/cache/dnf, or in
+# /var/cache/libdnf5 for dnf5, which is dnf from Fedora 41 on. The same folders hold repository
+# metadata. `dnf clean packages` removes the packages and keeps the metadata:
+# https://dnf.readthedocs.io/en/latest/command_ref.html
+# https://dnf5.readthedocs.io/en/latest/dnf5.conf.5.html
+# https://dnf5.readthedocs.io/en/latest/commands/clean.8.html
+[[rule]]
+id = "dnf.cache"
+scope = "system"
+name = "dnf's cache"
+category = "package_caches"
+risk = "protected"
+explain = "Repository data dnf downloaded, and packages it kept after installing them. dnf's own command removes the packages."
+advise = "sudo dnf clean packages"
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "linux", base = "var", path = "cache/dnf" },
+    { os = "linux", base = "var", path = "cache/libdnf5" },
+]
+
+[[rule.test]]
+os = "linux"
+tree = [
+    "var/cache/dnf/fedora-1a2b3c/packages/curl-8.6.0-7.fc40.x86_64.rpm",
+    "var/cache/libdnf5/updates-4d5e6f/repodata/x",
+]
+matches = ["var/cache/dnf", "var/cache/libdnf5"]
+
+[[rule.test]]
+tree = ["var/cache/yum/x", "var/lib/dnf/history.sqlite"]
+matches = []
+
+# pacman keeps every package it downloaded in /var/cache/pacman/pkg, old versions too, so they
+# can be installed again. `pacman -Sc` removes all but the installed version of each, after
+# asking:
+# https://man.archlinux.org/man/pacman.8
+# https://man.archlinux.org/man/pacman.conf.5
+[[rule]]
+id = "pacman.cache"
+scope = "system"
+name = "pacman's downloaded packages"
+category = "package_caches"
+risk = "protected"
+explain = "Every package pacman downloaded, including versions no longer installed. pacman's own command removes all but the installed versions."
+advise = "sudo pacman -Sc"
+
+[rule.match]
+kind = "known_location"
+locations = [{ os = "linux", base = "var", path = "cache/pacman/pkg" }]
+
+[[rule.test]]
+os = "linux"
+tree = ["var/cache/pacman/pkg/curl-8.6.0-1-x86_64.pkg.tar.zst"]
+matches = ["var/cache/pacman/pkg"]
+
+[[rule.test]]
+tree = ["var/lib/pacman/local/curl-8.6.0-1/desc"]
+matches = []
