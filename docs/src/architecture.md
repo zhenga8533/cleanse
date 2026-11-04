@@ -78,7 +78,9 @@ installer put it: beside the app in Program Files on Windows, or `/usr/lib/clean
 on Linux, with pkexec's policy. Only administrators or root may be able to change the helper, the
 policy, or any folder above them, or the app doesn't offer system cleanup. The app's
 `system_*` commands start it when one first needs it, and again once it has stopped, so each
-start asks for administrator rights. Until the app's System section comes, nothing calls them.
+start asks for administrator rights. The app's System section calls them through the same Scan,
+Quarantine, and History screens as the user's own cleanup, which take the commands they call
+from a React context.
 
 ## Enforcement
 

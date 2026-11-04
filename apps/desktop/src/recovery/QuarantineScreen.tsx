@@ -14,9 +14,9 @@ import {
   TableBody,
   TableHeader,
 } from "react-aria-components";
-import { purge, quarantined, restore } from "../api";
 import type { Handled } from "../bindings/Handled";
 import type { QuarantineView } from "../bindings/QuarantineView";
+import { useCleanup } from "../cleanup";
 import { ago, bytes, items, now } from "../format";
 import { total } from "../scan/selection";
 import { type Done, HandledReport } from "./HandledReport";
@@ -28,6 +28,7 @@ interface Props {
 
 /** What cleanups set aside, to put back or delete for good, as `cleanse quarantine` does. */
 export function QuarantineScreen({ elevated }: Props) {
+  const { kind, purge, quarantined, restore } = useCleanup();
   const [listing, setListing] = useState<QuarantineView | null>(null);
   const [selected, setSelected] = useState<Selection>(new Set());
   const [running, setRunning] = useState(false);
@@ -68,8 +69,11 @@ export function QuarantineScreen({ elevated }: Props) {
   const allSize = total(entries.map((entry) => entry.size));
   return (
     <>
-      <h1>Quarantine</h1>
-      <p className="muted">Put back, or delete for good, what cleanups set aside.</p>
+      <h1>{kind === "user" ? "Quarantine" : "System quarantine"}</h1>
+      <p className="muted">
+        Put back, or delete for good, what {kind === "user" ? "cleanups" : "system cleanups"} set
+        aside.
+      </p>
       {error && (
         <p role="alert" className="notice error">
           {error}

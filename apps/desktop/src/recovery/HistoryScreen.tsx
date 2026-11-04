@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { Button, Cell, Column, Row, Table, TableBody, TableHeader } from "react-aria-components";
-import { finish, history } from "../api";
 import type { Amount } from "../bindings/Amount";
 import type { Handled } from "../bindings/Handled";
 import type { HistoryView } from "../bindings/HistoryView";
 import type { RunView } from "../bindings/RunView";
+import { useCleanup } from "../cleanup";
 import { ago, bytes, count, items, now } from "../format";
 import { HandledReport } from "./HandledReport";
 
@@ -18,6 +18,7 @@ interface Props {
 
 /** What Cleanse has removed, restored, and purged, as `cleanse history` lists it. */
 export function HistoryScreen({ elevated }: Props) {
+  const { kind, finish, history } = useCleanup();
   const [view, setView] = useState<HistoryView | null>(null);
   const [all, setAll] = useState(false);
   const [running, setRunning] = useState(false);
@@ -50,8 +51,10 @@ export function HistoryScreen({ elevated }: Props) {
   const at = now();
   return (
     <>
-      <h1>History</h1>
-      <p className="muted">What Cleanse has removed, restored, and purged.</p>
+      <h1>{kind === "user" ? "History" : "System history"}</h1>
+      <p className="muted">
+        What {kind === "user" ? "Cleanse" : "system cleanup"} has removed, restored, and purged.
+      </p>
       {error && (
         <p role="alert" className="notice error">
           {error}

@@ -17,8 +17,8 @@ the impact is. We aim to acknowledge reports within a week.
   links, rule files, or plan files
 - A rule file causing anything other than path matching, such as running a command
 - Privilege escalation through system cleanup (`cleanse system`) or the desktop app's
-  elevated helper (once it exists), such as by planting files, links, or folders in the system
-  folders it cleans, or in its data folder
+  elevated helper (`apps/elevate`), such as by planting files, links, or folders in the system
+  folders it cleans, or in its data folder, or by talking to the helper from another program
 - File paths or file contents leaving the machine
 
 A false positive that didn't cause data loss can go through the public **False positive**

@@ -9,10 +9,10 @@ import {
   Heading,
   type Key,
 } from "react-aria-components";
-import { candidates } from "../api";
 import type { Item } from "../bindings/Item";
 import type { RuleTotal } from "../bindings/RuleTotal";
 import type { Section } from "../bindings/Section";
+import { useCleanup } from "../cleanup";
 import { bytes, count, items, modified, now, size } from "../format";
 import { removable, SECTIONS } from "./sections";
 import { type Chosen, choose } from "./selection";
@@ -33,6 +33,7 @@ interface Props {
 
 /** A rule's items in one section, listed once it's opened. */
 export function RuleGroup({ scan, section, rule, version, chosen, onChoose, onShow }: Props) {
+  const { candidates } = useCleanup();
   const [isExpanded, setExpanded] = useState(false);
   const [shown, setShown] = useState<{ items: Item[]; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -51,7 +52,7 @@ export function RuleGroup({ scan, section, rule, version, chosen, onChoose, onSh
     return () => {
       current = false;
     };
-  }, [isExpanded, scan, section, rule.rule, version]);
+  }, [isExpanded, scan, section, rule.rule, version, candidates]);
 
   function showMore(): void {
     if (!shown) {

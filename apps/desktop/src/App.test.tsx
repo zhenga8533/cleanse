@@ -5,12 +5,17 @@ import { expect, it } from "vitest";
 import { App } from "./App";
 import type { AppInfo } from "./bindings/AppInfo";
 import type { Folders } from "./bindings/Folders";
+import type { SystemStatus } from "./bindings/SystemStatus";
 
-function answer(info: AppInfo): void {
+const SYSTEM: SystemStatus = { supported: true, unavailable: null, running: false };
+
+function answer(info: AppInfo, system = SYSTEM): void {
   mockIPC((cmd) => {
     switch (cmd) {
       case "app_info":
         return info;
+      case "system_status":
+        return system;
       case "folders":
         return { folders: ["C:\\Users\\sample"], home: true } satisfies Folders;
       default:
@@ -60,4 +65,28 @@ it("moves between sections with the keyboard", async () => {
     "true",
   );
   expect(screen.getByRole("heading", { name: "Disk usage" })).toBeTruthy();
+});
+
+it("has a System section where system cleanup is supported", async () => {
+  answer({ version: "1.2.3", elevated: false });
+
+  render(<App />);
+
+  expect(await screen.findByRole("tab", { name: "System" })).toBeTruthy();
+});
+
+it("has no System section on macOS, which has no system cleanup", async () => {
+  answer(
+    { version: "1.2.3", elevated: false },
+    {
+      supported: false,
+      unavailable: "system cleanup is only for Windows and Linux",
+      running: false,
+    },
+  );
+
+  render(<App />);
+
+  await screen.findByText("1.2.3");
+  expect(screen.queryByRole("tab", { name: "System" })).toBeNull();
 });

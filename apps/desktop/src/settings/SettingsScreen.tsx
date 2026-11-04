@@ -37,28 +37,7 @@ export function SettingsScreen() {
             <p className="muted">
               What Cleanse recognizes. Each says why what it matches is safe to remove.
             </p>
-            <Table
-              aria-label="Rules"
-              className="table"
-              onRowAction={(key) => setShown(String(key))}
-            >
-              <TableHeader>
-                <Column isRowHeader className="column">
-                  Name
-                </Column>
-                <Column className="column">Category</Column>
-                <Column className="column">Tier</Column>
-              </TableHeader>
-              <TableBody items={rules}>
-                {(rule) => (
-                  <Row id={rule.id} className="table-row opens">
-                    <Cell className="cell">{rule.name}</Cell>
-                    <Cell className="cell">{rule.category}</Cell>
-                    <Cell className="cell">{RISKS[rule.risk]}</Cell>
-                  </Row>
-                )}
-              </TableBody>
-            </Table>
+            <RuleTable rules={rules} onShow={setShown} />
           </section>
         )}
       </div>
@@ -130,7 +109,31 @@ function Doctor({ settings, rules }: { settings: SettingsView; rules: number }) 
   );
 }
 
-function RuleDetails({ rule, onClose }: { rule: RuleView; onClose: () => void }) {
+/** Rules by name, category, and tier, each of which opens its details. */
+export function RuleTable({ rules, onShow }: { rules: RuleView[]; onShow: (id: string) => void }) {
+  return (
+    <Table aria-label="Rules" className="table" onRowAction={(key) => onShow(String(key))}>
+      <TableHeader>
+        <Column isRowHeader className="column">
+          Name
+        </Column>
+        <Column className="column">Category</Column>
+        <Column className="column">Tier</Column>
+      </TableHeader>
+      <TableBody items={rules}>
+        {(rule) => (
+          <Row id={rule.id} className="table-row opens">
+            <Cell className="cell">{rule.name}</Cell>
+            <Cell className="cell">{rule.category}</Cell>
+            <Cell className="cell">{RISKS[rule.risk]}</Cell>
+          </Row>
+        )}
+      </TableBody>
+    </Table>
+  );
+}
+
+export function RuleDetails({ rule, onClose }: { rule: RuleView; onClose: () => void }) {
   const heading = useRef<HTMLHeadingElement>(null);
   const opener = useRef<Element | null>(null);
 

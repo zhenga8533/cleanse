@@ -84,6 +84,12 @@ own files. System cleanup is kept apart from them
 
 It isn't available on macOS.
 
+The [desktop app](#desktop-app)'s System section does the same, through the same screens as for
+your own files. The app itself never runs as an administrator. A separate part of it does system
+cleanup, and asks for administrator rights when it starts, through the UAC prompt on Windows or
+polkit's password prompt on Linux. Only the MSI and the deb install it, where only administrators
+or root can change it, so the AppImage has no System section and points to `cleanse system`.
+
 `sudo` and an administrator terminal run whichever `cleanse` comes first on your path, with full
 control. If yours is in a folder your own account can change, as the shell installer's is,
 anything you run could replace it. So for system cleanup, use a copy that only administrators or

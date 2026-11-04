@@ -8,6 +8,7 @@ import type { Item } from "../bindings/Item";
 import type { ItemPage } from "../bindings/ItemPage";
 import type { ScanProgress } from "../bindings/ScanProgress";
 import type { Section } from "../bindings/Section";
+import type { SystemStatus } from "../bindings/SystemStatus";
 import {
   details,
   folder,
@@ -42,9 +43,20 @@ export function installMocks(): void {
     return undefined;
   };
 
-  mockIPC(async (cmd, payload) => {
+  mockIPC(async (asked, payload) => {
     const args = (payload ?? {}) as Record<string, unknown>;
+    // System cleanup's commands answer with the same sample data as the user's own, which is
+    // enough to review how its screens look. `?system=unavailable` shows the section without it.
+    const cmd = asked.replace(/^system_/, "");
     switch (cmd) {
+      case "status":
+        return {
+          supported: true,
+          unavailable: new URLSearchParams(window.location.search).has("system")
+            ? "this copy of Cleanse wasn't installed with its system cleanup helper"
+            : null,
+          running: false,
+        } satisfies SystemStatus;
       case "app_info":
         return { version: "0.0.0-preview", elevated: false } satisfies AppInfo;
       case "folders":
@@ -147,7 +159,7 @@ export function installMocks(): void {
       case "rules":
         return RULE_VIEWS;
       default:
-        throw new Error(`The browser preview has no sample data for ${cmd}`);
+        throw new Error(`The browser preview has no sample data for ${asked}`);
     }
   });
 

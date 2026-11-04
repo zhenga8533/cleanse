@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { Button } from "react-aria-components";
-import * as api from "../api";
+import { folders as loadFolders } from "../api";
 import type { CleanReport } from "../bindings/CleanReport";
 import type { Folders } from "../bindings/Folders";
 import type { Results } from "../bindings/Results";
 import type { ScanProgress } from "../bindings/ScanProgress";
+import { useCleanup } from "../cleanup";
 import { count, items, size } from "../format";
 import { Activity } from "./Activity";
 import { CleanDialog } from "./CleanDialog";
@@ -24,11 +25,16 @@ interface Props {
   /** Cleanse runs elevated, so it won't remove anything. */
   elevated: boolean;
   /** Told the scan whose results show, whenever they change. */
-  onResults: (scan: number) => void;
+  onResults?: (scan: number) => void;
 }
 
-/** Choose folders, scan them, look through what was found, and clean up. */
-export function ScanScreen({ elevated, onResults }: Props) {
+/**
+ * Choose folders, scan them, look through what was found, and clean up. System cleanup's scans
+ * cover the system's own folders, so there are none to choose.
+ */
+export function ScanScreen({ elevated, onResults = () => {} }: Props) {
+  const cleanup = useCleanup();
+  const own = cleanup.kind === "user";
   const [folders, setFolders] = useState<Folders | null>(null);
   const [running, setRunning] = useState<Running>({ kind: "nothing" });
   const [results, setResults] = useState<Results | null>(null);
@@ -42,8 +48,10 @@ export function ScanScreen({ elevated, onResults }: Props) {
   const fail = (error: unknown) => setError(String(error));
 
   useEffect(() => {
-    api.folders().then(setFolders, (error: unknown) => setError(String(error)));
-  }, []);
+    if (own) {
+      loadFolders().then(setFolders, (error: unknown) => setError(String(error)));
+    }
+  }, [own]);
 
   async function scan(): Promise<void> {
     setError(null);
@@ -51,7 +59,7 @@ export function ScanScreen({ elevated, onResults }: Props) {
     setShown(null);
     setRunning({ kind: "scan", progress: null, cancelling: false });
     try {
-      const found = await api.scan((progress) =>
+      const found = await cleanup.scan((progress) =>
         // Progress can arrive after the scan has finished, and is stale by then.
         setRunning((running) => (running.kind === "scan" ? { ...running, progress } : running)),
       );
@@ -77,13 +85,13 @@ export function ScanScreen({ elevated, onResults }: Props) {
     setRunning({ kind: "cleanup", done: 0, total: ids.length, cancelling: false });
     try {
       setReport(
-        await api.clean(results.scan, ids, (done) =>
+        await cleanup.clean(results.scan, ids, (done) =>
           setRunning((running) => (running.kind === "cleanup" ? { ...running, done } : running)),
         ),
       );
       setChosen(new Map());
       setShown(null);
-      setResults(await api.summary(results.scan));
+      setResults(await cleanup.summary(results.scan));
       onResults(results.scan);
       setVersion((version) => version + 1);
     } catch (error) {
@@ -97,7 +105,7 @@ export function ScanScreen({ elevated, onResults }: Props) {
     setRunning((running) =>
       running.kind === "nothing" ? running : { ...running, cancelling: true },
     );
-    api.cancel().catch(fail);
+    cleanup.cancel().catch(fail);
   }
 
   const busy = running.kind !== "nothing";
@@ -105,15 +113,19 @@ export function ScanScreen({ elevated, onResults }: Props) {
   return (
     <div className={shown === null ? "scan" : "scan with-details"}>
       <div className="scan-main">
-        <h1>Scan</h1>
-        <p className="muted">Find what can be removed, and why each item is safe to remove.</p>
+        <h1>{own ? "Scan" : "System scan"}</h1>
+        <p className="muted">
+          {own
+            ? "Find what can be removed, and why each item is safe to remove."
+            : "Find what can be removed from the system's own folders, and why each item is safe to remove."}
+        </p>
         {folders && (
           <FolderList folders={folders} isDisabled={busy} onChange={setFolders} onError={fail} />
         )}
         <div className="row">
           <Button
             className="button primary"
-            isDisabled={busy || !folders || folders.folders.length === 0}
+            isDisabled={busy || (own && (!folders || folders.folders.length === 0))}
             onPress={() => void scan()}
           >
             {results ? "Scan again" : "Scan"}
