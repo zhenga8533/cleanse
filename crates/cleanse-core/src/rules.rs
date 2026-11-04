@@ -17,7 +17,7 @@ use cleanse_model::RuleId;
 use serde::Deserialize;
 
 pub use matcher::{Detection, Listed, Matcher};
-pub(crate) use matcher::{base_folder, wildcard_match};
+pub(crate) use matcher::{base_folder, system_base_folder, wildcard_match};
 pub use schema::{Base, Entry, Location, Os, Rule, RuleTest, Scope, Target};
 
 /// The rule files that ship with Cleanse, embedded at build time. A test checks that this list

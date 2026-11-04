@@ -128,6 +128,29 @@ fn exceptions_can_name_folders_by_pattern() {
     }
 }
 
+#[test]
+fn exceptions_cant_be_reached_through_parent_folders() {
+    let windows = fake_path(&["Windows"]);
+    let mut system = location(windows.clone(), Reach::Subtree, "Windows");
+    system.except.push("Temp/*".to_owned());
+    let policy = policy(vec![system]);
+    let check = |relative: &[&str]| {
+        let mut path = windows.clone();
+        path.extend(relative);
+        policy.check(&path, None, &[])
+    };
+
+    assert_eq!(check(&["Temp", "setup.log"]), None);
+    for protected in [
+        &["Temp", ".."][..],
+        &["Temp", "..", "System32"],
+        &["Temp", "..", "System32", "config", "SAM"],
+        &["Temp", "x", "..", "..", "System32"],
+    ] {
+        assert_eq!(check(protected), Some("Windows"), "{protected:?}");
+    }
+}
+
 #[cfg(any(windows, target_os = "macos"))]
 #[test]
 fn protection_ignores_case_where_the_os_does() {

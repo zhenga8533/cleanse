@@ -412,7 +412,7 @@ pub(crate) fn base_folder(folders: &KnownFolders, base: Base) -> Option<&Path> {
     }
 }
 
-fn system_base_folder(folders: &SystemFolders, base: Base) -> Option<&Path> {
+pub(crate) fn system_base_folder(folders: &SystemFolders, base: Base) -> Option<&Path> {
     match base {
         Base::SystemRoot => folders.system_root.as_deref(),
         Base::ProgramData => folders.program_data.as_deref(),

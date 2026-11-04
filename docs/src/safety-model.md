@@ -108,6 +108,36 @@ a large file is measured again the same way, against the size in the settings th
   each file's length, or nothing for cloud files that aren't downloaded. Compression isn't
   reflected, and hard links are only noticed in pnpm's store and for items that are single files.
 
+## System cleanup
+
+> Status: its rules and safety checks are written. It can't be run yet.
+
+System cleanup removes clutter from the operating system's own folders, such as the Windows temp
+folder, and runs only as an administrator or root
+([ADR 0010](adr/0010-elevated-system-cleanup.md)). Anyone can create files in some of those
+folders, so it never mixes with the user's cleanup, and adds gates of its own:
+
+- **Its own rules.** It uses only [system rules](rules.md#system-rules), which name items directly
+  inside fixed system folders.
+- **Its own protected policy.** The Windows folder, `ProgramData`, and `/var` are protected
+  whole. The only exceptions are the items system rules name, never the folders holding them:
+  what's in `C:\Windows\Temp` can be removed, but not `C:\Windows\Temp` itself. The exceptions are
+  listed with the safety checks, and a test keeps them the same as the rules' locations. A path
+  through `..` never reaches an exception.
+- **Checked folders.** Each folder items are removed from, and every folder from its base down to
+  it, must be a real folder, not a link, that the system owns: SYSTEM, a service's account, or
+  Administrators on Windows, and root on Linux. An item is removed only from directly inside one,
+  and only while that folder is still the one that was checked. The folders come from the
+  operating system, never from environment variables.
+- **The system's throughout.** The item must belong to the system, and so must everything inside
+  it. A link or special file inside, or a file with other hard links, keeps it too.
+- **No Git.** It doesn't read Git, since anyone can create a repository above a system folder.
+- **Advice.** A rule that only advises a command, such as `apt-get clean`, isn't checked this
+  way, since nothing it matches is removed.
+
+The other gates apply as they do to the user's cleanup: activity, owner programs, idle days,
+contents that couldn't be read, and other filesystems mounted inside.
+
 ## Execution and recovery
 
 - Nothing is removed while Cleanse runs as an administrator or root, or if it can't start a

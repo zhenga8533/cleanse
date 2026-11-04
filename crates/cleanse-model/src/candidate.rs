@@ -166,6 +166,18 @@ pub enum Concern {
     OwnedByAnotherUser,
     /// The item's owner couldn't be read, so it may belong to another account.
     OwnerUnknown,
+    /// System cleanup found an item that doesn't belong to the operating system.
+    NotSystemOwned,
+    /// System cleanup found something inside the item that doesn't belong to the operating
+    /// system, or whose owner couldn't be read.
+    ContentsNotSystemOwned,
+    /// System cleanup found links or special files inside the item.
+    LinksInside,
+    /// System cleanup found that the item, or a file inside it, has other hard links.
+    HardLinked,
+    /// System cleanup found the item somewhere other than directly inside one of the system's
+    /// folders that it checked.
+    OutsideSystemFolders,
     /// The item's file identity couldn't be read, so it can't be re-checked before removal.
     Unverifiable,
     /// The project the item belongs to has uncommitted changes.
@@ -235,6 +247,15 @@ impl fmt::Display for Concern {
             ),
             Self::OwnedByAnotherUser => f.write_str("Belongs to another account"),
             Self::OwnerUnknown => f.write_str("Its owner couldn't be read"),
+            Self::NotSystemOwned => f.write_str("It doesn't belong to the system"),
+            Self::ContentsNotSystemOwned => f.write_str(
+                "Something inside it doesn't belong to the system, or its owner couldn't be read",
+            ),
+            Self::LinksInside => f.write_str("It has links or special files inside"),
+            Self::HardLinked => f.write_str("It, or a file inside it, has other hard links"),
+            Self::OutsideSystemFolders => {
+                f.write_str("It isn't directly in a system folder that checked out as the system's")
+            }
             Self::Unverifiable => f.write_str(
                 "Its file identity couldn't be read, so it can't be re-checked before removal",
             ),
@@ -382,6 +403,11 @@ mod tests {
             },
             Concern::OwnedByAnotherUser,
             Concern::OwnerUnknown,
+            Concern::NotSystemOwned,
+            Concern::ContentsNotSystemOwned,
+            Concern::LinksInside,
+            Concern::HardLinked,
+            Concern::OutsideSystemFolders,
             Concern::Unverifiable,
             Concern::ChangedRecently {
                 days_ago: 2,

@@ -4,10 +4,10 @@ use std::path::Path;
 use std::sync::{Mutex, PoisonError};
 use std::time::SystemTime;
 
-use cleanse_model::{EntryKind, Size};
+use cleanse_model::{Concern, EntryKind, Size};
 use cleanse_platform::listed_facts;
 
-use super::{Descend, walk};
+use super::{Descend, Entry, walk};
 
 /// File names that suggest credentials, keys, or databases. An ambiguous build folder holding
 /// one may be more than build output, and a large file named like one may be someone's only
@@ -62,10 +62,21 @@ pub struct Measurement {
     pub vm_disk: Option<String>,
     /// Some of the data is shared with files elsewhere through hard links.
     pub shared: bool,
+    /// What [`measure_with`]'s check found wrong with entries inside, each once.
+    pub inside: Vec<Concern>,
 }
 
 /// Walks everything below `path` without following links, or measures it alone if it's a file.
 pub fn measure(path: &Path) -> io::Result<Measurement> {
+    measure_with(path, |_| None)
+}
+
+/// Like [`measure`], and also asks `check` about each entry inside, from many threads at once,
+/// recording what it says is wrong.
+pub fn measure_with<F>(path: &Path, check: F) -> io::Result<Measurement>
+where
+    F: Fn(&Entry<'_>) -> Option<Concern> + Sync,
+{
     let metadata = fs::symlink_metadata(path)?;
     if metadata.is_file() {
         let mut measurement = Measurement::default();
@@ -77,7 +88,13 @@ pub fn measure(path: &Path) -> io::Result<Measurement> {
     started.changed(metadata.modified().ok());
     let measurement = Mutex::new(started);
     let report = walk(path, |entry| {
+        let concern = check(entry);
         let mut measurement = measurement.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(concern) = concern
+            && !measurement.inside.contains(&concern)
+        {
+            measurement.inside.push(concern);
+        }
         match entry.kind {
             EntryKind::File => {
                 let in_store = cfg!(windows) && in_pnpm_store(entry.path, path);

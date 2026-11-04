@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf, Prefix};
 
 use cleanse_model::FileIdentity;
-use cleanse_platform::{KnownFolders, Probe};
+use cleanse_platform::{KnownFolders, Probe, SystemFolders};
 
-use crate::rules::{Base, base_folder, wildcard_match};
+use crate::rules::{Base, base_folder, system_base_folder, wildcard_match};
 
 /// How far a protected location's protection reaches.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,6 +72,50 @@ const DISPOSABLE: &[(&str, &[&str])] = &[(
     ],
 )];
 
+/// What system cleanup may remove inside the operating system's folders, which are otherwise
+/// protected whole (ADR 0010). They're exactly the locations of the system rules that remove
+/// things, as a test checks, and never the folders holding them: what's in `C:\Windows\Temp` can
+/// go, but `C:\Windows\Temp` stays protected. Only [`ProtectedPolicy::for_system_cleanup`] has
+/// these exceptions.
+pub(super) const SYSTEM_DISPOSABLE: &[(Base, &[&str])] = &[
+    (
+        Base::SystemRoot,
+        &[
+            "MEMORY.DMP",
+            "Minidump/*.dmp",
+            "SoftwareDistribution/Download/*",
+            "Temp/*",
+        ],
+    ),
+    (
+        Base::ProgramData,
+        &["Microsoft/Windows/WER/ReportArchive/*"],
+    ),
+    (Base::Var, &["crash/*.crash", "lib/systemd/coredump/core.*"]),
+];
+
+/// The locations of the system rules that only advise a command. They aren't protected as
+/// locations either, so the command is shown, and since those rules are `protected`, nothing they
+/// match is ever removed.
+pub(super) const SYSTEM_ADVISED: &[(Base, &[&str])] = &[
+    (
+        Base::SystemRoot,
+        &[
+            "ServiceProfiles/NetworkService/AppData/Local/Microsoft/Windows/DeliveryOptimization/Cache",
+        ],
+    ),
+    (
+        Base::Var,
+        &[
+            "cache/apt/archives",
+            "cache/dnf",
+            "cache/libdnf5",
+            "cache/pacman/pkg",
+            "log/journal",
+        ],
+    ),
+];
+
 /// The caches in each profile of a Chromium-based browser: the HTTP cache and compiled scripts.
 /// Profiles are named `Default`, then `Profile 1`, `Profile 2`, and so on
 /// (`chrome/common/chrome_constants.h`), and both caches are in each profile's cache folder
@@ -125,6 +169,28 @@ impl ProtectedPolicy {
             except: Vec::new(),
         }));
         Self::new(locations, probe)
+    }
+
+    /// The protected locations for system cleanup: the operating system's folders, whole, apart
+    /// from what system rules remove or advise about in them. The folders are the ones the
+    /// operating system reports, never environment variables.
+    pub fn for_system_cleanup(folders: &SystemFolders, probe: &dyn Probe) -> Self {
+        let mut locations = Locations::default();
+        for (base, what) in [
+            (Base::SystemRoot, "Windows"),
+            (Base::ProgramData, "shared app data"),
+            (Base::Var, "system files"),
+        ] {
+            if let Some(folder) = system_base_folder(folders, base) {
+                let except = SYSTEM_DISPOSABLE
+                    .iter()
+                    .chain(SYSTEM_ADVISED)
+                    .filter(|(listed, _)| *listed == base)
+                    .flat_map(|(_, inside)| inside.iter().map(|&inner| inner.to_owned()));
+                locations.subtree_except(folder.to_path_buf(), what, except);
+            }
+        }
+        Self::new(locations.0, probe)
     }
 
     /// Reads the identities of the locations, and their ancestors, that exist.
@@ -231,11 +297,16 @@ impl ProtectedPolicy {
     }
 
     /// Whether the path is inside one of entry `index`'s exceptions, spelled the usual way. A
-    /// path reaching it another way, such as through a short name, stays protected.
+    /// path reaching it another way, such as through a short name, stays protected, and so does
+    /// one through `.` or `..`, which `*` would otherwise match: `Temp/../System32` isn't in
+    /// `Temp/*`.
     fn excepted(&self, index: usize, path_key: &[String]) -> bool {
         let Some(inside) = path_key.strip_prefix(self.entries[index].0.as_slice()) else {
             return false;
         };
+        if inside.iter().any(|name| name == "." || name == "..") {
+            return false;
+        }
         self.except_keys[index].iter().any(|except| {
             except.len() <= inside.len()
                 && except
