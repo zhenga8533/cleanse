@@ -1,6 +1,6 @@
 use cleanse_engine::{Engine, Entry, Os, Rule, Target};
 
-use crate::{format, write_json};
+use crate::{command, format, write_json};
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
@@ -35,7 +35,12 @@ pub fn run(engine: &Engine, args: &Args) -> crate::Result {
                 .rules()
                 .iter()
                 .find(|rule| rule.id.0 == *id)
-                .ok_or_else(|| format!("there's no rule `{id}`; `cleanse rules` lists them"))?;
+                .ok_or_else(|| {
+                    format!(
+                        "there's no rule `{id}`; `{}` lists them",
+                        command(engine, "rules")
+                    )
+                })?;
             if args.json {
                 return write_json(rule);
             }

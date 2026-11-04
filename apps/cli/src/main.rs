@@ -10,6 +10,7 @@ mod history;
 mod quarantine;
 mod rules;
 mod scan;
+mod system;
 
 use std::error::Error;
 use std::io::{self, IsTerminal};
@@ -18,7 +19,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
-use cleanse_engine::Engine;
+use cleanse_engine::{Engine, Mode};
 use serde::Serialize;
 
 type Result = std::result::Result<(), Box<dyn Error>>;
@@ -45,6 +46,15 @@ fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| since.as_secs())
+}
+
+/// The command line for Cleanse's `name` command, such as `clean`, in the engine's cleanup:
+/// `cleanse clean`, or `cleanse system clean`.
+fn command(engine: &Engine, name: &str) -> String {
+    match engine.mode() {
+        Mode::User => format!("cleanse {name}"),
+        Mode::System => format!("cleanse system {name}"),
+    }
 }
 
 /// Prints `value` as JSON on stdout, for `--json`.
@@ -87,6 +97,9 @@ enum Command {
     Rules(rules::Args),
     /// Show what Cleanse knows about this system
     Doctor(doctor::Args),
+    /// Clean the operating system's own folders, such as Windows' temp folder, as an
+    /// administrator or root
+    System(system::Args),
     /// Print completions for a shell, to load from its profile
     Completions {
         /// The shell to print completions for.
@@ -102,6 +115,8 @@ fn main() -> ExitCode {
             print_completions(*shell);
             Ok(ExitCode::SUCCESS)
         }
+        // System cleanup reads no settings.
+        Command::System(args) => system::run(args),
         command => Engine::new()
             .map_err(Into::into)
             .and_then(|engine| run(&engine, command)),
@@ -127,6 +142,7 @@ fn run(engine: &Engine, command: &Command) -> std::result::Result<ExitCode, Box<
         Command::Explain(args) => explain::run(engine, args).map(|()| ExitCode::SUCCESS),
         Command::Rules(args) => rules::run(engine, args).map(|()| ExitCode::SUCCESS),
         Command::Doctor(args) => doctor::run(engine, args).map(|()| ExitCode::SUCCESS),
+        Command::System(args) => system::run(args),
         Command::Completions { shell } => {
             print_completions(*shell);
             Ok(ExitCode::SUCCESS)

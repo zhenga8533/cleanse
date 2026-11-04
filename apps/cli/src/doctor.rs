@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use cleanse_engine::{Engine, Probe, cloud_sync_detection};
+use cleanse_engine::{Engine, Probe, SystemFolders, cloud_sync_detection};
 use cleanse_model::RuleId;
 use serde::Serialize;
 
@@ -67,7 +67,32 @@ pub fn run(engine: &Engine, args: &Args) -> crate::Result {
     folder("App data", folders.data_local.as_deref());
     folder("Settings", folders.config.as_deref());
     folder("Temp", Some(&folders.temp));
+
+    let system_folders = SystemFolders::current()?;
+    println!("System cleanup: {}", system_cleanup());
+    // Each OS has only some of them, so the others aren't listed.
+    for (name, path) in [
+        ("Windows", system_folders.system_root.clone()),
+        ("ProgramData", system_folders.program_data.clone()),
+        ("var", system_folders.var.clone()),
+        ("Its data", system_folders.cleanse_data()),
+    ] {
+        if let Some(path) = path {
+            println!("  {name:<12} {}", path.display());
+        }
+    }
     Ok(())
+}
+
+/// How to run system cleanup here, if it runs here at all.
+fn system_cleanup() -> &'static str {
+    if cfg!(windows) {
+        "`cleanse system`, from a terminal opened with Run as administrator"
+    } else if cfg!(target_os = "linux") {
+        "`sudo cleanse system`"
+    } else {
+        "only on Windows and Linux"
+    }
 }
 
 fn print_json(engine: &Engine) -> crate::Result {
@@ -82,6 +107,19 @@ fn print_json(engine: &Engine) -> crate::Result {
         cloud_sync_detection: &'static str,
         settings: Settings<'a>,
         folders: Folders,
+        system_cleanup: SystemCleanup,
+    }
+
+    /// `None` for folders the system doesn't have, and macOS has none of them.
+    #[derive(Serialize)]
+    struct SystemCleanup {
+        /// Whether system cleanup runs on this operating system, when elevated.
+        available: bool,
+        system_root: Option<String>,
+        program_data: Option<String>,
+        var: Option<String>,
+        /// Where system cleanup keeps its journal and quarantine.
+        data: Option<String>,
     }
 
     #[derive(Serialize)]
@@ -109,6 +147,7 @@ fn print_json(engine: &Engine) -> crate::Result {
     let lossy = |path: &Path| path.to_string_lossy().into_owned();
     let folders = engine.system().known_folders();
     let config = engine.config();
+    let system_folders = SystemFolders::current()?;
     write_json(&Report {
         version: env!("CARGO_PKG_VERSION"),
         os: std::env::consts::OS,
@@ -131,6 +170,13 @@ fn print_json(engine: &Engine) -> crate::Result {
             data_local: folders.data_local.as_deref().map(lossy),
             config: folders.config.as_deref().map(lossy),
             temp: lossy(&folders.temp),
+        },
+        system_cleanup: SystemCleanup {
+            available: cfg!(any(windows, target_os = "linux")),
+            system_root: system_folders.system_root.as_deref().map(lossy),
+            program_data: system_folders.program_data.as_deref().map(lossy),
+            var: system_folders.var.as_deref().map(lossy),
+            data: system_folders.cleanse_data().as_deref().map(lossy),
         },
     })
 }

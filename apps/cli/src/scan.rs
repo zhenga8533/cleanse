@@ -11,12 +11,23 @@ use cleanse_engine::{Engine, Progress, RuleSet, Scan, advice, save_plan};
 use cleanse_model::{Candidate, Category, PlanItem, Risk, RuleId, SavedPlan, Size};
 use serde::Serialize;
 
-use crate::{format, now};
+use crate::{command, format, now};
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
     /// Folders to scan. Defaults to your home folder.
     paths: Vec<PathBuf>,
+    #[command(flatten)]
+    report: Report,
+    /// Save what can be removed to a plan file, to review and then remove with `cleanse apply`.
+    #[arg(long, value_name = "FILE")]
+    save: Option<PathBuf>,
+}
+
+/// What a scan lists, and how, which `cleanse system scan` shares. System cleanup always scans
+/// the system's folders, and saves no plan, since it reads no plan files.
+#[derive(Debug, clap::Args)]
+pub(crate) struct Report {
     /// Print the results as JSON.
     #[arg(long)]
     json: bool,
@@ -26,9 +37,6 @@ pub struct Args {
     /// Also list everything that's kept, and why.
     #[arg(long)]
     show_protected: bool,
-    /// Save what can be removed to a plan file, to review and then remove with `cleanse apply`.
-    #[arg(long, value_name = "FILE")]
-    save: Option<PathBuf>,
     #[command(flatten)]
     categories: Categories,
 }
@@ -65,16 +73,28 @@ impl Categories {
 const LARGEST: usize = 10;
 
 pub fn run(engine: &Engine, args: &Args) -> crate::Result {
-    let scan = scan(engine, &args.paths, &args.categories)?;
-    if args.json {
-        print_json(engine, &scan)?;
-    } else {
-        print_human(engine, &scan, args);
-    }
+    let scan = scan(engine, &args.paths, &args.report.categories)?;
+    report(engine, &scan, &args.report, args.save.is_some())?;
     if let Some(path) = &args.save {
-        save(&scan, path, args.json)?;
+        save(&scan, path, args.report.json)?;
     }
     Ok(())
+}
+
+/// Scans the system's folders, for `cleanse system scan`.
+pub(crate) fn run_system(engine: &Engine, args: &Report) -> crate::Result {
+    let scan = scan(engine, &[], &args.categories)?;
+    report(engine, &scan, args, false)
+}
+
+/// Prints the scan, as JSON or for people. `saving` says a plan is about to be saved too.
+fn report(engine: &Engine, scan: &Scan, args: &Report, saving: bool) -> crate::Result {
+    if args.json {
+        print_json(engine, scan)
+    } else {
+        print_human(engine, scan, args, saving);
+        Ok(())
+    }
 }
 
 /// Saves the scan as a plan, and says how to apply it: on stderr when stdout holds JSON.
@@ -207,7 +227,7 @@ pub(crate) fn print_scanned(scan: &Scan) {
     }
 }
 
-fn print_human(engine: &Engine, scan: &Scan, args: &Args) {
+fn print_human(engine: &Engine, scan: &Scan, args: &Report, saving: bool) {
     print_scanned(scan);
 
     let mut by_size: Vec<&Candidate> = scan.candidates.iter().collect();
@@ -247,10 +267,13 @@ fn print_human(engine: &Engine, scan: &Scan, args: &Args) {
             }
         );
     }
-    if args.save.is_some() {
+    if saving {
         println!("\nNothing was removed.");
     } else {
-        println!("\nNothing was removed. Run `cleanse clean` to choose what to remove.");
+        println!(
+            "\nNothing was removed. Run `{}` to choose what to remove.",
+            command(engine, "clean")
+        );
     }
 }
 

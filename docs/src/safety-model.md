@@ -110,7 +110,7 @@ a large file is measured again the same way, against the size in the settings th
 
 ## System cleanup
 
-> Status: its rules, safety checks, and executor are written. It can't be run yet.
+> Status: implemented in the command line, as `cleanse system`. The desktop app's comes next.
 
 System cleanup removes clutter from the operating system's own folders, such as the Windows temp
 folder, and runs only as an administrator or root

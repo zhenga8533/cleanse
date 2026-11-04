@@ -12,7 +12,8 @@ removes anything you haven't approved.
 > and `cleanse clean` deletes what you approve, or quarantines it so `cleanse restore` can put it
 > back. The [desktop app](#desktop-app) does the same in a window.
 > [v0.5.0](https://github.com/zhenga8533/cleanse/releases/tag/v0.5.0) has prebuilt binaries and
-> installers for both, not yet signed. Signed builds and system cleanup come next.
+> installers for both, not yet signed. [System cleanup](#system-cleanup) is on `main`, for the
+> next release.
 
 ## Try it
 
@@ -57,6 +58,36 @@ disabled_rules = ["unity.library"]
 # Files this large or larger are offered for review: MiB, GiB, or TiB, at least 64 MiB.
 large_file_size = "1 GiB"
 ```
+
+## System cleanup
+
+`cleanse system` cleans the operating system's own folders, which only an administrator or root
+can: Windows' temp folder, Windows Update's downloads, sent error reports, and memory dumps, and
+on Linux, core dumps and Ubuntu's crash reports. For package caches, Delivery Optimization's
+cache, and the systemd journal, it shows the command that cleans them.
+
+```sh
+sudo cleanse system scan     # on Windows, without sudo, in a terminal opened with Run as administrator
+sudo cleanse system clean    # choose what to remove, then confirm; each item is checked again first
+cleanse system rules         # what it looks for, which needs no elevation
+```
+
+`explain`, `quarantine`, `restore`, and `history` work under `cleanse system` as they do for your
+own files. System cleanup is kept apart from them
+([ADR 0010](docs/src/adr/0010-elevated-system-cleanup.md)):
+
+- It has rules of its own, and reads no settings or plan files.
+- Its journal and quarantine are in a folder only administrators or root can open:
+  `ProgramData\Cleanse` on Windows, `/var/lib/cleanse` on Linux.
+- It looks only directly inside the folders its rules name.
+- It removes an item only if the item, and everything in it, belongs to the system.
+
+It isn't available on macOS.
+
+`sudo` and an administrator terminal run whichever `cleanse` comes first on your path, with full
+control. If yours is in a folder your own account can change, as the shell installer's is,
+anything you run could replace it. So for system cleanup, use a copy that only administrators or
+root can change, such as one in `/usr/local/bin` or `C:\Program Files`.
 
 ## Desktop app
 

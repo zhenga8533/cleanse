@@ -5,14 +5,14 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::atomic::AtomicBool;
 
-use cleanse_engine::{Applied, ApplyError, Engine, Probe, Scan};
+use cleanse_engine::{Applied, Engine, Scan};
 use cleanse_model::{Candidate, Disposal, Outcome, Plan, PlanItem, Risk, Size};
 use inquire::{Confirm, InquireError, MultiSelect};
 use serde::Serialize;
 
 use crate::exit::{ABORTED, PARTIAL, USAGE};
 use crate::scan::{self, Reporter, items};
-use crate::{can_ask, format, now, write_json};
+use crate::{can_ask, command, format, now, write_json};
 
 /// How many items the selection list shows at once.
 const PAGE_SIZE: usize = 15;
@@ -21,6 +21,14 @@ const PAGE_SIZE: usize = 15;
 pub struct Args {
     /// Folders to clean. Defaults to your home folder.
     paths: Vec<PathBuf>,
+    #[command(flatten)]
+    choice: Choosing,
+}
+
+/// How the items to remove are chosen, which `cleanse system clean` shares. System cleanup
+/// always cleans the system's folders.
+#[derive(Debug, clap::Args)]
+pub(crate) struct Choosing {
     /// Delete the preselected items up to --max-risk without asking. Items with warnings are
     /// never preselected.
     #[arg(long, requires = "max_risk")]
@@ -54,6 +62,15 @@ impl From<MaxRisk> for Risk {
 }
 
 pub fn run(engine: &Engine, args: &Args) -> Result<ExitCode, Box<dyn Error>> {
+    clean(engine, &args.paths, &args.choice)
+}
+
+/// Cleans the system's folders, for `cleanse system clean`.
+pub(crate) fn run_system(engine: &Engine, args: &Choosing) -> Result<ExitCode, Box<dyn Error>> {
+    clean(engine, &[], args)
+}
+
+fn clean(engine: &Engine, paths: &[PathBuf], args: &Choosing) -> Result<ExitCode, Box<dyn Error>> {
     let asking = !args.yes && !args.dry_run;
     // Checked before scanning, so nobody waits through a scan only to be turned away.
     if asking && !can_ask() {
@@ -63,11 +80,11 @@ pub fn run(engine: &Engine, args: &Args) -> Result<ExitCode, Box<dyn Error>> {
         );
         return Ok(ExitCode::from(USAGE));
     }
-    if !args.dry_run && engine.system().is_elevated() {
-        return Err(ApplyError::Elevated.into());
+    if !args.dry_run {
+        engine.check_can_change()?;
     }
 
-    let scan = scan::scan(engine, &args.paths, &args.categories)?;
+    let scan = scan::scan(engine, paths, &args.categories)?;
     if args.json {
         let max = args.max_risk.map_or(Risk::Regenerable, Risk::from);
         print_dry_run(&scan, &preselected(&removable(&scan), max))?;
@@ -126,7 +143,7 @@ pub(crate) fn remove(engine: &Engine, plan: &Plan) -> Result<ExitCode, Box<dyn E
         &AtomicBool::new(false),
     );
     reporter.clear();
-    Ok(report(plan, &applied?))
+    Ok(report(engine, plan, &applied?))
 }
 
 /// What can be removed, largest first: everything but what's protected.
@@ -276,7 +293,7 @@ fn list(candidates: &[&Candidate]) {
 }
 
 /// Prints what happened to each item, and whether all of them were dealt with.
-fn report(plan: &Plan, applied: &Applied) -> ExitCode {
+fn report(engine: &Engine, plan: &Plan, applied: &Applied) -> ExitCode {
     let mut deleted = 0;
     let mut freed = Size::default();
     let mut quarantined = 0;
@@ -305,10 +322,11 @@ fn report(plan: &Plan, applied: &Applied) -> ExitCode {
     );
     if quarantined > 0 {
         println!(
-            "Quarantined {}, {}. Run `cleanse quarantine` to see or restore them; they take \
-             space until you purge them.",
+            "Quarantined {}, {}. Run `{}` to see or restore them; they take space until you \
+             purge them.",
             items(quarantined),
-            format::bytes(held.on_disk)
+            format::bytes(held.on_disk),
+            command(engine, "quarantine")
         );
     }
     for (title, list) in [("Skipped", &skipped), ("Couldn't remove", &failed)] {

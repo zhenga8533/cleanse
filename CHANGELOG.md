@@ -6,6 +6,22 @@ All notable changes to Cleanse are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- `cleanse system` cleans the operating system's own folders, as an administrator or root:
+  Windows' temp folder, Windows Update's downloads, sent error reports, and memory dumps, and
+  on Linux, core dumps and Ubuntu's crash reports. For apt's, dnf's, pacman's, and Delivery
+  Optimization's caches, and the systemd journal, it shows the command that cleans them. `scan`,
+  `clean`, `explain`, `quarantine`, `restore`, `history`, and `rules` work as they do for your
+  own files.
+  - It has rules of its own, and reads no settings or plan files.
+  - Its journal and quarantine are in a folder only administrators or root can open:
+    `ProgramData\Cleanse` or `/var/lib/cleanse`.
+  - It looks only directly in the folders its rules name, and removes an item only if it, and
+    everything in it, belongs to the system.
+  - Without elevation it says how to run it, and on macOS that it's for Windows and Linux.
+    `cleanse doctor` says how to run it, and where its folders are.
+
 ### Changed
 
 - Items that belong to another account or to the operating system are kept, as are items whose
