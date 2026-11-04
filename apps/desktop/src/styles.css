@@ -179,6 +179,31 @@ code {
   display: none;
 }
 
+/* System cleanup's own parts, along the top of its section. */
+.subnav {
+  display: flex;
+  gap: 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.system-note {
+  margin: 12px 0 24px;
+}
+
+.subpanel {
+  outline: none;
+}
+
+.subpanel[data-focus-visible] {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.subpanel[data-inert] {
+  display: none;
+}
+
 .row {
   display: flex;
   flex-wrap: wrap;
@@ -831,6 +856,7 @@ code {
 
   .react-aria-Tab[data-focus-visible],
   .panel[data-focus-visible],
+  .subpanel[data-focus-visible],
   .button[data-focus-visible],
   .group-trigger[data-focus-visible],
   .item[data-focus-visible] {

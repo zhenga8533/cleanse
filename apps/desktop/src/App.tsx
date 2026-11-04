@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { type Key, Tab, TabList, TabPanel, Tabs } from "react-aria-components";
-import { appInfo } from "./api";
+import { appInfo, systemStatus } from "./api";
 import type { AppInfo } from "./bindings/AppInfo";
+import type { SystemStatus } from "./bindings/SystemStatus";
 import { DiskScreen, type Latest } from "./disk/DiskScreen";
 import { HistoryScreen } from "./recovery/HistoryScreen";
 import { QuarantineScreen } from "./recovery/QuarantineScreen";
 import { ScanScreen } from "./scan/ScanScreen";
 import { SettingsScreen } from "./settings/SettingsScreen";
+import { SystemScreen } from "./system/SystemScreen";
 
 const SECTIONS = [
   {
@@ -30,6 +32,11 @@ const SECTIONS = [
     description: "What Cleanse has removed, restored, and purged.",
   },
   {
+    id: "system",
+    title: "System",
+    description: "Clean up the operating system's own folders, as an administrator.",
+  },
+  {
     id: "settings",
     title: "Settings",
     description: "Your settings file, the folders Cleanse knows, and its rules.",
@@ -38,7 +45,7 @@ const SECTIONS = [
 
 type Startup =
   | { state: "loading" }
-  | { state: "ready"; info: AppInfo }
+  | { state: "ready"; info: AppInfo; system: SystemStatus }
   | { state: "failed"; error: string };
 
 export function App() {
@@ -47,11 +54,16 @@ export function App() {
   const [latest, setLatest] = useState<Latest | null>(null);
 
   useEffect(() => {
-    appInfo().then(
-      (info) => setStartup({ state: "ready", info }),
+    Promise.all([appInfo(), systemStatus()]).then(
+      ([info, system]) => setStartup({ state: "ready", info, system }),
       (error: unknown) => setStartup({ state: "failed", error: String(error) }),
     );
   }, []);
+
+  // System cleanup is for Windows and Linux, so on macOS there's no System section.
+  const sections = SECTIONS.filter(
+    (section) => section.id !== "system" || (startup.state === "ready" && startup.system.supported),
+  );
 
   return (
     <div className="app">
@@ -77,7 +89,7 @@ export function App() {
         onSelectionChange={setSection}
       >
         <TabList aria-label="Sections" className="nav">
-          {SECTIONS.map((section) => (
+          {sections.map((section) => (
             <Tab key={section.id} id={section.id}>
               {section.title}
             </Tab>
@@ -111,13 +123,19 @@ export function App() {
             <HistoryScreen elevated={startup.info.elevated} />
           </TabPanel>
         )}
+        {/* Kept like Scan, so a system scan's results are too. */}
+        {startup.state === "ready" && startup.system.supported && (
+          <TabPanel id="system" className="panel" shouldForceMount>
+            <SystemScreen status={startup.system} />
+          </TabPanel>
+        )}
         {startup.state === "ready" && (
           <TabPanel id="settings" className="panel">
             <SettingsScreen />
           </TabPanel>
         )}
         {startup.state !== "ready" &&
-          SECTIONS.map((section) => (
+          sections.map((section) => (
             <TabPanel key={section.id} id={section.id} className="panel">
               <h1>{section.title}</h1>
               <p className="muted">{section.description}</p>

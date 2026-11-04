@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "react-aria-components";
-import { explain } from "../api";
 import type { Details } from "../bindings/Details";
+import { useCleanup } from "../cleanup";
 import { ago, count, now, size } from "../format";
 import { RISKS, SECTIONS } from "./sections";
 
@@ -13,6 +13,7 @@ interface Props {
 
 /** Everything known about one item, as `cleanse explain` gives it. */
 export function ItemDetails({ scan, item, onClose }: Props) {
+  const { explain } = useCleanup();
   const [details, setDetails] = useState<Details | null>(null);
   const [error, setError] = useState<string | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -30,7 +31,7 @@ export function ItemDetails({ scan, item, onClose }: Props) {
     return () => {
       current = false;
     };
-  }, [scan, item]);
+  }, [scan, item, explain]);
 
   // The panel opens from a list, so focus follows it there.
   useEffect(() => {

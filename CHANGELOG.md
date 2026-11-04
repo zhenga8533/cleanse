@@ -21,6 +21,15 @@ All notable changes to Cleanse are documented here. The format is based on
     everything in it, belongs to the system.
   - Without elevation it says how to run it, and on macOS that it's for Windows and Linux.
     `cleanse doctor` says how to run it, and where its folders are.
+- The desktop app's System section does system cleanup too: scan, clean, quarantine, history,
+  and rules, on the same screens as for your own files. The app's window still never runs as an
+  administrator. A separate helper does the work, which the MSI and the deb install where only
+  administrators or root can change it.
+  - It asks for administrator rights when it starts, through the UAC prompt on Windows or
+    polkit's password prompt on Linux, and again after ten minutes without use.
+  - It accepts only the app that started it, and only the IDs of what its own scan found.
+  - The AppImage doesn't have it, and points to `cleanse system` instead. There's no System
+    section on macOS.
 
 ### Changed
 
