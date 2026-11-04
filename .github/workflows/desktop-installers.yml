@@ -110,9 +110,11 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           dpkg-deb -c target/release/bundle/deb/*.deb | tee contents.txt
-          grep -E '^drwxr-xr-x root/root .* \./usr/lib/cleanse/$' contents.txt
-          grep -E '^-rwxr-xr-x root/root .* \./usr/lib/cleanse/cleanse-elevate$' contents.txt
-          grep -E '^-rw-r--r-- root/root .* \./usr/share/polkit-1/actions/io\.github\.zhenga8533\.cleanse\.policy$' contents.txt
+          # Tauri's tar headers give owners as numbers, and paths without `./` or a trailing slash.
+          owner='(root/root|0/0)'
+          grep -E "^drwxr-xr-x $owner .* (\./)?usr/lib/cleanse/?\$" contents.txt
+          grep -E "^-rwxr-xr-x $owner .* (\./)?usr/lib/cleanse/cleanse-elevate\$" contents.txt
+          grep -E "^-rw-r--r-- $owner .* (\./)?usr/share/polkit-1/actions/io\.github\.zhenga8533\.cleanse\.policy\$" contents.txt
           appimage=$(realpath target/release/bundle/appimage/*.AppImage)
           chmod +x "$appimage"
           (cd "$RUNNER_TEMP" && "$appimage" --appimage-extract > /dev/null)
