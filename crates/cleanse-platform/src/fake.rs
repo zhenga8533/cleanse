@@ -13,6 +13,7 @@ pub struct FakeProbe {
     elevated: bool,
     running: HashSet<String>,
     booted_at: Option<SystemTime>,
+    admins_only: HashSet<PathBuf>,
 }
 
 impl FakeProbe {
@@ -48,6 +49,13 @@ impl FakeProbe {
         self.booted_at = Some(time);
         self
     }
+
+    /// Reports `path` as something only administrators or root can change.
+    #[must_use]
+    pub fn admins_only(mut self, path: impl Into<PathBuf>) -> Self {
+        self.admins_only.insert(path.into());
+        self
+    }
 }
 
 impl Probe for FakeProbe {
@@ -81,6 +89,12 @@ impl Probe for FakeProbe {
 
     fn is_private_dir(&self, _: &Path) -> io::Result<bool> {
         Ok(false)
+    }
+
+    /// Paths the test didn't set up as files are reported as missing.
+    fn only_admins_can_change(&self, path: &Path) -> io::Result<bool> {
+        self.inspect(path)?;
+        Ok(self.admins_only.contains(path))
     }
 }
 
@@ -161,5 +175,11 @@ impl Probe for StagedSystem {
     fn is_private_dir(&self, path: &Path) -> io::Result<bool> {
         let metadata = std::fs::symlink_metadata(path)?;
         Ok(metadata.is_dir() && self.private.contains(path))
+    }
+
+    /// Never, since system cleanup never asks.
+    fn only_admins_can_change(&self, path: &Path) -> io::Result<bool> {
+        std::fs::symlink_metadata(path)?;
+        Ok(false)
     }
 }

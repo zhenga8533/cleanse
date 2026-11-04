@@ -5,6 +5,7 @@
 //! cleanup and system cleanup each have an executor of their own (ADR 0010).
 
 mod delete;
+pub mod helper;
 mod history;
 mod journal;
 mod plan_file;

@@ -17,42 +17,47 @@ use std::ptr;
 
 use cleanse_model::{EntryKind, FileIdentity};
 use windows_sys::Win32::Foundation::{
-    ERROR_CLOUD_FILE_NOT_UNDER_SYNC_ROOT, ERROR_INVALID_FUNCTION, ERROR_SUCCESS, HANDLE, LocalFree,
+    ERROR_CLOUD_FILE_NOT_UNDER_SYNC_ROOT, ERROR_INVALID_FUNCTION, ERROR_SUCCESS, GENERIC_ALL,
+    GENERIC_WRITE, HANDLE, LocalFree,
 };
 use windows_sys::Win32::Security::Authorization::{GetSecurityInfo, SE_FILE_OBJECT};
 use windows_sys::Win32::Security::{
     ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_SIZE_INFORMATION, AclSizeInformation, CopySid,
     DACL_SECURITY_INFORMATION, EqualSid, GetAce, GetAclInformation, GetLengthSid,
     GetSecurityDescriptorControl, GetSidIdentifierAuthority, GetSidSubAuthority,
-    GetSidSubAuthorityCount, GetTokenInformation, IsWellKnownSid, OBJECT_SECURITY_INFORMATION,
-    OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SE_DACL_PROTECTED,
-    SECURITY_NT_AUTHORITY, TOKEN_ELEVATION, TOKEN_QUERY, TOKEN_USER, TokenElevation, TokenUser,
-    WELL_KNOWN_SID_TYPE, WinBuiltinAdministratorsSid, WinLocalServiceSid, WinLocalSystemSid,
-    WinNetworkServiceSid,
+    GetSidSubAuthorityCount, GetTokenInformation, INHERIT_ONLY_ACE, IsWellKnownSid,
+    OBJECT_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
+    SE_DACL_PROTECTED, SECURITY_NT_AUTHORITY, TOKEN_ELEVATION, TOKEN_QUERY, TOKEN_USER,
+    TokenElevation, TokenUser, WELL_KNOWN_SID_TYPE, WinBuiltinAdministratorsSid,
+    WinLocalServiceSid, WinLocalSystemSid, WinNetworkServiceSid,
 };
 use windows_sys::Win32::Storage::CloudFilters::{
     CF_SYNC_ROOT_BASIC_INFO, CF_SYNC_ROOT_INFO_BASIC, CfGetSyncRootInfoByHandle,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_OFFLINE, FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS,
-    FILE_ATTRIBUTE_RECALL_ON_OPEN, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO,
+    DELETE, FILE_APPEND_DATA, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_OFFLINE,
+    FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS, FILE_ATTRIBUTE_RECALL_ON_OPEN,
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_DELETE_CHILD,
     FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_ID_INFO,
     FILE_INFO_BY_HANDLE_CLASS, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, FILE_STANDARD_INFO, FileAttributeTagInfo, FileIdInfo, FileStandardInfo,
-    GetFileInformationByHandleEx, GetLongPathNameW, GetVolumeInformationByHandleW, READ_CONTROL,
+    FILE_SHARE_WRITE, FILE_STANDARD_INFO, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, FILE_WRITE_EA,
+    FileAttributeTagInfo, FileIdInfo, FileStandardInfo, GetFileInformationByHandleEx,
+    GetLongPathNameW, GetVolumeInformationByHandleW, READ_CONTROL, WRITE_DAC, WRITE_OWNER,
 };
 use windows_sys::Win32::System::Registry::{
     HKEY_LOCAL_MACHINE, RRF_NOEXPAND, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ, RegGetValueW,
 };
 use windows_sys::Win32::System::SystemInformation::GetSystemWindowsDirectoryW;
 use windows_sys::Win32::System::SystemServices::{
-    ACCESS_ALLOWED_ACE_TYPE, ACCESS_DENIED_ACE_TYPE, FILE_PERSISTENT_ACLS,
+    ACCESS_ALLOWED_ACE_TYPE, ACCESS_DENIED_ACE_TYPE, FILE_PERSISTENT_ACLS, MAXIMUM_ALLOWED,
     SECURITY_SERVICE_ID_BASE_RID,
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 use crate::{FileFacts, FileOwner, ListedFacts, SystemFolders};
 
+#[cfg(any(test, feature = "privileged"))]
+pub mod launch;
 #[cfg(any(test, feature = "privileged"))]
 pub mod pipe;
 
@@ -266,6 +271,92 @@ pub(crate) fn is_private_dir(path: &Path) -> io::Result<bool> {
         return Ok(false);
     }
 
+    for entry in entries(&security)? {
+        match entry.kind {
+            ACCESS_DENIED_ACE_TYPE => {}
+            ACCESS_ALLOWED_ACE_TYPE if entry.who == Who::AdministratorsOrSystem => {}
+            // Anyone else, and object, callback, and other entries, which could let someone in
+            // on conditions.
+            _ => return Ok(false),
+        }
+    }
+    Ok(true)
+}
+
+/// Whether `path` is a real file or folder, not a link, that only SYSTEM, Administrators, and
+/// services such as `NT SERVICE\TrustedInstaller` can change: one of them owns it, and its access
+/// list lets no one else change it, what's in it, or who may. Others may read and run it.
+pub(crate) fn only_admins_can_change(path: &Path) -> io::Result<bool> {
+    const CHANGE: u32 = FILE_WRITE_DATA
+        | FILE_APPEND_DATA
+        | FILE_WRITE_EA
+        | FILE_DELETE_CHILD
+        | FILE_WRITE_ATTRIBUTES
+        | DELETE
+        | WRITE_DAC
+        | WRITE_OWNER
+        | GENERIC_WRITE
+        | GENERIC_ALL
+        | MAXIMUM_ALLOWED;
+
+    let file = open(path, FILE_READ_ATTRIBUTES | READ_CONTROL)?;
+    let tag: FILE_ATTRIBUTE_TAG_INFO = query(&file)?;
+    if tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Ok(false);
+    }
+    let security = Security::read(
+        &file,
+        OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+    )?;
+    // Whoever owns it can change its access list.
+    if security.owner.is_null() || who(security.owner) == Who::Other || security.dacl.is_null() {
+        return Ok(false);
+    }
+    for entry in entries(&security)? {
+        match entry.kind {
+            ACCESS_DENIED_ACE_TYPE => {}
+            // Entries only for what's made inside it don't apply to it.
+            _ if entry.flags & INHERIT_ONLY_ACE != 0 => {}
+            ACCESS_ALLOWED_ACE_TYPE if entry.who != Who::Other || entry.mask & CHANGE == 0 => {}
+            _ => return Ok(false),
+        }
+    }
+    Ok(true)
+}
+
+/// An entry in an access list.
+struct Entry {
+    kind: u32,
+    flags: u32,
+    mask: u32,
+    /// Who an allowed or denied entry is for. Other kinds keep that elsewhere, so it's `Other`.
+    who: Who,
+}
+
+/// Who an access list's entry or an owner is, as far as trusting them with what runs as an
+/// administrator goes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Who {
+    AdministratorsOrSystem,
+    /// A service's own account, such as `NT SERVICE\TrustedInstaller`, which Windows makes for
+    /// services administrators install.
+    Service,
+    Other,
+}
+
+/// `sid` must be a valid SID.
+fn who(sid: PSID) -> Who {
+    if is_administrators_or_system(sid) {
+        Who::AdministratorsOrSystem
+    } else if is_service(sid) {
+        Who::Service
+    } else {
+        Who::Other
+    }
+}
+
+/// The entries of `security`'s access list, which must have been read and not be null.
+fn entries(security: &Security) -> io::Result<Vec<Entry>> {
     let mut size = ACL_SIZE_INFORMATION::default();
     // SAFETY: `dacl` is a valid access list, and `size` is a writable `ACL_SIZE_INFORMATION`
     // (what `AclSizeInformation` returns) of exactly the size passed.
@@ -280,6 +371,7 @@ pub(crate) fn is_private_dir(path: &Path) -> io::Result<bool> {
     if ok == 0 {
         return Err(io::Error::last_os_error());
     }
+    let mut entries = Vec::new();
     for index in 0..size.AceCount {
         let mut ace = ptr::null_mut();
         // SAFETY: `dacl` is a valid access list with more than `index` entries, and `ace` is
@@ -289,21 +381,24 @@ pub(crate) fn is_private_dir(path: &Path) -> io::Result<bool> {
         }
         // SAFETY: `GetAce` gave a pointer to an entry in the access list, which starts with a
         // header.
-        let kind = u32::from(unsafe { (*ace.cast::<ACE_HEADER>()).AceType });
-        match kind {
-            ACCESS_DENIED_ACE_TYPE => {}
-            ACCESS_ALLOWED_ACE_TYPE => {
-                // SAFETY: the entry is an `ACCESS_ALLOWED_ACE`, whose SID starts at `SidStart`.
-                let sid = unsafe { (&raw mut (*ace.cast::<ACCESS_ALLOWED_ACE>()).SidStart).cast() };
-                if !is_administrators_or_system(sid) {
-                    return Ok(false);
-                }
-            }
-            // Object, callback, and other entries could let someone in on conditions.
-            _ => return Ok(false),
-        }
+        let header = unsafe { *ace.cast::<ACE_HEADER>() };
+        let kind = u32::from(header.AceType);
+        let (mask, who) = if kind == ACCESS_ALLOWED_ACE_TYPE || kind == ACCESS_DENIED_ACE_TYPE {
+            let ace = ace.cast::<ACCESS_ALLOWED_ACE>();
+            // SAFETY: allowed and denied entries are both laid out as an `ACCESS_ALLOWED_ACE`,
+            // whose SID starts at `SidStart`.
+            unsafe { ((*ace).Mask, who((&raw mut (*ace).SidStart).cast())) }
+        } else {
+            (0, Who::Other)
+        };
+        entries.push(Entry {
+            kind,
+            flags: u32::from(header.AceFlags),
+            mask,
+            who,
+        });
     }
-    Ok(true)
+    Ok(entries)
 }
 
 /// `sid` must be a valid SID.
@@ -499,16 +594,32 @@ fn windows_folder() -> io::Result<PathBuf> {
     }
 }
 
-/// The `ProgramData` folder as the registry records it, usually `%SystemDrive%\ProgramData`. The
-/// shell's known-folder lookup expands that from the environment, so here `%SystemDrive%` is the
-/// drive of `windows`, the Windows folder, which is what it means. Any other variable is refused.
+/// The `ProgramData` folder as the registry records it, usually `%SystemDrive%\ProgramData`.
 fn program_data(windows: &Path) -> io::Result<PathBuf> {
-    const SYSTEM_DRIVE: &str = "%SystemDrive%";
-
-    let recorded = registry_text(
+    recorded_folder(
+        windows,
         r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList",
         "ProgramData",
-    )?;
+    )
+}
+
+/// Where Windows installs programs for every user, usually `C:\Program Files`, as the registry
+/// records it.
+pub(crate) fn program_files() -> io::Result<PathBuf> {
+    recorded_folder(
+        &windows_folder()?,
+        r"SOFTWARE\Microsoft\Windows\CurrentVersion",
+        "ProgramFilesDir",
+    )
+}
+
+/// A folder as the registry records it in `value` under `key`. The shell's known-folder lookup
+/// expands `%SystemDrive%` in it from the environment, so here that's the drive of `windows`, the
+/// Windows folder, which is what it means. Any other variable is refused.
+fn recorded_folder(windows: &Path, key: &str, value: &str) -> io::Result<PathBuf> {
+    const SYSTEM_DRIVE: &str = "%SystemDrive%";
+
+    let recorded = registry_text(key, value)?;
     let Some(Component::Prefix(drive)) = windows.components().next() else {
         return Err(io::Error::other(format!(
             "the Windows folder, {}, isn't on a drive",
@@ -527,7 +638,7 @@ fn program_data(windows: &Path) -> io::Result<PathBuf> {
     let folder = PathBuf::from(folder);
     if rest.contains('%') || !folder.is_absolute() {
         return Err(io::Error::other(format!(
-            "the registry records ProgramData as {recorded}, which isn't a full path or names an \
+            "the registry records {value} as {recorded}, which isn't a full path or names an \
              environment variable other than {SYSTEM_DRIVE}"
         )));
     }

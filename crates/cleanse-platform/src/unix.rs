@@ -71,6 +71,17 @@ pub(crate) fn is_private_dir(path: &Path) -> io::Result<bool> {
     Ok(private && above_safe)
 }
 
+/// Whether `path` is a real file or folder, not a link, that root owns and no one else may write.
+pub(crate) fn only_admins_can_change(path: &Path) -> io::Result<bool> {
+    /// Group and others' permission to write.
+    const OTHERS_WRITE: u32 = 0o022;
+
+    let metadata = fs::symlink_metadata(path)?;
+    Ok(!metadata.file_type().is_symlink()
+        && metadata.uid() == 0
+        && metadata.mode() & OTHERS_WRITE == 0)
+}
+
 /// Creates the folder at `path`, which mustn't exist, so that only its owner can open it.
 #[cfg(any(test, feature = "privileged"))]
 #[expect(

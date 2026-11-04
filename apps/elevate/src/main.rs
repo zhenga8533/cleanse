@@ -1,6 +1,10 @@
 //! The elevated helper's program. The desktop app starts it as an administrator or root to do
 //! system cleanup for its window, which never runs elevated (ADR 0010).
 
+// No console window on Windows. It talks to the window over pipes, and when the window starts it,
+// there's no one to read what it writes to its standard error.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 use std::error::Error;
 use std::process::ExitCode;
 use std::sync::Arc;

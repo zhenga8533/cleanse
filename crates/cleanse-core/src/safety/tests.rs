@@ -927,6 +927,10 @@ impl Probe for Running {
     fn is_private_dir(&self, path: &Path) -> io::Result<bool> {
         self.system.is_private_dir(path)
     }
+
+    fn only_admins_can_change(&self, path: &Path) -> io::Result<bool> {
+        self.system.only_admins_can_change(path)
+    }
 }
 
 /// A fake home whose `.claude` holds every folder a Claude Code rule matches, plus data that
