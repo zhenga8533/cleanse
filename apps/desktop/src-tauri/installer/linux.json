@@ -1,0 +1,13 @@
+{
+  "$schema": "../../node_modules/@tauri-apps/cli/config.schema.json",
+  "bundle": {
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/lib/cleanse/cleanse-elevate": "binaries/cleanse-elevate-x86_64-unknown-linux-gnu",
+          "/usr/share/polkit-1/actions/io.github.zhenga8533.cleanse.policy": "installer/io.github.zhenga8533.cleanse.policy"
+        }
+      }
+    }
+  }
+}

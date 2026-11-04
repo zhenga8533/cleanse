@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+  "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!--
+  Lets pkexec start the desktop app's elevated helper, which does system cleanup for the app's
+  window (ADR 0010). It asks for an administrator's password every time, rather than
+  auth_admin_keep's few minutes, so no other program can reuse an approval.
+-->
+<policyconfig>
+  <vendor>Cleanse</vendor>
+  <vendor_url>https://github.com/zhenga8533/cleanse</vendor_url>
+  <action id="io.github.zhenga8533.cleanse.system-cleanup">
+    <description>Clean up the system's own folders</description>
+    <message>Cleanse needs an administrator's password to clean up the system's own folders.</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/cleanse/cleanse-elevate</annotate>
+  </action>
+</policyconfig>

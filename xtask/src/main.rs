@@ -8,6 +8,8 @@
 mod gen_tree;
 
 use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 const USAGE: &str = "\
@@ -17,6 +19,7 @@ tasks:
   ci                                run the same checks as CI: rustfmt, clippy, tests, cargo-deny, typos, taplo
   desktop                           run the desktop app's checks: clippy, tests, bindings, Biome, types, frontend tests and build
   gen-tree <dir> [--entries <n>]    create a synthetic directory tree for benchmarks (default 200000 entries)
+  helper                            build the desktop app's elevated helper for its installers, in apps/desktop/src-tauri/binaries
   help                              show this message";
 
 struct Check {
@@ -31,6 +34,10 @@ const PNPM: &str = if cfg!(windows) { "pnpm.cmd" } else { "pnpm" };
 
 /// Where the desktop app's TypeScript bindings are, which its Rust tests write.
 const BINDINGS: &str = "apps/desktop/src/bindings";
+
+/// Where the desktop app's installers take its elevated helper from, as
+/// `apps/desktop/src-tauri/installer/` says.
+const STAGED_HELPER: &str = "apps/desktop/src-tauri/binaries";
 
 const CI_CHECKS: &[Check] = &[
     Check {
@@ -177,6 +184,7 @@ fn main() -> ExitCode {
         Some("ci") => ci(),
         Some("desktop") => desktop(),
         Some("gen-tree") => gen_tree::run(&args[1..]),
+        Some("helper") => helper(),
         Some("help" | "-h" | "--help") => {
             println!("{USAGE}");
             ExitCode::SUCCESS
@@ -204,6 +212,65 @@ fn desktop() -> ExitCode {
     }
     failed.extend(run_checks(DESKTOP_FRONTEND_CHECKS));
     report(&failed)
+}
+
+/// Builds the elevated helper for release, and puts it where the installers take it from, named
+/// as Tauri's `externalBin` wants: with the target it's built for, such as
+/// `cleanse-elevate-x86_64-pc-windows-msvc.exe`.
+fn helper() -> ExitCode {
+    let host = match host_target() {
+        Ok(host) => host,
+        Err(err) => {
+            eprintln!("could not tell what this computer builds for: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    eprintln!("==> building cleanse-elevate");
+    match Command::new("cargo")
+        .args([
+            "build",
+            "--release",
+            "--locked",
+            "--package",
+            "cleanse-elevate",
+        ])
+        .status()
+    {
+        Ok(status) if status.success() => {}
+        Ok(_) => return ExitCode::FAILURE,
+        Err(err) => {
+            eprintln!("could not run `cargo`: {err}");
+            return ExitCode::FAILURE;
+        }
+    }
+    let exe = env::consts::EXE_SUFFIX;
+    let target =
+        env::var_os("CARGO_TARGET_DIR").map_or_else(|| PathBuf::from("target"), PathBuf::from);
+    let built = target.join("release").join(format!("cleanse-elevate{exe}"));
+    let staged = Path::new(STAGED_HELPER).join(format!("cleanse-elevate-{host}{exe}"));
+    if let Err(err) = fs::create_dir_all(STAGED_HELPER).and_then(|()| fs::copy(&built, &staged)) {
+        eprintln!(
+            "could not copy {} to {}: {err}",
+            built.display(),
+            staged.display()
+        );
+        return ExitCode::FAILURE;
+    }
+    eprintln!("staged {}", staged.display());
+    ExitCode::SUCCESS
+}
+
+/// The target this computer's Rust toolchain builds for by default, as `rustc -vV` says.
+fn host_target() -> Result<String, String> {
+    let output = Command::new("rustc")
+        .arg("-vV")
+        .output()
+        .map_err(|err| format!("could not run `rustc`: {err}"))?;
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| line.strip_prefix("host: "))
+        .map(str::to_owned)
+        .ok_or_else(|| "`rustc -vV` didn't say".to_owned())
 }
 
 /// Runs every check, even after a failure, so one run reports everything that needs fixing,
