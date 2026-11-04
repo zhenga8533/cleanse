@@ -17,6 +17,8 @@ on:
       - .github/workflows/desktop-installers.yml
       - apps/desktop/src-tauri/tauri.conf.json
       - apps/desktop/src-tauri/icons/**
+      - apps/desktop/src-tauri/installer/**
+      - apps/elevate/build.rs
   workflow_dispatch:
 
 permissions:
@@ -29,10 +31,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # The MSI and the deb carry the elevated helper, which does system cleanup for the app
+          # (ADR 0010), as `src-tauri/installer/` adds it. Only installers do: every build of the
+          # app would need the helper built first if `tauri.conf.json` named it.
           - name: windows
             runner: windows-latest
-            build: --bundles msi
+            build: --bundles msi --config src-tauri/installer/windows.json
             bundles: target/release/bundle/msi/*.msi
+            helper: true
           # One disk image for Apple silicon and Intel Macs. It's ad-hoc signed (`signingIdentity`
           # in tauri.conf.json), since Apple silicon calls an unsigned download damaged and
           # won't open it. Signing with a Developer ID waits for M5.
@@ -43,8 +49,9 @@ jobs:
           # The oldest Ubuntu runner, so the AppImage and deb need no newer a glibc than it has.
           - name: linux
             runner: ubuntu-22.04
-            build: --bundles appimage,deb
+            build: --bundles appimage,deb --config src-tauri/installer/linux.json
             bundles: target/release/bundle/appimage/*.AppImage target/release/bundle/deb/*.deb
+            helper: true
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     defaults:
@@ -70,8 +77,51 @@ jobs:
         with:
           node-version: 24
       - run: pnpm --dir apps/desktop install --frozen-lockfile
+      - name: Build the elevated helper
+        if: matrix.helper
+        run: cargo xtask helper
       - name: Build
         run: pnpm --dir apps/desktop tauri build ${{ matrix.build }}
+      # Installed as a user's would be, the helper is beside the app in Program Files, where the
+      # app looks for it, and runs from there.
+      - name: Check the MSI installs the helper beside the app
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $msi = (Get-ChildItem target/release/bundle/msi/*.msi)[0].FullName
+          $installed = Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /l*v install.log" -Wait -PassThru
+          if ($installed.ExitCode -ne 0) { Get-Content install.log -Tail 40; exit 1 }
+          $folder = Join-Path $env:ProgramFiles Cleanse
+          foreach ($program in "cleanse-desktop.exe", "cleanse-elevate.exe") {
+            if (-not (Test-Path (Join-Path $folder $program))) { throw "$program isn't in $folder" }
+          }
+          icacls (Join-Path $folder cleanse-elevate.exe)
+          # Without the window's arguments, it says how the app starts it. It's a Windows program,
+          # with no console, so it's waited for, and its standard error read from a file.
+          $ran = Start-Process (Join-Path $folder cleanse-elevate.exe) -Wait -PassThru -NoNewWindow -RedirectStandardError helper.txt
+          $said = Get-Content helper.txt -Raw
+          Write-Output $said
+          if ($ran.ExitCode -ne 1 -or $said -notmatch '--pipe <name> --parent') { throw "the installed helper didn't run" }
+          $removed = Start-Process msiexec.exe -ArgumentList "/x `"$msi`" /qn" -Wait -PassThru
+          exit $removed.ExitCode
+      # The deb installs the helper and polkit's policy where the app looks for them, owned by
+      # root, and the AppImage, which can't offer system cleanup, carries neither.
+      - name: Check the deb has the helper and the AppImage doesn't
+        if: runner.os == 'Linux'
+        run: |
+          dpkg-deb -c target/release/bundle/deb/*.deb | tee contents.txt
+          # Tauri's tar headers give owners as numbers, and paths without `./` or a trailing slash.
+          owner='(root/root|0/0)'
+          grep -E "^drwxr-xr-x $owner .* (\./)?usr/lib/cleanse/?\$" contents.txt
+          grep -E "^-rwxr-xr-x $owner .* (\./)?usr/lib/cleanse/cleanse-elevate\$" contents.txt
+          grep -E "^-rw-r--r-- $owner .* (\./)?usr/share/polkit-1/actions/io\.github\.zhenga8533\.cleanse\.policy\$" contents.txt
+          appimage=$(realpath target/release/bundle/appimage/*.AppImage)
+          chmod +x "$appimage"
+          (cd "$RUNNER_TEMP" && "$appimage" --appimage-extract > /dev/null)
+          if find "$RUNNER_TEMP/squashfs-root" -name 'cleanse-elevate*' -o -name '*.policy' | grep .; then
+            echo "the AppImage carries the helper"
+            exit 1
+          fi
       - name: Collect the installers and their checksums
         run: |
           mkdir installers

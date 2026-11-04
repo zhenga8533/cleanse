@@ -75,7 +75,8 @@ the other's process ID. It loads DLLs only from System32.
 
 `cleanse-exec` starts the helper, through the UAC prompt or pkexec, and only from where its
 installer put it: beside the app in Program Files on Windows, or `/usr/lib/cleanse` from the deb
-on Linux, with pkexec's policy. Only administrators or root may be able to change the helper, the
+on Linux, with pkexec's policy. Only the MSI and the deb carry it, as
+`apps/desktop/src-tauri/installer/` adds it to their builds. Only administrators or root may be able to change the helper, the
 policy, or any folder above them, or the app doesn't offer system cleanup. The app's
 `system_*` commands start it when one first needs it, and again once it has stopped, so each
 start asks for administrator rights. The app's System section calls them through the same Scan,

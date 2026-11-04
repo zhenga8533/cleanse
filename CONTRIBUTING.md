@@ -44,6 +44,7 @@ correctness is high. This guide covers setup, conventions, and how changes are r
 | Run the desktop app | `pnpm --dir apps/desktop install`, then `pnpm --dir apps/desktop tauri dev` |
 | Preview the desktop UI in a browser, with sample data | `pnpm --dir apps/desktop dev`, then open http://localhost:1420 |
 | Run the desktop app's checks | `cargo xtask desktop` |
+| Build the app's installer, with its elevated helper | `cargo xtask helper`, then `pnpm --dir apps/desktop tauri build --config src-tauri/installer/windows.json` (or `linux.json`) |
 | Preview the docs | `mdbook serve docs` |
 | Create a synthetic tree for benchmarks | `cargo xtask gen-tree <dir> [--entries <n>]` |
 | Benchmark the directory walker (read-only) | `cargo bench -p cleanse-core --bench walk -- <dir>` |
