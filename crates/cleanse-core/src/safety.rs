@@ -2,9 +2,10 @@
 //!
 //! [`Assessor::assess`] runs the safety model's gates over a rule's match and turns it into a
 //! [`Candidate`]. Every concern found is recorded, so `explain` can show all of them, and any
-//! blocking one makes the item Protected.
+//! blocking one makes the item Protected. System cleanup has gates of its own, in [`system`].
 
 mod policy;
+mod system;
 
 #[cfg(test)]
 mod tests;
@@ -15,15 +16,16 @@ use std::path::{self, Path, PathBuf};
 use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use cleanse_model::{Candidate, CandidateId, Concern, EntryKind, FileIdentity, Match};
-use cleanse_platform::{FileOwner, Probe};
+use cleanse_model::{Candidate, CandidateId, Concern, EntryKind, FileIdentity, Match, Risk};
+use cleanse_platform::{FileFacts, FileOwner, Probe};
 
 pub(crate) use policy::key;
 pub use policy::{Protected, ProtectedPolicy, Reach};
+pub use system::SystemRoots;
 
 use crate::git::GitStatus;
 use crate::rules::{Detection, Target};
-use crate::scan::{Measurement, measure};
+use crate::scan::{Measurement, measure, measure_with};
 
 /// A file modified more recently than this suggests something is using the directory, such as
 /// a running build or dev server pausing between writes.
@@ -35,7 +37,7 @@ const SECONDS_PER_DAY: u64 = 24 * 60 * 60;
 pub struct Assessor<'p> {
     probe: &'p dyn Probe,
     policy: ProtectedPolicy,
-    roots: Vec<Vec<String>>,
+    cleanup: Cleanup,
     home: Option<PathBuf>,
     now: SystemTime,
     identities: Mutex<HashMap<PathBuf, Option<FileIdentity>>>,
@@ -46,8 +48,18 @@ pub struct Assessor<'p> {
     booted_at: OnceLock<Option<SystemTime>>,
 }
 
+/// Which cleanup an [`Assessor`] checks items for.
+#[derive(Debug)]
+enum Cleanup {
+    /// The user's, of the folders being scanned, compared like [`policy::key`].
+    User { roots: Vec<Vec<String>> },
+    /// The system's, of items directly inside the system folders that checked out.
+    System { roots: SystemRoots },
+}
+
 impl<'p> Assessor<'p> {
-    /// `roots` are the folders being scanned. Recent activity is measured back from `now`.
+    /// Checks the user's items. `roots` are the folders being scanned. Recent activity is
+    /// measured back from `now`.
     pub fn new(
         probe: &'p dyn Probe,
         policy: ProtectedPolicy,
@@ -61,7 +73,7 @@ impl<'p> Assessor<'p> {
         Ok(Self {
             probe,
             policy,
-            roots,
+            cleanup: Cleanup::User { roots },
             home: probe.known_folders().home.clone(),
             now,
             identities: Mutex::default(),
@@ -70,9 +82,39 @@ impl<'p> Assessor<'p> {
         })
     }
 
+    /// Checks system cleanup's items, with `policy` from
+    /// [`ProtectedPolicy::for_system_cleanup`] and the system folders `roots` that checked out.
+    /// Recent activity is measured back from `now`.
+    pub fn system(
+        probe: &'p dyn Probe,
+        policy: ProtectedPolicy,
+        roots: SystemRoots,
+        now: SystemTime,
+    ) -> Self {
+        Self {
+            probe,
+            policy,
+            cleanup: Cleanup::System { roots },
+            home: None,
+            now,
+            identities: Mutex::default(),
+            running: OnceLock::new(),
+            booted_at: OnceLock::new(),
+        }
+    }
+
     pub fn assess(&self, id: CandidateId, detection: &Detection<'_>) -> Candidate {
         let path = &detection.path;
-        let measured = measure(path);
+        // Nothing a `protected` rule matches is ever removed, so system cleanup's own gates are
+        // only for the rest.
+        let system_roots = match &self.cleanup {
+            Cleanup::System { roots } if detection.rule.risk != Risk::Protected => Some(roots),
+            Cleanup::User { .. } | Cleanup::System { .. } => None,
+        };
+        let measured = match system_roots {
+            Some(_) => measure_with(path, |entry| system::entry_concern(self.probe, entry)),
+            None => measure(path),
+        };
         let mut measurement = measured.as_ref().cloned().unwrap_or_default();
         // Anything other than the kind of item the rule matched means it changed since the scan.
         let facts = self
@@ -105,31 +147,14 @@ impl<'p> Assessor<'p> {
                 what: "another filesystem mounted inside".into(),
             });
         }
-        if !self.inside_roots(path) {
-            concerns.push(Concern::OutsideScanRoots);
-        }
-        // Without facts, the item is already Unverifiable.
-        if let Some(facts) = facts {
-            match facts.owner {
-                None => concerns.push(Concern::OwnerUnknown),
-                Some(FileOwner::System | FileOwner::Other) => {
-                    concerns.push(Concern::OwnedByAnotherUser);
+        match &self.cleanup {
+            Cleanup::User { roots } => user_concerns(roots, detection, facts, &mut concerns),
+            Cleanup::System { .. } => {
+                if let Some(roots) = system_roots {
+                    concerns.extend(system::item_concerns(roots, self.probe, path, facts));
+                    concerns.extend(measurement.inside.iter().cloned());
                 }
-                // Administrators own what the user's own elevated programs make on Windows, and
-                // some drives don't record owners at all.
-                Some(
-                    FileOwner::CurrentUser | FileOwner::Administrators | FileOwner::Unrecorded,
-                ) => {}
             }
-        }
-        match &detection.git {
-            GitStatus::Known(git) if git.has_tracked_files => concerns.push(Concern::TrackedByGit),
-            // Only system cleanup leaves Git unread, and its items are never assessed as the
-            // user's, so one that is can't be shown free of tracked files.
-            GitStatus::Unreadable { .. } | GitStatus::NotChecked => {
-                concerns.push(Concern::RepositoryUnreadable);
-            }
-            GitStatus::Known(_) | GitStatus::NotInRepository => {}
         }
         if is_ambiguous(detection)
             && let Some(name) = &measurement.secret
@@ -148,7 +173,13 @@ impl<'p> Assessor<'p> {
             concerns.push(Concern::CloudSynced { provider });
         }
         if measurement.shared {
-            concerns.push(Concern::SharedData);
+            // Removing one name of a hard-linked file frees nothing, and in a system folder
+            // the other name could be anywhere, so system cleanup keeps it.
+            if system_roots.is_none() {
+                concerns.push(Concern::SharedData);
+            } else if !concerns.contains(&Concern::HardLinked) {
+                concerns.push(Concern::HardLinked);
+            }
         }
         let rule = detection.rule;
         if let Some(days) = rule.idle_days {
@@ -236,13 +267,6 @@ impl<'p> Assessor<'p> {
             .collect()
     }
 
-    fn inside_roots(&self, path: &Path) -> bool {
-        let path = policy::key(path);
-        self.roots
-            .iter()
-            .any(|root| path.len() > root.len() && path.starts_with(root))
-    }
-
     fn recent_activity(&self, measurement: &Measurement) -> Option<Concern> {
         let newest = measurement.newest_modified?;
         let age = match self.now.duration_since(newest) {
@@ -277,6 +301,44 @@ impl<'p> Assessor<'p> {
             }
             _ => None,
         }
+    }
+}
+
+/// The user's cleanup's own gates: the item must be inside the folders being scanned and belong
+/// to the user, and Git mustn't track anything in it.
+fn user_concerns(
+    roots: &[Vec<String>],
+    detection: &Detection<'_>,
+    facts: Option<FileFacts>,
+    concerns: &mut Vec<Concern>,
+) {
+    let key = policy::key(&detection.path);
+    if !roots
+        .iter()
+        .any(|root| key.len() > root.len() && key.starts_with(root))
+    {
+        concerns.push(Concern::OutsideScanRoots);
+    }
+    // Without facts, the item is already Unverifiable.
+    if let Some(facts) = facts {
+        match facts.owner {
+            None => concerns.push(Concern::OwnerUnknown),
+            Some(FileOwner::System | FileOwner::Other) => {
+                concerns.push(Concern::OwnedByAnotherUser);
+            }
+            // Administrators own what the user's own elevated programs make on Windows, and some
+            // drives don't record owners at all.
+            Some(FileOwner::CurrentUser | FileOwner::Administrators | FileOwner::Unrecorded) => {}
+        }
+    }
+    match &detection.git {
+        GitStatus::Known(git) if git.has_tracked_files => concerns.push(Concern::TrackedByGit),
+        // Only system cleanup leaves Git unread, and its items are never the user's, so one that
+        // is can't be shown free of tracked files.
+        GitStatus::Unreadable { .. } | GitStatus::NotChecked => {
+            concerns.push(Concern::RepositoryUnreadable);
+        }
+        GitStatus::Known(_) | GitStatus::NotInRepository => {}
     }
 }
 
