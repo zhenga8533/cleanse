@@ -613,6 +613,7 @@ version = "0.5.0"
 dependencies = [
  "cleanse-desktop-views",
  "cleanse-engine",
+ "cleanse-exec",
  "cleanse-model",
  "cleanse-platform",
  "serde",

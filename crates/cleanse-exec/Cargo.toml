@@ -6,6 +6,10 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+# `helper::Installed::unchecked`, for tests that start a copy of the elevated helper.
+fake = []
+
 [dependencies]
 cleanse-core.workspace = true
 cleanse-model.workspace = true

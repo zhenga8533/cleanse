@@ -169,25 +169,26 @@ fn serves_the_desktop_app_over_its_pipes_when_elevated() {
 }
 
 #[cfg(windows)]
+/// Starts the helper as the app does, which needs no UAC prompt as an administrator.
+#[cfg(windows)]
 fn be_the_desktop_app() {
-    use std::io::BufReader;
-    use std::time::Duration;
-
-    use cleanse_elevate::client::Client;
-    use cleanse_elevate::protocol::{Request, Response};
-    use cleanse_platform::privileged::pipe;
-
     let program = std::env::current_exe()
         .unwrap()
         .with_file_name("cleanse-elevate.exe");
-    let name = format!("cleanse-test-{}", std::process::id());
-    let mut helper = Command::new(program)
-        .args(["--pipe", &name, "--parent", &std::process::id().to_string()])
-        .stdin(Stdio::null())
-        .spawn()
-        .unwrap();
-    let connection = pipe::connect(&name, helper.id(), Duration::from_secs(30)).unwrap();
-    let client = Client::connect(BufReader::new(connection.answers), connection.requests).unwrap();
+
+    ask_quarantine_and_history(&program);
+}
+
+/// Starts the helper at `program` as the app does, asks it for what's in quarantine and the
+/// history, then closes its requests, and checks that it stopped cleanly.
+#[cfg(any(windows, target_os = "linux"))]
+fn ask_quarantine_and_history(program: &std::path::Path) {
+    use cleanse_elevate::client::Client;
+    use cleanse_elevate::protocol::{Request, Response};
+    use cleanse_exec::helper::{self, Installed};
+
+    let mut launched = helper::launch(&Installed::unchecked(program.to_path_buf()), None).unwrap();
+    let client = Client::connect(launched.answers, launched.requests).unwrap();
 
     let quarantine = client.ask(&Request::Quarantined {}, &mut |_| {}).unwrap();
     let history = client.ask(&Request::History {}, &mut |_| {}).unwrap();
@@ -198,7 +199,25 @@ fn be_the_desktop_app() {
     );
     assert!(matches!(history, Response::History { .. }), "{history:?}");
     drop(client);
-    assert!(helper.wait().unwrap().success());
+    assert_eq!(
+        launched.process.stopped().as_deref(),
+        Some("it stopped with exit code 0")
+    );
+}
+
+/// As the deb's app starts it. pkexec asks root for no password.
+#[cfg(target_os = "linux")]
+#[test]
+fn starts_through_pkexec_when_elevated() {
+    if !elevated_or_skip() {
+        return;
+    }
+    if !std::path::Path::new("/usr/bin/pkexec").exists() {
+        eprintln!("skipped: needs pkexec");
+        return;
+    }
+
+    ask_quarantine_and_history(std::path::Path::new(env!("CARGO_BIN_EXE_cleanse-elevate")));
 }
 
 /// Windows looks for the DLLs a program imports beside it first. The helper's link flags make it

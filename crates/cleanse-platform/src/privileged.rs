@@ -1,11 +1,14 @@
 //! What only system cleanup does (ADR 0010), behind the `privileged` feature, which only
-//! `cleanse-exec` and the elevated helper turn on: creating its data folder, and on Windows, the
-//! pipes between the desktop app's window and the helper, and where the helper loads DLLs from.
-//! `clippy.toml` keeps other code from making the pipes or the folder.
+//! `cleanse-exec` and the elevated helper turn on: creating its data folder, and on Windows,
+//! starting the desktop app's helper through the UAC prompt, the pipes between the app's window
+//! and the helper, and where the helper loads DLLs from. `clippy.toml` keeps other code from
+//! starting the helper, making or opening the pipes, or making the folder.
 
 use std::io;
 use std::path::Path;
 
+#[cfg(windows)]
+pub use crate::windows::launch::{Process, run_as_administrator};
 #[cfg(windows)]
 pub use crate::windows::pipe;
 

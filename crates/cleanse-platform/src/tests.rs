@@ -739,3 +739,61 @@ fn dlls_beside_the_program_dont_load_once_only_system32_is_searched() {
         Some(ERROR_MOD_NOT_FOUND.cast_signed())
     );
 }
+
+/// Program Files and Windows' own programs, which only administrators and Windows' services can
+/// change, though everyone can run what's there.
+#[cfg(windows)]
+#[test]
+fn only_admins_can_change_program_files_and_system32() {
+    let program_files = crate::program_files().unwrap();
+    let system32 = SystemFolders::current()
+        .unwrap()
+        .system_root
+        .unwrap()
+        .join("System32");
+
+    assert!(program_files.is_absolute(), "{}", program_files.display());
+    assert!(system().only_admins_can_change(&program_files).unwrap());
+    assert!(
+        system()
+            .only_admins_can_change(&system32.join("kernel32.dll"))
+            .unwrap()
+    );
+}
+
+/// What the test makes in a temporary folder, its owner can change, as can whoever can write
+/// the temporary folder, whether or not that's an administrator.
+#[test]
+fn files_others_can_change_arent_only_admins() {
+    let temp = tempfile::tempdir().unwrap();
+    let file = temp.path().join("file");
+    fs::write(&file, "data").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o666)).unwrap();
+    }
+
+    assert!(!system().only_admins_can_change(&file).unwrap());
+}
+
+/// A link can lead anywhere, so even one to a folder only administrators can change doesn't
+/// count.
+#[test]
+fn links_arent_only_admins() {
+    let temp = tempfile::tempdir().unwrap();
+    let link = temp.path().join("link");
+    #[cfg(windows)]
+    let target = crate::program_files().unwrap();
+    #[cfg(unix)]
+    let target = std::path::PathBuf::from("/usr");
+    link_dir(&target, &link);
+
+    assert!(!system().only_admins_can_change(&link).unwrap());
+}
+
+#[cfg(unix)]
+#[test]
+fn only_root_can_change_usr() {
+    assert!(system().only_admins_can_change(Path::new("/usr")).unwrap());
+}

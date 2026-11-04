@@ -32,9 +32,9 @@ path, so it isn't stored in the tree. A plain `scan` doesn't build the tree.
 | Crate | Responsibility | May change the filesystem? |
 |---|---|---|
 | `cleanse-model` | Shared types: candidates, risk tiers, plans, journal records | No |
-| `cleanse-platform` | Per-OS facts: file identity, ownership, links and reparse points, cloud placeholders, allocated size, mounts, elevation, processes, system folders | Only through its `privileged` feature, which only `cleanse-exec` and the elevated helper turn on, to create system cleanup's data folder and the helper's pipes on Windows ([ADR 0010](adr/0010-elevated-system-cleanup.md)) |
+| `cleanse-platform` | Per-OS facts: file identity, ownership, links and reparse points, cloud placeholders, allocated size, mounts, elevation, processes, system folders | Only through its `privileged` feature, which only `cleanse-exec` and the elevated helper turn on, to create system cleanup's data folder, and on Windows to start the helper and make its pipes ([ADR 0010](adr/0010-elevated-system-cleanup.md)) |
 | `cleanse-core` | Scanning, rule matching, safety evaluation, planning, analysis | No |
-| `cleanse-exec` | Executing approved plans, quarantine, journal, restore | **Yes, the only one** |
+| `cleanse-exec` | Executing approved plans, quarantine, journal, restore; starting the desktop app's elevated helper | **Yes, the only one** |
 | `cleanse-engine` | Session API with progress and cancellation; the only API front-ends use | No (delegates to exec) |
 | `apps/cli` | The `cleanse` command | No |
 | `apps/desktop/views` | What the desktop app shows, built from a session, for its window and its helper | No |
@@ -71,7 +71,13 @@ ten minutes with none. On Linux it talks over the standard input and output pkex
 Windows' UAC prompt can't pass those on, so there the window names a pair of local pipes for the
 helper to make, one each way, which only the window's logon session can open. The helper serves
 only the desktop app's program installed beside it, in the same session, and each end checks
-the other's process ID. It loads DLLs only from System32. The app's System section comes next.
+the other's process ID. It loads DLLs only from System32.
+
+`cleanse-exec` starts the helper, through the UAC prompt or pkexec, and only from where its
+installer put it: beside the app in Program Files on Windows, or `/usr/lib/cleanse` from the deb
+on Linux, with pkexec's policy. Only administrators or root may be able to change the helper, the
+policy, or any folder above them, or the app doesn't offer system cleanup. The app's System
+section comes next.
 
 ## Enforcement
 

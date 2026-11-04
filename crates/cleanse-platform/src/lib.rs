@@ -61,6 +61,12 @@ pub trait Probe: Send + Sync {
     /// Whether the folder at `path` is a real folder, not a link, that only Administrators and
     /// SYSTEM, or root, can change. System cleanup keeps its journal and quarantine only in one.
     fn is_private_dir(&self, path: &Path) -> io::Result<bool>;
+
+    /// Whether the file or folder at `path` is a real one, not a link, that only administrators
+    /// or root can change, though others may read and run it. On Windows, SYSTEM,
+    /// Administrators, or a service such as `NT SERVICE\TrustedInstaller` owns it, and its
+    /// access list lets only them change it. On Unix, root owns it and no one else may write it.
+    fn only_admins_can_change(&self, path: &Path) -> io::Result<bool>;
 }
 
 /// A program's process name for comparing: lowercase, without a trailing `.exe`, so `Claude.exe`
@@ -192,6 +198,13 @@ pub struct SystemFolders {
     pub var: Option<PathBuf>,
 }
 
+/// Where Windows installs programs for every user, usually `C:\Program Files`, as the registry
+/// records it, which the environment doesn't change.
+#[cfg(windows)]
+pub fn program_files() -> io::Result<PathBuf> {
+    os::program_files()
+}
+
 impl SystemFolders {
     pub fn current() -> io::Result<Self> {
         os::system_folders()
@@ -284,5 +297,9 @@ impl Probe for System {
 
     fn is_private_dir(&self, path: &Path) -> io::Result<bool> {
         os::is_private_dir(path)
+    }
+
+    fn only_admins_can_change(&self, path: &Path) -> io::Result<bool> {
+        os::only_admins_can_change(path)
     }
 }
