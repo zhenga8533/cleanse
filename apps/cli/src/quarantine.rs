@@ -3,13 +3,13 @@ use std::io;
 use std::process::ExitCode;
 
 use clap::Subcommand;
-use cleanse_engine::{ApplyError, Engine, Handled, Listing, Probe};
+use cleanse_engine::{Engine, Handled, Listing};
 use cleanse_model::{EntryOutcome, QuarantineEntry, Size};
 use inquire::{Confirm, InquireError};
 
 use crate::exit::{ABORTED, PARTIAL, USAGE};
 use crate::scan::items;
-use crate::{SECONDS_PER_DAY, can_ask, format, now};
+use crate::{SECONDS_PER_DAY, can_ask, command, format, now};
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
@@ -103,8 +103,9 @@ fn list(engine: &Engine, json: bool) -> Result<ExitCode, Box<dyn Error>> {
         );
     }
     println!(
-        "\n`cleanse restore ID` puts an item back; `cleanse quarantine purge ID` deletes it for \
-         good."
+        "\n`{}` puts an item back; `{}` deletes it for good.",
+        command(engine, "restore ID"),
+        command(engine, "quarantine purge ID")
     );
     Ok(ExitCode::SUCCESS)
 }
@@ -117,9 +118,7 @@ fn purge(engine: &Engine, args: &PurgeArgs) -> Result<ExitCode, Box<dyn Error>> 
         );
         return Ok(ExitCode::from(USAGE));
     }
-    if engine.system().is_elevated() {
-        return Err(ApplyError::Elevated.into());
-    }
+    engine.check_can_change()?;
     let listing = engine.quarantined()?;
     report_unreadable(&listing);
     let chosen = if let Some(days) = args.older_than {
@@ -130,7 +129,7 @@ fn purge(engine: &Engine, args: &PurgeArgs) -> Result<ExitCode, Box<dyn Error>> 
             .filter(|entry| now.saturating_sub(entry.at) >= days * SECONDS_PER_DAY)
             .collect()
     } else {
-        choose(listing, &args.ids, args.all)?
+        choose(engine, listing, &args.ids, args.all)?
     };
     if chosen.is_empty() {
         println!("Nothing to purge.");
@@ -163,12 +162,10 @@ fn purge(engine: &Engine, args: &PurgeArgs) -> Result<ExitCode, Box<dyn Error>> 
 }
 
 pub fn restore(engine: &Engine, args: &RestoreArgs) -> Result<ExitCode, Box<dyn Error>> {
-    if engine.system().is_elevated() {
-        return Err(ApplyError::Elevated.into());
-    }
+    engine.check_can_change()?;
     let listing = engine.quarantined()?;
     report_unreadable(&listing);
-    let chosen = choose(listing, &args.ids, args.all)?;
+    let chosen = choose(engine, listing, &args.ids, args.all)?;
     if chosen.is_empty() {
         println!("Nothing is in quarantine.");
         return Ok(ExitCode::SUCCESS);
@@ -180,6 +177,7 @@ pub fn restore(engine: &Engine, args: &RestoreArgs) -> Result<ExitCode, Box<dyn 
 /// The entries named by `ids`, or all of them. An ID that isn't in quarantine is an error, so a
 /// typo never quietly does less than asked.
 fn choose(
+    engine: &Engine,
     listing: Listing,
     ids: &[String],
     all: bool,
@@ -192,7 +190,8 @@ fn choose(
         .find(|id| !listing.entries.iter().any(|entry| &entry.id == *id))
     {
         return Err(format!(
-            "nothing in quarantine has the ID {unknown}. Run `cleanse quarantine` to list them."
+            "nothing in quarantine has the ID {unknown}. Run `{}` to list them.",
+            command(engine, "quarantine")
         )
         .into());
     }

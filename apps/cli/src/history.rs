@@ -2,7 +2,7 @@ use std::error::Error;
 use std::path::Path;
 use std::process::ExitCode;
 
-use cleanse_engine::{Action, ApplyError, Engine, History, Probe, Run};
+use cleanse_engine::{Action, Engine, History, Run};
 use cleanse_model::{EntryKind, EntryOutcome, Outcome, RuleId, Size};
 use serde::Serialize;
 
@@ -78,15 +78,16 @@ pub fn run(engine: &Engine, args: &Args) -> Result<ExitCode, Box<dyn Error>> {
                 leftover.original.display()
             );
         }
-        println!("Run `cleanse history --finish` to remove what's left.");
+        println!(
+            "Run `{}` to remove what's left.",
+            crate::command(engine, "history --finish")
+        );
     }
     Ok(ExitCode::SUCCESS)
 }
 
 fn finish(engine: &Engine) -> Result<ExitCode, Box<dyn Error>> {
-    if engine.system().is_elevated() {
-        return Err(ApplyError::Elevated.into());
-    }
+    engine.check_can_change()?;
     let leftovers = engine.history()?.leftovers;
     if leftovers.is_empty() {
         println!("Nothing to finish.");

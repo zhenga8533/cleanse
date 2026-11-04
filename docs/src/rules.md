@@ -1,8 +1,8 @@
 # Rules
 
 > Status: project artifacts, known locations, large files, advice, and Git checks are
-> implemented, including rules for AI agents' and browsers' folders. System rules are written,
-> and system cleanup, which uses them, is being built.
+> implemented, including rules for AI agents' and browsers' folders, and system rules for
+> `cleanse system`.
 
 Rules describe what Cleanse can recognize. They're TOML files in
 [`crates/cleanse-core/rules/`](https://github.com/zhenga8533/cleanse/tree/main/crates/cleanse-core/rules),

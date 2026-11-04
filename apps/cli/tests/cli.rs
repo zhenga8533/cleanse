@@ -792,3 +792,140 @@ fn apply_yes_removes_the_selected_items_in_a_saved_plan() {
     assert!(!root.path().join("web/node_modules").exists());
     assert!(root.path().join("web/package.json").exists());
 }
+
+#[test]
+fn system_rules_lists_only_system_rules() {
+    let listed = stdout(&cleanse(&["system", "rules"]));
+    let rules = json(&cleanse(&["system", "rules", "--json"]));
+
+    assert!(listed.contains("windows.system_temp"), "{listed}");
+    assert!(listed.contains("linux.core_dumps"), "{listed}");
+    assert!(!listed.contains("javascript.node_modules"), "{listed}");
+    let rules = rules.as_array().unwrap();
+    assert_ne!(rules.len(), 0);
+    assert!(rules.iter().all(|rule| rule["scope"] == "system"));
+}
+
+/// CI's Windows runners run as an administrator, so this runs on Linux and macOS there.
+#[test]
+fn system_cleanup_says_how_to_run_it_when_not_elevated() {
+    if elevated() {
+        return;
+    }
+    let expected = if cfg!(windows) {
+        "Run as administrator"
+    } else if cfg!(target_os = "linux") {
+        "with sudo in front"
+    } else {
+        "only for Windows and Linux"
+    };
+
+    for command in [
+        &["system", "scan"][..],
+        &["system", "clean", "--dry-run"],
+        &["system", "quarantine"],
+        &["system", "restore", "--all"],
+        &["system", "history"],
+        &["system", "explain", "."],
+    ] {
+        let output = cleanse(command);
+
+        assert_eq!(output.status.code(), Some(2), "{command:?}");
+        assert!(
+            stderr(&output).contains(expected),
+            "{command:?}: {}",
+            stderr(&output)
+        );
+    }
+}
+
+#[test]
+fn doctor_says_how_to_run_system_cleanup() {
+    let report = stdout(&cleanse(&["doctor"]));
+    let json = json(&cleanse(&["doctor", "--json"]));
+
+    assert!(report.contains("System cleanup: "), "{report}");
+    let system = &json["system_cleanup"];
+    assert_eq!(system["available"], cfg!(any(windows, target_os = "linux")));
+    if cfg!(windows) {
+        assert!(system["data"].as_str().unwrap().ends_with("Cleanse"));
+    } else if cfg!(target_os = "linux") {
+        assert_eq!(system["data"], "/var/lib/cleanse");
+    } else {
+        assert!(system["data"].is_null());
+    }
+}
+
+/// The tests named `when_elevated` read the real system folders as an administrator or root:
+/// CI's Windows runners are administrators, and a CI job of its own runs them as root on Linux.
+fn elevated_or_skip() -> bool {
+    if elevated() {
+        return true;
+    }
+    let required = if cfg!(windows) {
+        "CI"
+    } else {
+        "CLEANSE_TEST_AS_ROOT"
+    };
+    assert!(
+        std::env::var_os(required).is_none(),
+        "{required} is set, so this has to run as an administrator or root"
+    );
+    eprintln!("skipped: needs an administrator or root");
+    false
+}
+
+/// Read only. Each item is directly in one of the folders scanned, and none is in `System32`.
+#[test]
+fn system_scan_lists_only_whats_directly_in_the_system_folders_when_elevated() {
+    if cfg!(target_os = "macos") || !elevated_or_skip() {
+        return;
+    }
+
+    let scan = json(&cleanse(&["system", "scan", "--json"]));
+
+    let roots: Vec<std::path::PathBuf> = scan["roots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|root| root.as_str().unwrap().into())
+        .collect();
+    assert_ne!(roots.len(), 0);
+    for candidate in scan["candidates"].as_array().unwrap() {
+        let path = Path::new(candidate["path"].as_str().unwrap());
+        assert!(
+            roots
+                .iter()
+                .any(|root| Some(root.as_path()) == path.parent()),
+            "{}",
+            path.display()
+        );
+        assert!(
+            !path
+                .iter()
+                .any(|part| part.eq_ignore_ascii_case("system32")),
+            "{}",
+            path.display()
+        );
+    }
+}
+
+/// Read only: a dry run lists what it would delete, and leaves it, and system cleanup's data
+/// folder, as they were.
+#[test]
+fn system_clean_dry_run_changes_nothing_when_elevated() {
+    if cfg!(target_os = "macos") || !elevated_or_skip() {
+        return;
+    }
+    let doctor = json(&cleanse(&["doctor", "--json"]));
+    let data = Path::new(doctor["system_cleanup"]["data"].as_str().unwrap()).to_path_buf();
+    let data_existed = data.exists();
+
+    let dry_run = json(&cleanse(&["system", "clean", "--dry-run", "--json"]));
+
+    for item in dry_run["items"].as_array().unwrap() {
+        let path = Path::new(item["path"].as_str().unwrap());
+        assert!(path.exists(), "{}", path.display());
+    }
+    assert_eq!(data.exists(), data_existed);
+}
