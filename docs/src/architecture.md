@@ -37,6 +37,8 @@ path, so it isn't stored in the tree. A plain `scan` doesn't build the tree.
 | `cleanse-exec` | Executing approved plans, quarantine, journal, restore | **Yes, the only one** |
 | `cleanse-engine` | Session API with progress and cancellation; the only API front-ends use | No (delegates to exec) |
 | `apps/cli` | The `cleanse` command | No |
+| `apps/desktop/views` | What the desktop app shows, built from a session, for its window and its helper | No |
+| `apps/elevate` | The desktop app's elevated helper, which does system cleanup for its window | No (delegates to exec) |
 
 Dependencies point one way: `model ← platform ← core ← exec ← engine ← apps`. Scanning, rules,
 and safety are modules inside `cleanse-core` rather than separate crates. The boundary that
@@ -59,6 +61,14 @@ deletions or name something it wasn't shown. Results are served as summaries and
 size tree a folder at a time, rather than whole. [ADR 0009](adr/0009-desktop-web-view.md)
 describes the rest of the web view's limits: only the app's own commands, a strict content
 security policy, and no navigating elsewhere.
+
+For system cleanup, the window never runs elevated. It starts a helper, `apps/elevate`, as an
+administrator or root, and asks it for scans and changes over a protocol of one JSON message per
+line ([ADR 0010](adr/0010-elevated-system-cleanup.md)). The helper holds a session of system
+cleanup's own, and requests name things only by the IDs it gave out, as the window's commands do.
+It treats the window as untrusted: it stops at the first message that isn't a request, or after
+ten minutes with none. On Linux it talks over the standard input and output pkexec gives it; the
+pipe it needs on Windows, and the app's System section, come next.
 
 ## Enforcement
 

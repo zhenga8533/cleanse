@@ -1,0 +1,18 @@
+[package]
+name = "cleanse-desktop-views"
+description = "What the Cleanse desktop app shows, shared by its window and its elevated helper"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+cleanse-engine.workspace = true
+cleanse-model.workspace = true
+serde.workspace = true
+ts-rs.workspace = true
+
+[lints]
+workspace = true

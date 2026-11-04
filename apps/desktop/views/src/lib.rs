@@ -1,44 +1,46 @@
-//! What commands return, shaped for the web view. `ts-rs` writes a TypeScript type for each to
+//! What the desktop app's commands return, shaped for its web view. The app's window builds them
+//! from its own session, and the elevated helper builds them from system cleanup's, so the
+//! window shows both the same way. `ts-rs` writes a TypeScript type for each to
 //! `apps/desktop/src/bindings/` when the tests run, and CI fails if those are out of date.
 //!
 //! Paths are here to be shown, never sent back: the web view names items by their IDs.
 
 use std::cmp::Reverse;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 use cleanse_engine::{
-    self as engine, Action, Entry, Explained, NodeKind, Os, Progress, Rule, RuleSet, Summary,
-    Target, advice,
+    self as engine, Action, Cleaned, Entry, Explained, Finished, HandledEntries, History, Listing,
+    NodeKind, Os, Progress, Rule, RuleSet, ScanId, Session, SessionError, Summary, Target, advice,
 };
 use cleanse_model::{self as model, Candidate};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) struct AppInfo {
+pub struct AppInfo {
     pub version: String,
     /// Cleanse runs as an administrator or root, so it won't change anything.
     pub elevated: bool,
 }
 
 /// The folders a scan covers.
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) struct Folders {
+pub struct Folders {
     pub folders: Vec<String>,
     /// None were chosen, so `folders` is the home folder.
     pub home: bool,
 }
 
 /// How far a scan has got.
-#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) enum ScanProgress {
+pub enum ScanProgress {
     /// Looking through folders for things rules recognize.
     Walking {
         #[ts(type = "number")]
@@ -58,10 +60,10 @@ impl From<Progress> for ScanProgress {
 }
 
 /// How much space something takes, and how much removing it would free, in bytes.
-#[derive(Clone, Copy, Debug, Default, Serialize, TS)]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) struct Size {
+pub struct Size {
     #[ts(type = "number")]
     pub logical: u64,
     #[ts(type = "number")]
@@ -86,7 +88,7 @@ impl From<model::Size> for Size {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) enum Section {
+pub enum Section {
     /// Safe and Regenerable items.
     Removable,
     /// Review items, which only a person can decide about.
@@ -119,10 +121,10 @@ impl From<Section> for engine::Section {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) enum Risk {
+pub enum Risk {
     Safe,
     Regenerable,
     Review,
@@ -141,10 +143,10 @@ impl From<model::Risk> for Risk {
 }
 
 /// How a cleanup removes an item.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) enum Disposal {
+pub enum Disposal {
     Delete,
     Quarantine,
     Trash,
@@ -161,20 +163,20 @@ impl From<model::Disposal> for Disposal {
 }
 
 /// A reason to be careful about removing an item.
-#[derive(Clone, Debug, Serialize, TS)]
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) struct Concern {
+pub struct Concern {
     pub message: String,
     /// It keeps the item. Otherwise it's a warning, and the item isn't selected to begin with.
     pub blocks: bool,
 }
 
 /// What a scan found, section by section.
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) struct Results {
+pub struct Results {
     #[ts(type = "number")]
     pub scan: u64,
     pub roots: Vec<String>,
@@ -198,7 +200,7 @@ pub(crate) struct Results {
 }
 
 impl Results {
-    pub(crate) fn new(
+    pub fn new(
         summary: Summary,
         rules: &RuleSet,
         preselected: Vec<Choice>,
@@ -237,10 +239,10 @@ impl Results {
     }
 }
 
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) struct SectionResults {
+pub struct SectionResults {
     pub section: Section,
     pub items: usize,
     pub size: Size,
@@ -248,10 +250,10 @@ pub(crate) struct SectionResults {
     pub rules: Vec<RuleTotal>,
 }
 
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) struct RuleTotal {
+pub struct RuleTotal {
     pub rule: String,
     pub name: String,
     pub items: usize,
@@ -259,10 +261,10 @@ pub(crate) struct RuleTotal {
 }
 
 /// What can be removed in one category.
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) struct CategoryTotal {
+pub struct CategoryTotal {
     /// The name `--category` takes, like `build_output`.
     pub category: String,
     pub name: String,
@@ -272,7 +274,7 @@ pub(crate) struct CategoryTotal {
 
 impl CategoryTotal {
     /// The totals of `removable`, by category, largest first.
-    pub(crate) fn of<'c>(removable: impl IntoIterator<Item = &'c Candidate>) -> Vec<Self> {
+    pub fn of<'c>(removable: impl IntoIterator<Item = &'c Candidate>) -> Vec<Self> {
         let mut by_category: BTreeMap<model::Category, (usize, model::Size)> = BTreeMap::new();
         for candidate in removable {
             let total = by_category.entry(candidate.found.category).or_default();
@@ -294,10 +296,10 @@ impl CategoryTotal {
 }
 
 /// An item a cleanup can remove, and how.
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) struct Choice {
+pub struct Choice {
     #[ts(type = "number")]
     pub id: u64,
     pub size: Size,
@@ -306,7 +308,7 @@ pub(crate) struct Choice {
 
 impl Choice {
     /// Protected items can't be chosen, so they have none.
-    pub(crate) fn of(candidate: &Candidate) -> Option<Self> {
+    pub fn of(candidate: &Candidate) -> Option<Self> {
         Some(Self {
             id: candidate.id.0,
             size: candidate.found.size.into(),
@@ -316,10 +318,10 @@ impl Choice {
 }
 
 /// Something a rule recognized.
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) struct Item {
+pub struct Item {
     #[ts(type = "number")]
     pub id: u64,
     pub path: String,
@@ -341,7 +343,7 @@ pub(crate) struct Item {
 }
 
 impl Item {
-    pub(crate) fn new(candidate: &Candidate, rules: &RuleSet) -> Self {
+    pub fn new(candidate: &Candidate, rules: &RuleSet) -> Self {
         Self {
             id: candidate.id.0,
             path: lossy(&candidate.found.path),
@@ -366,10 +368,10 @@ impl Item {
 }
 
 /// Part of a section's items.
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) struct ItemPage {
+pub struct ItemPage {
     pub items: Vec<Item>,
     /// Where in the list `items` starts.
     pub offset: usize,
@@ -378,10 +380,10 @@ pub(crate) struct ItemPage {
 }
 
 /// An item, the rule that recognized it, and why it can be removed or is kept.
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) struct Details {
+pub struct Details {
     pub item: Item,
     pub section: Section,
     pub rule_name: String,
@@ -394,7 +396,7 @@ pub(crate) struct Details {
 }
 
 impl Details {
-    pub(crate) fn new(explained: &Explained, rules: &RuleSet) -> Self {
+    pub fn new(explained: &Explained, rules: &RuleSet) -> Self {
         Self {
             item: Item::new(&explained.candidate, rules),
             section: explained.section.into(),
@@ -413,10 +415,10 @@ impl Details {
 }
 
 /// What a cleanup did.
-#[derive(Debug, Default, Serialize, TS)]
+#[derive(Debug, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) struct CleanReport {
+pub struct CleanReport {
     pub deleted: Amount,
     /// Moved into quarantine, where they take space until they're purged.
     pub quarantined: Amount,
@@ -429,10 +431,10 @@ pub(crate) struct CleanReport {
     pub journal: Option<String>,
 }
 
-#[derive(Debug, Default, Serialize, TS)]
+#[derive(Debug, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) struct Amount {
+pub struct Amount {
     pub items: usize,
     pub size: Size,
 }
@@ -446,19 +448,19 @@ impl From<(usize, model::Size)> for Amount {
     }
 }
 
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) struct Problem {
+pub struct Problem {
     pub path: String,
     pub reason: String,
 }
 
 /// How much space a folder takes, in bytes.
-#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) struct Usage {
+pub struct Usage {
     #[ts(type = "number")]
     pub logical: u64,
     #[ts(type = "number")]
@@ -475,10 +477,10 @@ impl From<engine::Usage> for Usage {
 }
 
 /// What a folder entry is.
-#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) enum EntryKind {
+pub enum EntryKind {
     Folder,
     /// Something a rule recognized, counted whole.
     Item,
@@ -497,10 +499,10 @@ impl From<NodeKind> for EntryKind {
 }
 
 /// One folder of a scan's size tree, or its roots, with its largest entries.
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) struct FolderView {
+pub struct FolderView {
     /// The folders from a root down to this one. Empty for the roots.
     pub trail: Vec<FolderEntry>,
     /// Its largest entries, or the roots, largest first.
@@ -517,10 +519,10 @@ pub(crate) struct FolderView {
     pub own_removable: u64,
 }
 
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) struct FolderEntry {
+pub struct FolderEntry {
     /// Names the folder for the `folder` command.
     pub node: u32,
     /// A root's whole path, or the name inside its folder.
@@ -542,7 +544,7 @@ pub(crate) struct FolderEntry {
 }
 
 impl FolderEntry {
-    pub(crate) fn new(entry: &engine::FolderEntry, item: Option<EntryItem>) -> Self {
+    pub fn new(entry: &engine::FolderEntry, item: Option<EntryItem>) -> Self {
         Self {
             node: entry.node.index(),
             name: entry.name.to_string_lossy().into_owned(),
@@ -559,10 +561,10 @@ impl FolderEntry {
 }
 
 /// What a rule made of an item in the size tree.
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) struct EntryItem {
+pub struct EntryItem {
     #[ts(type = "number")]
     pub id: u64,
     pub rule_name: String,
@@ -572,7 +574,7 @@ pub(crate) struct EntryItem {
 }
 
 impl EntryItem {
-    pub(crate) fn new(explained: &Explained, rules: &RuleSet) -> Self {
+    pub fn new(explained: &Explained, rules: &RuleSet) -> Self {
         Self {
             id: explained.candidate.id.0,
             rule_name: explained.rule.name.clone(),
@@ -583,20 +585,20 @@ impl EntryItem {
 }
 
 /// What's in quarantine.
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) struct QuarantineView {
+pub struct QuarantineView {
     /// Oldest first.
     pub entries: Vec<QuarantinedItem>,
     /// Records that couldn't be read, so whatever they describe isn't listed.
     pub unreadable: Vec<String>,
 }
 
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) struct QuarantinedItem {
+pub struct QuarantinedItem {
     /// Names it for `restore` and `purge`.
     pub id: String,
     /// Where it was, and where restoring it puts it back.
@@ -611,7 +613,7 @@ pub(crate) struct QuarantinedItem {
 }
 
 impl QuarantinedItem {
-    pub(crate) fn new(entry: &model::QuarantineEntry, rules: &RuleSet) -> Self {
+    pub fn new(entry: &model::QuarantineEntry, rules: &RuleSet) -> Self {
         Self {
             id: entry.id.clone(),
             original: lossy(&entry.original),
@@ -624,10 +626,10 @@ impl QuarantinedItem {
 }
 
 /// What restoring, purging, or finishing did.
-#[derive(Debug, Default, Serialize, TS)]
+#[derive(Debug, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) struct Handled {
+pub struct Handled {
     /// What was restored, purged, or removed, and how much space it takes or freed.
     pub done: Amount,
     /// What couldn't be, and why.
@@ -637,10 +639,10 @@ pub(crate) struct Handled {
 }
 
 /// What Cleanse has done before.
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) struct HistoryView {
+pub struct HistoryView {
     /// Most recent first.
     pub runs: Vec<RunView>,
     /// Removals that started but whose item is still on disk, under its tombstone name.
@@ -650,10 +652,10 @@ pub(crate) struct HistoryView {
 }
 
 /// The command that made a run.
-#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) enum Command {
+pub enum Command {
     Clean,
     Restore,
     Purge,
@@ -672,10 +674,10 @@ impl From<Action> for Command {
 }
 
 /// One run that changed something, and what it did.
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) struct RunView {
+pub struct RunView {
     pub journal: String,
     /// When it started, in seconds since the Unix epoch.
     #[ts(type = "number")]
@@ -694,7 +696,7 @@ pub(crate) struct RunView {
 }
 
 impl RunView {
-    pub(crate) fn new(run: &engine::Run) -> Self {
+    pub fn new(run: &engine::Run) -> Self {
         let mut deleted = (0, model::Size::default());
         let mut quarantined = (0, model::Size::default());
         let mut purged = (0, model::Size::default());
@@ -739,10 +741,10 @@ impl RunView {
     }
 }
 
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) struct LeftoverView {
+pub struct LeftoverView {
     /// Where the item was before it was renamed.
     pub original: String,
     /// Where what's left of it is now.
@@ -761,10 +763,10 @@ impl From<&engine::Leftover> for LeftoverView {
 }
 
 /// How Cleanse is set up on this system, as `cleanse doctor` reports it.
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) struct SettingsView {
+pub struct SettingsView {
     pub version: String,
     pub os: String,
     pub arch: String,
@@ -785,19 +787,19 @@ pub(crate) struct SettingsView {
     pub folders: Vec<KnownFolder>,
 }
 
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) struct KnownFolder {
+pub struct KnownFolder {
     pub name: String,
     pub path: Option<String>,
 }
 
 /// A rule, as `cleanse rules show` describes it.
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) struct RuleView {
+pub struct RuleView {
     pub id: String,
     pub name: String,
     pub category: String,
@@ -818,14 +820,14 @@ pub(crate) struct RuleView {
 }
 
 /// What a rule matches.
-#[derive(Debug, Serialize, TS)]
+#[derive(Debug, Serialize, Deserialize, TS)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) enum RuleMatch {
+pub enum RuleMatch {
     /// A folder inside a project.
     ProjectArtifact {
         names: Vec<String>,
@@ -849,17 +851,17 @@ pub(crate) enum RuleMatch {
 }
 
 /// What a known location matches.
-#[derive(Clone, Copy, Debug, Serialize, TS)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
-pub(crate) enum LocationEntry {
+pub enum LocationEntry {
     Folder,
     Files,
     FilesAndFolders,
 }
 
 impl RuleView {
-    pub(crate) fn new(rule: &Rule, large_file_size: u64) -> Self {
+    pub fn new(rule: &Rule, large_file_size: u64) -> Self {
         let matches = match &rule.target {
             Target::ProjectArtifact {
                 names,
@@ -905,7 +907,7 @@ impl RuleView {
 }
 
 /// For display only: names that aren't valid Unicode get replacement characters.
-pub(crate) fn lossy(path: &Path) -> String {
+pub fn lossy(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
@@ -914,4 +916,195 @@ fn rule_name(rules: &RuleSet, id: &model::RuleId) -> String {
     rules
         .get(id)
         .map_or_else(|| id.0.clone(), |rule| rule.name.clone())
+}
+
+/// A scan's results as they are now, after any cleanups.
+pub fn results(session: &Session, scan: ScanId) -> Result<Results, SessionError> {
+    let summary = session.summary(scan)?;
+    let removable = session.candidates(scan, engine::Section::Removable, None, 0, usize::MAX)?;
+    let review = session.candidates(scan, engine::Section::Review, None, 0, usize::MAX)?;
+    let preselected = removable
+        .items
+        .iter()
+        .filter(|candidate| candidate.preselected())
+        .filter_map(Choice::of)
+        .collect();
+    let categories = CategoryTotal::of(removable.items.iter().chain(&review.items));
+    Ok(Results::new(
+        summary,
+        session.engine().rules(),
+        preselected,
+        categories,
+    ))
+}
+
+/// The items in `section`, and of `rule` if given, largest first.
+pub fn item_page(
+    session: &Session,
+    scan: ScanId,
+    section: Section,
+    rule: Option<&model::RuleId>,
+    offset: usize,
+    limit: usize,
+) -> Result<ItemPage, SessionError> {
+    let page = session.candidates(scan, section.into(), rule, offset, limit)?;
+    let rules = session.engine().rules();
+    Ok(ItemPage {
+        items: page
+            .items
+            .iter()
+            .map(|candidate| Item::new(candidate, rules))
+            .collect(),
+        offset: page.offset,
+        total: page.total,
+    })
+}
+
+/// What a cleanup did, with the paths of the items it skipped or couldn't remove.
+pub fn clean_report(
+    session: &Session,
+    scan: ScanId,
+    cleaned: Cleaned,
+) -> Result<CleanReport, SessionError> {
+    let mut deleted = (0, model::Size::default());
+    let mut quarantined = (0, model::Size::default());
+    let mut skipped = Vec::new();
+    let mut failed = Vec::new();
+    for (id, outcome) in cleaned.outcomes {
+        match outcome {
+            model::Outcome::Deleted { size } => {
+                deleted.0 += 1;
+                deleted.1 += size;
+            }
+            model::Outcome::Quarantined { size, .. } => {
+                quarantined.0 += 1;
+                quarantined.1 += size;
+            }
+            model::Outcome::Skipped { reason } => skipped.push((id, reason.to_string())),
+            model::Outcome::Failed { error } => failed.push((id, error)),
+        }
+    }
+
+    // What wasn't removed is still in the results, so that's where its path is.
+    let paths = if skipped.is_empty() && failed.is_empty() {
+        HashMap::new()
+    } else {
+        removable_paths(session, scan)?
+    };
+    let problems = |list: Vec<(model::CandidateId, String)>| -> Vec<Problem> {
+        list.into_iter()
+            .map(|(id, reason)| Problem {
+                path: paths
+                    .get(&id)
+                    .cloned()
+                    .unwrap_or_else(|| format!("Item {}", id.0)),
+                reason,
+            })
+            .collect()
+    };
+    Ok(CleanReport {
+        deleted: deleted.into(),
+        quarantined: quarantined.into(),
+        skipped: problems(skipped),
+        failed: problems(failed),
+        journal: cleaned.journal.as_deref().map(lossy),
+    })
+}
+
+/// The paths of everything a cleanup could have been given, by ID.
+fn removable_paths(
+    session: &Session,
+    scan: ScanId,
+) -> Result<HashMap<model::CandidateId, String>, SessionError> {
+    let mut paths = HashMap::new();
+    for section in [engine::Section::Removable, engine::Section::Review] {
+        let page = session.candidates(scan, section, None, 0, usize::MAX)?;
+        paths.extend(
+            page.items
+                .iter()
+                .map(|candidate| (candidate.id, lossy(&candidate.found.path))),
+        );
+    }
+    Ok(paths)
+}
+
+impl QuarantineView {
+    pub fn new(listing: &Listing, rules: &RuleSet) -> Self {
+        Self {
+            entries: listing
+                .entries
+                .iter()
+                .map(|entry| QuarantinedItem::new(entry, rules))
+                .collect(),
+            unreadable: listing.unreadable.iter().map(|path| lossy(path)).collect(),
+        }
+    }
+}
+
+impl From<HandledEntries> for Handled {
+    fn from(handled: HandledEntries) -> Self {
+        let mut done = (0, model::Size::default());
+        let mut failed = Vec::new();
+        for (entry, outcome) in handled.outcomes {
+            match outcome {
+                model::EntryOutcome::Restored => {
+                    done.0 += 1;
+                    done.1 += entry.size;
+                }
+                model::EntryOutcome::Purged { size } => {
+                    done.0 += 1;
+                    done.1 += size;
+                }
+                model::EntryOutcome::Failed { error } => failed.push(Problem {
+                    path: lossy(&entry.original),
+                    reason: error,
+                }),
+            }
+        }
+        Self {
+            done: done.into(),
+            failed,
+            journal: handled.journal.as_deref().map(lossy),
+        }
+    }
+}
+
+impl From<Finished> for Handled {
+    fn from(finished: Finished) -> Self {
+        let mut done = (0, model::Size::default());
+        let mut failed = Vec::new();
+        for (leftover, outcome) in finished.outcomes {
+            let reason = match outcome {
+                model::Outcome::Deleted { size } => {
+                    done.0 += 1;
+                    done.1 += size;
+                    continue;
+                }
+                model::Outcome::Skipped { reason } => reason.to_string(),
+                model::Outcome::Failed { error } => error,
+                // Finishing only deletes.
+                model::Outcome::Quarantined { .. } => continue,
+            };
+            failed.push(Problem {
+                path: lossy(&leftover.tombstone),
+                reason,
+            });
+        }
+        Self {
+            done: done.into(),
+            failed,
+            journal: finished.journal.as_deref().map(lossy),
+        }
+    }
+}
+
+impl From<&History> for HistoryView {
+    /// Most recent first.
+    fn from(history: &History) -> Self {
+        Self {
+            runs: history.runs.iter().rev().map(RunView::new).collect(),
+            leftovers: history.leftovers.iter().map(LeftoverView::from).collect(),
+            unreadable: history.unreadable.iter().map(|path| lossy(path)).collect(),
+        }
+    }
 }

@@ -1,0 +1,27 @@
+[package]
+name = "cleanse-elevate"
+description = "The Cleanse desktop app's elevated helper, which does system cleanup for its window"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# The desktop app's installers carry it, not dist.
+[package.metadata.dist]
+dist = false
+
+[dependencies]
+cleanse-desktop-views.workspace = true
+cleanse-engine.workspace = true
+cleanse-model.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+cleanse-engine = { workspace = true, features = ["fake"] }
+tempfile.workspace = true
+
+[lints]
+workspace = true

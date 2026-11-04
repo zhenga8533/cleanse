@@ -4,7 +4,6 @@
 mod commands;
 #[cfg(test)]
 mod tests;
-mod views;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};

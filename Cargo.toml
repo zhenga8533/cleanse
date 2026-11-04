@@ -1,9 +1,16 @@
 [workspace]
 resolver = "3"
-members = ["apps/cli", "apps/desktop/src-tauri", "crates/*", "xtask"]
+members = [
+    "apps/cli",
+    "apps/desktop/src-tauri",
+    "apps/desktop/views",
+    "apps/elevate",
+    "crates/*",
+    "xtask",
+]
 # The desktop app needs its web view's system libraries to build, so a plain `cargo build` or
-# `cargo test` leaves it out. `cargo xtask desktop` checks it.
-default-members = ["apps/cli", "crates/*", "xtask"]
+# `cargo test` leaves it out. `cargo xtask desktop` checks it. Its views don't need them.
+default-members = ["apps/cli", "apps/desktop/views", "apps/elevate", "crates/*", "xtask"]
 
 [workspace.package]
 version = "0.5.0"
@@ -14,6 +21,7 @@ repository = "https://github.com/zhenga8533/cleanse"
 
 [workspace.dependencies]
 cleanse-core = { path = "crates/cleanse-core", version = "0.5.0" }
+cleanse-desktop-views = { path = "apps/desktop/views", version = "0.5.0" }
 cleanse-engine = { path = "crates/cleanse-engine", version = "0.5.0" }
 cleanse-exec = { path = "crates/cleanse-exec", version = "0.5.0" }
 cleanse-model = { path = "crates/cleanse-model", version = "0.5.0" }

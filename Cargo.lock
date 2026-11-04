@@ -585,6 +585,7 @@ dependencies = [
 name = "cleanse-desktop"
 version = "0.5.0"
 dependencies = [
+ "cleanse-desktop-views",
  "cleanse-engine",
  "cleanse-model",
  "rfd",
@@ -594,6 +595,28 @@ dependencies = [
  "tauri-build",
  "tempfile",
  "ts-rs",
+]
+
+[[package]]
+name = "cleanse-desktop-views"
+version = "0.5.0"
+dependencies = [
+ "cleanse-engine",
+ "cleanse-model",
+ "serde",
+ "ts-rs",
+]
+
+[[package]]
+name = "cleanse-elevate"
+version = "0.5.0"
+dependencies = [
+ "cleanse-desktop-views",
+ "cleanse-engine",
+ "cleanse-model",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

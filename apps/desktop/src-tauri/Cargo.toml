@@ -13,6 +13,7 @@ publish = false
 dist = false
 
 [dependencies]
+cleanse-desktop-views.workspace = true
 cleanse-engine.workspace = true
 cleanse-model.workspace = true
 # The system's folder picker, without Tauri's dialog plugin, which would also bring in its file

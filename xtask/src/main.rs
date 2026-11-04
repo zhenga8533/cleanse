@@ -102,7 +102,7 @@ const CI_CHECKS: &[Check] = &[
     },
 ];
 
-/// The desktop app's Rust checks. Its tests also write the TypeScript bindings.
+/// The desktop app's Rust checks. Its views' tests also write the TypeScript bindings.
 const DESKTOP_RUST_CHECKS: &[Check] = &[
     Check {
         name: "clippy",
@@ -111,6 +111,8 @@ const DESKTOP_RUST_CHECKS: &[Check] = &[
             "clippy",
             "--package",
             "cleanse-desktop",
+            "--package",
+            "cleanse-desktop-views",
             "--all-targets",
             "--locked",
             "--",
@@ -122,7 +124,15 @@ const DESKTOP_RUST_CHECKS: &[Check] = &[
     Check {
         name: "tests",
         program: "cargo",
-        args: &["nextest", "run", "--package", "cleanse-desktop", "--locked"],
+        args: &[
+            "nextest",
+            "run",
+            "--package",
+            "cleanse-desktop",
+            "--package",
+            "cleanse-desktop-views",
+            "--locked",
+        ],
         install: Some("cargo install --locked cargo-nextest"),
     },
 ];

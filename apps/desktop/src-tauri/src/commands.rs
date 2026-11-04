@@ -9,28 +9,22 @@
     reason = "Tauri hands commands their arguments, `State` among them, by value"
 )]
 
-use std::collections::HashMap;
 use std::fmt::Display;
+use std::path::Path;
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use std::path::Path;
-
-use cleanse_engine::{
-    Cleaned, FolderEntry, HandledEntries, Probe, ScanId, Section, Session, SessionError,
-    cloud_sync_detection,
+use cleanse_desktop_views::{
+    self as views, AppInfo, CleanReport, Details, EntryItem, Folders, HistoryView, ItemPage,
+    KnownFolder, QuarantineView, Results, RuleView, ScanProgress, SettingsView, lossy,
 };
-use cleanse_model::{self as model, CandidateId, Category, EntryOutcome, Outcome, RuleId};
+use cleanse_engine::{FolderEntry, Probe, ScanId, SessionError, cloud_sync_detection};
+use cleanse_model::{CandidateId, Category, RuleId};
 use rfd::AsyncFileDialog;
 use tauri::ipc::{Channel, IpcResponse};
 use tauri::{Runtime, State, WebviewWindow};
 
 use crate::AppState;
-use crate::views::{
-    self, Amount, AppInfo, CategoryTotal, Choice, CleanReport, Details, EntryItem, Folders,
-    HistoryView, Item, ItemPage, KnownFolder, LeftoverView, Problem, QuarantineView,
-    QuarantinedItem, Results, RuleView, RunView, ScanProgress, SettingsView, lossy,
-};
 
 #[tauri::command]
 pub(crate) fn app_info(state: State<'_, AppState>) -> Result<AppInfo, String> {
@@ -100,7 +94,7 @@ pub(crate) async fn scan(
                 tell(&progress, ScanProgress::from(update));
             }
         })?;
-        results(&session, scan)
+        views::results(&session, scan)
     })
     .await
 }
@@ -116,7 +110,7 @@ pub(crate) fn cancel(state: State<'_, AppState>) -> Result<(), String> {
 #[tauri::command(async)]
 pub(crate) fn summary(state: State<'_, AppState>, scan: u64) -> Result<Results, String> {
     let session = state.session()?;
-    results(&session, ScanId(scan)).map_err(message)
+    views::results(&session, ScanId(scan)).map_err(message)
 }
 
 /// The items in `section`, and of `rule` if given, largest first.
@@ -131,19 +125,15 @@ pub(crate) fn candidates(
 ) -> Result<ItemPage, String> {
     let session = state.session()?;
     let rule = rule.map(RuleId);
-    let page = session
-        .candidates(ScanId(scan), section.into(), rule.as_ref(), offset, limit)
-        .map_err(message)?;
-    let rules = session.engine().rules();
-    Ok(ItemPage {
-        items: page
-            .items
-            .iter()
-            .map(|candidate| Item::new(candidate, rules))
-            .collect(),
-        offset: page.offset,
-        total: page.total,
-    })
+    views::item_page(
+        &session,
+        ScanId(scan),
+        section,
+        rule.as_ref(),
+        offset,
+        limit,
+    )
+    .map_err(message)
 }
 
 #[tauri::command(async)]
@@ -227,7 +217,7 @@ pub(crate) async fn clean(
                 tell(&progress, done);
             }
         })?;
-        report(&session, scan, cleaned)
+        views::clean_report(&session, scan, cleaned)
     })
     .await
 }
@@ -237,15 +227,7 @@ pub(crate) async fn clean(
 pub(crate) fn quarantined(state: State<'_, AppState>) -> Result<QuarantineView, String> {
     let session = state.session()?;
     let listing = session.quarantined().map_err(message)?;
-    let rules = session.engine().rules();
-    Ok(QuarantineView {
-        entries: listing
-            .entries
-            .iter()
-            .map(|entry| QuarantinedItem::new(entry, rules))
-            .collect(),
-        unreadable: listing.unreadable.iter().map(|path| lossy(path)).collect(),
-    })
+    Ok(QuarantineView::new(&listing, session.engine().rules()))
 }
 
 /// Puts back the quarantined items `ids` names, unless something has taken their place.
@@ -255,7 +237,7 @@ pub(crate) async fn restore(
     ids: Vec<String>,
 ) -> Result<views::Handled, String> {
     let session = state.session()?;
-    run(move || session.restore(&ids).map(handled_entries)).await
+    run(move || session.restore(&ids).map(views::Handled::from)).await
 }
 
 /// Deletes the quarantined items `ids` names for good.
@@ -265,7 +247,7 @@ pub(crate) async fn purge(
     ids: Vec<String>,
 ) -> Result<views::Handled, String> {
     let session = state.session()?;
-    run(move || session.purge(&ids).map(handled_entries)).await
+    run(move || session.purge(&ids).map(views::Handled::from)).await
 }
 
 /// What Cleanse has done before, most recent first, and what's left of removals that didn't
@@ -274,45 +256,14 @@ pub(crate) async fn purge(
 pub(crate) fn history(state: State<'_, AppState>) -> Result<HistoryView, String> {
     let session = state.session()?;
     let history = session.history().map_err(message)?;
-    Ok(HistoryView {
-        runs: history.runs.iter().rev().map(RunView::new).collect(),
-        leftovers: history.leftovers.iter().map(LeftoverView::from).collect(),
-        unreadable: history.unreadable.iter().map(|path| lossy(path)).collect(),
-    })
+    Ok(HistoryView::from(&history))
 }
 
 /// Removes what's left of every removal that didn't finish, if it's still what was approved.
 #[tauri::command]
 pub(crate) async fn finish(state: State<'_, AppState>) -> Result<views::Handled, String> {
     let session = state.session()?;
-    run(move || {
-        let finished = session.finish()?;
-        let mut done = (0, model::Size::default());
-        let mut failed = Vec::new();
-        for (leftover, outcome) in finished.outcomes {
-            let reason = match outcome {
-                Outcome::Deleted { size } => {
-                    done.0 += 1;
-                    done.1 += size;
-                    continue;
-                }
-                Outcome::Skipped { reason } => reason.to_string(),
-                Outcome::Failed { error } => error,
-                // Finishing only deletes.
-                Outcome::Quarantined { .. } => continue,
-            };
-            failed.push(Problem {
-                path: lossy(&leftover.tombstone),
-                reason,
-            });
-        }
-        Ok(views::Handled {
-            done: done.into(),
-            failed,
-            journal: finished.journal.as_deref().map(lossy),
-        })
-    })
-    .await
+    run(move || session.finish().map(views::Handled::from)).await
 }
 
 /// How Cleanse is set up on this system, as `cleanse doctor` reports it.
@@ -366,32 +317,6 @@ pub(crate) fn rules(state: State<'_, AppState>) -> Result<Vec<RuleView>, String>
         .collect())
 }
 
-fn handled_entries(handled: HandledEntries) -> views::Handled {
-    let mut done = (0, model::Size::default());
-    let mut failed = Vec::new();
-    for (entry, outcome) in handled.outcomes {
-        match outcome {
-            EntryOutcome::Restored => {
-                done.0 += 1;
-                done.1 += entry.size;
-            }
-            EntryOutcome::Purged { size } => {
-                done.0 += 1;
-                done.1 += size;
-            }
-            EntryOutcome::Failed { error } => failed.push(Problem {
-                path: lossy(&entry.original),
-                reason: error,
-            }),
-        }
-    }
-    views::Handled {
-        done: done.into(),
-        failed,
-        journal: handled.journal.as_deref().map(lossy),
-    }
-}
-
 fn folders_of(state: &AppState) -> Result<Folders, String> {
     let chosen = state.chosen();
     if !chosen.is_empty() {
@@ -421,92 +346,6 @@ async fn run<T: Send + 'static>(
         .await
         .map_err(message)?
         .map_err(message)
-}
-
-fn results(session: &Session, scan: ScanId) -> Result<Results, SessionError> {
-    let summary = session.summary(scan)?;
-    let removable = session.candidates(scan, Section::Removable, None, 0, usize::MAX)?;
-    let review = session.candidates(scan, Section::Review, None, 0, usize::MAX)?;
-    let preselected = removable
-        .items
-        .iter()
-        .filter(|candidate| candidate.preselected())
-        .filter_map(Choice::of)
-        .collect();
-    let categories = CategoryTotal::of(removable.items.iter().chain(&review.items));
-    Ok(Results::new(
-        summary,
-        session.engine().rules(),
-        preselected,
-        categories,
-    ))
-}
-
-fn report(session: &Session, scan: ScanId, cleaned: Cleaned) -> Result<CleanReport, SessionError> {
-    let mut deleted = (0, model::Size::default());
-    let mut quarantined = (0, model::Size::default());
-    let mut skipped = Vec::new();
-    let mut failed = Vec::new();
-    for (id, outcome) in cleaned.outcomes {
-        match outcome {
-            Outcome::Deleted { size } => {
-                deleted.0 += 1;
-                deleted.1 += size;
-            }
-            Outcome::Quarantined { size, .. } => {
-                quarantined.0 += 1;
-                quarantined.1 += size;
-            }
-            Outcome::Skipped { reason } => skipped.push((id, reason.to_string())),
-            Outcome::Failed { error } => failed.push((id, error)),
-        }
-    }
-
-    // What wasn't removed is still in the results, so that's where its path is.
-    let paths = if skipped.is_empty() && failed.is_empty() {
-        HashMap::new()
-    } else {
-        removable_paths(session, scan)?
-    };
-    let problems = |list: Vec<(CandidateId, String)>| -> Vec<Problem> {
-        list.into_iter()
-            .map(|(id, reason)| Problem {
-                path: paths
-                    .get(&id)
-                    .cloned()
-                    .unwrap_or_else(|| format!("Item {}", id.0)),
-                reason,
-            })
-            .collect()
-    };
-    let amount = |(items, size): (usize, model::Size)| Amount {
-        items,
-        size: size.into(),
-    };
-    Ok(CleanReport {
-        deleted: amount(deleted),
-        quarantined: amount(quarantined),
-        skipped: problems(skipped),
-        failed: problems(failed),
-        journal: cleaned.journal.as_deref().map(lossy),
-    })
-}
-
-/// The paths of everything a cleanup could have been given, by ID.
-fn removable_paths(
-    session: &Session,
-    scan: ScanId,
-) -> Result<HashMap<CandidateId, String>, SessionError> {
-    let mut paths = HashMap::new();
-    for section in [Section::Removable, Section::Review] {
-        let page = session.candidates(scan, section, None, 0, usize::MAX)?;
-        paths.extend(
-            page.items
-                .iter()
-                .map(|candidate| (candidate.id, lossy(&candidate.found.path))),
-        );
-    }
-    Ok(paths)
 }
 
 /// Sends progress to the web view. It's only progress, so if the window has closed, there's no
