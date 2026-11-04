@@ -6,6 +6,10 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+# Engines over fixtures, for other crates' tests.
+fake = ["cleanse-platform/fake"]
+
 [dependencies]
 cleanse-core.workspace = true
 cleanse-exec.workspace = true

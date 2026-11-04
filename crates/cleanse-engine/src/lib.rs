@@ -252,6 +252,35 @@ impl Engine {
         })
     }
 
+    /// The user's cleanup, with the built-in rules and the default settings, over `system`'s
+    /// known folders, keeping its journal and quarantine in `data_dir`. For tests of what uses an
+    /// engine, on fixtures.
+    #[cfg(feature = "fake")]
+    pub fn user_at(system: System, data_dir: PathBuf) -> Result<Self, EngineError> {
+        Ok(Self {
+            rules: RuleSet::builtin()?,
+            system,
+            config: Config::default(),
+            config_path: None,
+            data_dir: Some(data_dir),
+            cleanup: Cleanup::User,
+        })
+    }
+
+    /// System cleanup over `folders`, as if the operating system reported them. For tests of what
+    /// uses an engine, on fixtures.
+    #[cfg(feature = "fake")]
+    pub fn system_at(system: System, folders: SystemFolders) -> Result<Self, EngineError> {
+        Ok(Self {
+            rules: RuleSet::builtin_system()?,
+            system,
+            config: Config::default(),
+            config_path: None,
+            data_dir: folders.cleanse_data(),
+            cleanup: Cleanup::System { folders },
+        })
+    }
+
     pub fn mode(&self) -> Mode {
         match self.cleanup {
             Cleanup::User => Mode::User,

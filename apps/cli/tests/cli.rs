@@ -910,8 +910,8 @@ fn system_scan_lists_only_whats_directly_in_the_system_folders_when_elevated() {
     }
 }
 
-/// Read only: a dry run lists what it would delete, and leaves it, and system cleanup's data
-/// folder, as they were.
+/// Read only: a dry run lists what it would delete, and starts no run. The items themselves are
+/// in folders other programs change all the time, so whether they're still there says nothing.
 #[test]
 fn system_clean_dry_run_changes_nothing_when_elevated() {
     if cfg!(target_os = "macos") || !elevated_or_skip() {
@@ -919,13 +919,20 @@ fn system_clean_dry_run_changes_nothing_when_elevated() {
     }
     let doctor = json(&cleanse(&["doctor", "--json"]));
     let data = Path::new(doctor["system_cleanup"]["data"].as_str().unwrap()).to_path_buf();
+    let journal = data.join("journal");
+    let journals = || -> Vec<std::path::PathBuf> {
+        let mut files: Vec<_> = fs::read_dir(&journal)
+            .map(|entries| entries.map(|entry| entry.unwrap().path()).collect())
+            .unwrap_or_default();
+        files.sort();
+        files
+    };
     let data_existed = data.exists();
+    let journals_before = journals();
 
     let dry_run = json(&cleanse(&["system", "clean", "--dry-run", "--json"]));
 
-    for item in dry_run["items"].as_array().unwrap() {
-        let path = Path::new(item["path"].as_str().unwrap());
-        assert!(path.exists(), "{}", path.display());
-    }
+    assert!(dry_run["items"].is_array(), "{dry_run}");
     assert_eq!(data.exists(), data_existed);
+    assert_eq!(journals(), journals_before);
 }
