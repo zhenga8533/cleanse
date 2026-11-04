@@ -9,6 +9,10 @@ use serde::{Deserialize, Serialize};
 #[serde(deny_unknown_fields)]
 pub struct Rule {
     pub id: RuleId,
+    /// Which cleanup the rule is for. Rule files for each are loaded separately, and each refuses
+    /// the other's rules.
+    #[serde(default, skip_serializing_if = "Scope::is_user")]
+    pub scope: Scope,
     /// A short name for headings, like "Node.js dependencies".
     pub name: String,
     pub category: Category,
@@ -37,6 +41,28 @@ pub struct Rule {
     /// checking the rule, so they're left out of it as data.
     #[serde(default, rename = "test", skip_serializing)]
     pub tests: Vec<RuleTest>,
+}
+
+/// Which cleanup a rule is for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Scope {
+    /// The user's own files, cleaned without elevation.
+    #[default]
+    User,
+    /// The operating system's folders, cleaned only by an administrator or root, apart from
+    /// everything else (ADR 0010).
+    System,
+}
+
+impl Scope {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's `skip_serializing_if` passes a reference"
+    )]
+    fn is_user(&self) -> bool {
+        *self == Self::User
+    }
 }
 
 /// An app, and how to tell that it's running.
@@ -68,7 +94,8 @@ pub enum Target {
         #[serde(default)]
         require_git_ignored: bool,
     },
-    /// A fixed location under one of the user's standard folders.
+    /// A fixed location under one of the user's standard folders, or for a system rule, one of
+    /// the system's.
     KnownLocation {
         locations: Vec<Location>,
         /// What the locations name. Anything else at a location doesn't match.
@@ -110,12 +137,14 @@ pub struct Location {
     pub base: Base,
     /// A `/`-separated path relative to `base`. In names after the first, `*` matches any run
     /// of characters, for folders whose names vary, like a browser's profiles. Under `temp` and
-    /// `downloads`, the first name can have `*` too.
+    /// `downloads`, the first name can have `*` too. A system rule's locations can have `*` only
+    /// in their last name, and not directly in the base folder.
     pub path: String,
 }
 
 /// The standard folder a [`Location`] is relative to. See
-/// [`cleanse_platform::KnownFolders`] for what each one is on each OS.
+/// [`cleanse_platform::KnownFolders`] and [`cleanse_platform::SystemFolders`] for what each one
+/// is on each OS.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Base {
@@ -125,6 +154,12 @@ pub enum Base {
     DataLocal,
     Temp,
     Downloads,
+    /// The Windows folder, for system rules.
+    SystemRoot,
+    /// `ProgramData` on Windows, for system rules.
+    ProgramData,
+    /// `/var` on Linux, for system rules.
+    Var,
 }
 
 impl Base {
@@ -132,6 +167,20 @@ impl Base {
     /// can match by pattern directly inside them.
     fn is_shared(self) -> bool {
         matches!(self, Self::Temp | Self::Downloads)
+    }
+
+    /// The OS a system folder is on, or `None` for the user's folders.
+    fn system_os(self) -> Option<Os> {
+        match self {
+            Self::SystemRoot | Self::ProgramData => Some(Os::Windows),
+            Self::Var => Some(Os::Linux),
+            Self::Home
+            | Self::Cache
+            | Self::Config
+            | Self::DataLocal
+            | Self::Temp
+            | Self::Downloads => None,
+        }
     }
 }
 
@@ -163,8 +212,8 @@ pub struct RuleTest {
     pub os: Option<Os>,
     /// Paths to create, `/`-separated and relative to the test's root. A trailing `/` makes a
     /// directory; anything else is an empty file. Known locations live under folders named
-    /// after their base: `home/`, `cache/`, `config/`, `data_local/`, `temp/`, and
-    /// `downloads/`.
+    /// after their base: `home/`, `cache/`, `config/`, `data_local/`, `temp/`, `downloads/`,
+    /// `system_root/`, `program_data/`, and `var/`.
     pub tree: Vec<String>,
     /// Files to create with the given contents, such as a `.gitignore`.
     #[serde(default)]
@@ -191,6 +240,13 @@ impl Rule {
         }
         if self.explain.trim().is_empty() {
             return Err("`explain` is empty".into());
+        }
+        if self.scope == Scope::System && !matches!(self.target, Target::KnownLocation { .. }) {
+            return Err(
+                "a system rule must be a `known_location`, since system cleanup looks only in fixed \
+                 folders"
+                    .into(),
+            );
         }
         match &self.target {
             Target::ProjectArtifact {
@@ -227,7 +283,7 @@ impl Rule {
                     return Err("`locations` is empty".into());
                 }
                 for location in locations {
-                    validate_location(location)?;
+                    validate_location(location, self.scope)?;
                 }
             }
             // Nothing says what a large file is, so only the person can decide about one.
@@ -337,20 +393,59 @@ fn validate_relative(path: &str) -> Result<(), String> {
 /// Like [`validate_relative`], but names after the first may contain `*`. The first is literal,
 /// so a location always stays inside one app's folder, except under `temp` and `downloads`,
 /// which hold whatever anyone put there.
-fn validate_location(location: &Location) -> Result<(), String> {
+///
+/// A system rule's location is one item directly inside a fixed folder, so only its last name may
+/// contain `*`, and not when that's directly in the base folder, which is the whole Windows
+/// folder or `/var`. Its base must be a system folder, on that folder's own OS.
+fn validate_location(location: &Location, scope: Scope) -> Result<(), String> {
     let path = &location.path;
-    let mut names = path.split('/');
-    let first_ok = names.next().is_some_and(|first| {
-        if location.base.is_shared() {
-            is_pattern_segment(first)
-        } else {
-            is_plain_segment(first)
+    match (scope, location.base.system_os()) {
+        (Scope::User, Some(_)) => {
+            return Err(
+                "`system_root`, `program_data`, and `var` are only for system rules".into(),
+            );
         }
-    });
-    if !first_ok || !names.all(is_pattern_segment) {
+        (Scope::System, None) => {
+            return Err(
+                "a system rule's locations must be under `system_root`, `program_data`, or `var`"
+                    .into(),
+            );
+        }
+        (Scope::System, Some(os)) if os != location.os => {
+            return Err(
+                "`system_root` and `program_data` are only on Windows, and `var` only on Linux"
+                    .into(),
+            );
+        }
+        (Scope::User | Scope::System, _) => {}
+    }
+    let names: Vec<&str> = path.split('/').collect();
+    let valid = match scope {
+        Scope::User => names.split_first().is_some_and(|(first, rest)| {
+            let first_ok = if location.base.is_shared() {
+                is_pattern_segment(first)
+            } else {
+                is_plain_segment(first)
+            };
+            first_ok && rest.iter().copied().all(is_pattern_segment)
+        }),
+        Scope::System => names.split_last().is_some_and(|(last, folder)| {
+            let last_ok = if folder.is_empty() {
+                is_plain_segment(last)
+            } else {
+                is_pattern_segment(last)
+            };
+            last_ok && folder.iter().copied().all(is_plain_segment)
+        }),
+    };
+    if !valid {
+        let wildcards = match scope {
+            Scope::User => "only after the first name, except under `temp` and `downloads`",
+            Scope::System => "only in the last name, and not directly in the base folder",
+        };
         return Err(format!(
             "`{path}` must be a relative path made of `/`-separated names, without `.` or `..`, \
-             and with `*` only after the first name, except under `temp` and `downloads`"
+             and with `*` {wildcards}"
         ));
     }
     Ok(())

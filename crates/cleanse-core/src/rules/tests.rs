@@ -9,10 +9,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use cleanse_model::{Evidence, RuleId};
-use cleanse_platform::KnownFolders;
+use cleanse_platform::{KnownFolders, SystemFolders};
 
 use super::matcher::wildcard_match;
-use super::{BUILTIN, Listed, Matcher, Os, Rule, RuleSet, RuleTest};
+use super::{BUILTIN, BUILTIN_SYSTEM, Listed, Matcher, Os, Rule, RuleSet, RuleTest, Scope};
 
 /// Known folders for fixtures: each base is a folder named after it under the test's root.
 fn fixture_folders(root: &Path) -> KnownFolders {
@@ -24,6 +24,15 @@ fn fixture_folders(root: &Path) -> KnownFolders {
         data_local: Some(root.join("data_local")),
         temp: root.join("temp"),
         ..KnownFolders::default()
+    }
+}
+
+/// System folders for fixtures, named after their bases like [`fixture_folders`].
+fn fixture_system_folders(root: &Path) -> SystemFolders {
+    SystemFolders {
+        system_root: Some(root.join("system_root")),
+        program_data: Some(root.join("program_data")),
+        var: Some(root.join("var")),
     }
 }
 
@@ -118,12 +127,22 @@ fn run_fixture(rule: &Rule, test: &RuleTest) -> BTreeSet<String> {
             git(root.path(), &add);
         }
     }
-    let matcher = fixture_matcher([rule], root.path());
+    let matcher = match rule.scope {
+        Scope::User => fixture_matcher([rule], root.path()),
+        Scope::System => {
+            Matcher::system([rule], &fixture_system_folders(root.path()), Os::current())
+        }
+    };
 
-    let (found, report) = matcher.find(root.path()).unwrap();
+    found_paths(&matcher, root.path())
+}
+
+/// What `matcher` finds under `root`, as `/`-separated paths relative to it.
+fn found_paths(matcher: &Matcher<'_>, root: &Path) -> BTreeSet<String> {
+    let (found, report) = matcher.find(root).unwrap();
 
     assert!(report.errors.is_empty(), "{:?}", report.errors);
-    let root = std::path::absolute(root.path()).unwrap();
+    let root = std::path::absolute(root).unwrap();
     found
         .iter()
         .map(|detection| {
@@ -143,9 +162,20 @@ fn builtin() -> RuleSet {
     RuleSet::builtin().unwrap()
 }
 
+fn builtin_system() -> RuleSet {
+    RuleSet::builtin_system().unwrap()
+}
+
+/// Every rule that ships, for both scopes.
+fn every_builtin_rule() -> Vec<Rule> {
+    let mut rules = builtin().rules().to_vec();
+    rules.extend_from_slice(builtin_system().rules());
+    rules
+}
+
 #[test]
 fn every_builtin_rule_passes_its_fixtures() {
-    for rule in builtin().rules() {
+    for rule in &every_builtin_rule() {
         for (index, test) in rule.tests.iter().enumerate() {
             if test.os.is_some_and(|os| os != Os::current()) {
                 continue;
@@ -164,7 +194,7 @@ fn every_builtin_rule_passes_its_fixtures() {
 
 #[test]
 fn every_builtin_rule_has_positive_and_negative_fixtures() {
-    for rule in builtin().rules() {
+    for rule in &every_builtin_rule() {
         assert!(
             rule.tests.iter().any(|test| !test.matches.is_empty()),
             "rule `{}` needs a test that matches something",
@@ -180,14 +210,265 @@ fn every_builtin_rule_has_positive_and_negative_fixtures() {
 
 #[test]
 fn every_rule_file_is_embedded() {
-    let on_disk: BTreeSet<String> =
-        fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("rules"))
+    let rules = Path::new(env!("CARGO_MANIFEST_DIR")).join("rules");
+    let files_in = |folder: &Path, prefix: &str| -> BTreeSet<String> {
+        fs::read_dir(folder)
             .unwrap()
-            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
-            .collect();
-    let embedded: BTreeSet<String> = BUILTIN.iter().map(|(name, _)| (*name).to_owned()).collect();
+            .map(Result::unwrap)
+            .filter(|entry| entry.file_type().unwrap().is_file())
+            .map(|entry| format!("{prefix}{}", entry.file_name().into_string().unwrap()))
+            .collect()
+    };
+    let embedded = |files: &[(&str, &str)]| -> BTreeSet<String> {
+        files.iter().map(|(name, _)| (*name).to_owned()).collect()
+    };
 
-    assert_eq!(embedded, on_disk);
+    assert_eq!(embedded(BUILTIN), files_in(&rules, ""));
+    assert_eq!(
+        embedded(BUILTIN_SYSTEM),
+        files_in(&rules.join("system"), "system/")
+    );
+}
+
+#[test]
+fn the_builtin_rule_sets_keep_to_their_own_scope() {
+    let user = builtin();
+    let system = builtin_system();
+
+    assert_eq!(user.scope(), Scope::User);
+    assert!(user.rules().iter().all(|rule| rule.scope == Scope::User));
+    assert_eq!(system.scope(), Scope::System);
+    assert!(!system.rules().is_empty());
+    assert!(
+        system
+            .rules()
+            .iter()
+            .all(|rule| rule.scope == Scope::System)
+    );
+    for rule in system.rules() {
+        assert!(user.get(&rule.id).is_none(), "{} is in both", rule.id);
+    }
+}
+
+/// A system rule for each item directly in `Temp` in the Windows folder, and in `/var/tmp`.
+const SYSTEM_TEMP: &str = r#"
+[[rule]]
+id = "test.system_temp"
+scope = "system"
+name = "Temp"
+category = "temp"
+risk = "safe"
+explain = "Because."
+
+[rule.match]
+kind = "known_location"
+entry = "any"
+locations = [
+    { os = "windows", base = "system_root", path = "Temp/*" },
+    { os = "linux", base = "var", path = "tmp/*" },
+]
+"#;
+
+fn load_system(toml: &str) -> Result<RuleSet, String> {
+    RuleSet::system_from_sources([("test.toml", toml)]).map_err(|error| error.to_string())
+}
+
+/// Where [`SYSTEM_TEMP`] matches `x` in a fixture on this OS, if anywhere.
+fn system_temp_item() -> Option<&'static str> {
+    match Os::current() {
+        Os::Windows => Some("system_root/Temp/x"),
+        Os::Linux => Some("var/tmp/x"),
+        Os::Macos => None,
+    }
+}
+
+#[test]
+fn each_loader_refuses_the_other_scopes_rules() {
+    let user = load(SYSTEM_TEMP).unwrap_err();
+    let system = load_system(VALID).unwrap_err();
+
+    assert!(user.contains("only for system cleanup"), "{user}");
+    assert!(system.contains("only system rules"), "{system}");
+    assert!(load_system(SYSTEM_TEMP).is_ok());
+}
+
+#[test]
+fn system_rules_use_system_folders_on_their_own_os() {
+    let location = |os: &str, base: &str| {
+        SYSTEM_TEMP.replace(
+            r#"{ os = "windows", base = "system_root", path = "Temp/*" }"#,
+            &format!(r#"{{ os = "{os}", base = "{base}", path = "Temp/*" }}"#),
+        )
+    };
+    let cases = [
+        (location("windows", "temp"), "must be under `system_root`"),
+        (location("linux", "home"), "must be under `system_root`"),
+        (location("linux", "system_root"), "only on Windows"),
+        (location("linux", "program_data"), "only on Windows"),
+        (location("windows", "var"), "only on Windows"),
+    ];
+
+    assert!(load_system(&location("windows", "program_data")).is_ok());
+    for (toml, expected) in cases {
+        let error = load_system(&toml).unwrap_err();
+        assert!(
+            error.contains(expected),
+            "expected {expected:?} in {error:?}"
+        );
+    }
+    for base in ["system_root", "program_data", "var"] {
+        let toml = format!(
+            r#"
+[[rule]]
+id = "test.user"
+name = "User"
+category = "temp"
+risk = "safe"
+explain = "Because."
+
+[rule.match]
+kind = "known_location"
+locations = [{{ os = "linux", base = "{base}", path = "app" }}]
+"#
+        );
+        let error = load(&toml).unwrap_err();
+        assert!(error.contains("only for system rules"), "{error}");
+    }
+}
+
+#[test]
+fn system_locations_have_wildcards_only_in_their_last_name() {
+    let path =
+        |path: &str| SYSTEM_TEMP.replace(r#"path = "Temp/*""#, &format!(r#"path = "{path}""#));
+
+    for valid in ["Temp/*", "Minidump/*.dmp", "MEMORY.DMP", "a/b/c/*.log"] {
+        assert!(load_system(&path(valid)).is_ok(), "{valid}");
+    }
+    for invalid in [
+        "*",
+        "*.dmp",
+        "*/Temp",
+        "Te*/x",
+        "Temp/*/x",
+        "Temp/../x",
+        "./Temp/*",
+    ] {
+        let error = load_system(&path(invalid)).unwrap_err();
+        assert!(
+            error.contains("only in the last name"),
+            "{invalid}: {error}"
+        );
+    }
+}
+
+#[test]
+fn system_rules_are_only_known_locations() {
+    let artifact = VALID.replace(
+        r#"id = "test.thing""#,
+        "id = \"test.thing\"\nscope = \"system\"",
+    );
+    let large = r#"
+[[rule]]
+id = "test.large"
+scope = "system"
+name = "Large"
+category = "large_files"
+risk = "review"
+explain = "Because."
+
+[rule.match]
+kind = "large_file"
+"#;
+
+    for toml in [artifact.as_str(), large] {
+        let error = load_system(toml).unwrap_err();
+        assert!(error.contains("must be a `known_location`"), "{error}");
+    }
+}
+
+#[test]
+fn each_matcher_matches_only_its_own_scopes_rules() {
+    let user = location_rule("app/Cache", "dir");
+    let system = load_system(SYSTEM_TEMP).unwrap();
+    let both: Vec<&Rule> = user.rules().iter().chain(system.rules()).collect();
+    let root = fixture_root();
+    build_tree(
+        root.path(),
+        &[
+            "cache/app/Cache/x".into(),
+            "system_root/Temp/x".into(),
+            "var/tmp/x".into(),
+        ],
+    );
+
+    let users = Matcher::new(
+        both.iter().copied(),
+        &fixture_folders(root.path()),
+        Os::current(),
+    );
+    let systems = Matcher::system(
+        both.iter().copied(),
+        &fixture_system_folders(root.path()),
+        Os::current(),
+    );
+
+    assert_eq!(
+        found_paths(&users, root.path()),
+        BTreeSet::from(["cache/app/Cache".to_owned()])
+    );
+    assert_eq!(
+        found_paths(&systems, root.path()),
+        system_temp_item().into_iter().map(str::to_owned).collect()
+    );
+}
+
+/// Even a rule in the wrong scope finds nothing, since each matcher resolves only its own bases.
+#[test]
+fn each_matcher_resolves_only_its_own_scopes_folders() {
+    let mut system_rule = load_system(SYSTEM_TEMP).unwrap().rules()[0].clone();
+    system_rule.scope = Scope::User;
+    let mut user_rule = location_rule("app/Cache", "dir").rules()[0].clone();
+    user_rule.scope = Scope::System;
+    let root = fixture_root();
+    build_tree(
+        root.path(),
+        &[
+            "cache/app/Cache/x".into(),
+            "system_root/Temp/x".into(),
+            "var/tmp/x".into(),
+        ],
+    );
+
+    let users = Matcher::new([&system_rule], &fixture_folders(root.path()), Os::current());
+    let systems = Matcher::system(
+        [&user_rule],
+        &fixture_system_folders(root.path()),
+        Os::current(),
+    );
+
+    assert_eq!(found_paths(&users, root.path()), BTreeSet::new());
+    assert_eq!(found_paths(&systems, root.path()), BTreeSet::new());
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+#[test]
+fn the_system_matcher_doesnt_read_git() {
+    let item = system_temp_item().unwrap();
+    let system = load_system(SYSTEM_TEMP).unwrap();
+    let root = fixture_root();
+    build_tree(root.path(), &[item.to_owned()]);
+    git(root.path(), &["init", "-q"]);
+    git(root.path(), &["add", "--", item]);
+    let matcher = Matcher::system(
+        system.rules(),
+        &fixture_system_folders(root.path()),
+        Os::current(),
+    );
+
+    let (found, _) = matcher.find(root.path()).unwrap();
+
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].git, crate::git::GitStatus::NotChecked);
 }
 
 #[test]
@@ -536,6 +817,7 @@ fn large_and_dump_rules() -> RuleSet {
     let dumps = shared_folder_rule("home", "Dumps/*.dmp").rules()[0].clone();
     RuleSet {
         rules: vec![large, dumps],
+        scope: Scope::User,
     }
 }
 

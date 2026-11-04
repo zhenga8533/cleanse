@@ -1,7 +1,8 @@
 # Rules
 
 > Status: project artifacts, known locations, large files, advice, and Git checks are
-> implemented, including rules for AI agents' and browsers' folders.
+> implemented, including rules for AI agents' and browsers' folders. System rules are written,
+> and system cleanup, which uses them, is being built.
 
 Rules describe what Cleanse can recognize. They're TOML files in
 [`crates/cleanse-core/rules/`](https://github.com/zhenga8533/cleanse/tree/main/crates/cleanse-core/rules),
@@ -171,11 +172,47 @@ also shows when unpacked files arrived even though they keep their original date
 were last opened doesn't count, since scanners open them without anything needing them. If when
 the computer started can't be read, the matches are kept.
 
+## System rules
+
+System cleanup removes clutter from the operating system's own folders, such as the Windows
+temp folder, and runs only as an administrator or root
+([ADR 0010](adr/0010-elevated-system-cleanup.md)). Its rules are in
+[`rules/system/`](https://github.com/zhenga8533/cleanse/tree/main/crates/cleanse-core/rules/system),
+and each says so:
+
+```toml
+[[rule]]
+id = "windows.system_temp"
+scope = "system"
+
+[rule.match]
+kind = "known_location"
+entry = "any"
+locations = [{ os = "windows", base = "system_root", path = "Temp/*" }]
+```
+
+System rules and the user's rules never mix. The user's rules can't say `scope = "system"`, and
+system cleanup loads only rules that do. A system rule is always a known location, under one of
+the system's folders, which come from the operating system rather than environment variables:
+
+| `base` | System | Usually |
+|---|---|---|
+| `system_root` | Windows | `C:\Windows` |
+| `program_data` | Windows | `C:\ProgramData` |
+| `var` | Linux | `/var` |
+
+The user's rules can't use these bases, and system rules can't use the user's. A system rule's
+location names one item directly inside a fixed folder, so `*` can appear only in its last name,
+and not directly in the base folder: `Temp/*` and `Minidump/*.dmp` are allowed, but `*` and
+`Temp/*/x` aren't. System cleanup doesn't read Git, so `git` in a system rule's test changes
+nothing.
+
 ## Fields
 
 | Field | |
 |---|---|
 | `id` | Lowercase, two or more `.`-separated parts: `ecosystem.thing` |
+| `scope` | Optional: `system` for a [system rule](#system-rules) |
 | `name` | A short heading, like "Node.js dependencies" |
 | `category` | `dependencies`, `build_output`, `package_caches`, `tool_caches`, `ai_agents`, `ai_models`, `git`, `temp`, `logs`, `browser_caches`, `downloads`, or `large_files` |
 | `risk` | `safe` (the app recreates it on its own), `regenerable` (it takes a command, a download, or time), `review`, or `protected`. See the [safety model](safety-model.md) |
@@ -195,7 +232,8 @@ Every rule needs at least one test that matches something and one that matches n
 fails otherwise. A test builds `tree` in an empty directory (a trailing `/` makes a directory;
 anything else is an empty file), runs only that rule over it, and expects exactly `matches`.
 Known locations resolve under folders named after their base (`home/`, `cache/`, `config/`,
-`data_local/`, `temp/`, `downloads/`), and a test can be limited to one OS with `os = "windows"`.
+`data_local/`, `temp/`, `downloads/`, and for system rules `system_root/`, `program_data/`, and
+`var/`), and a test can be limited to one OS with `os = "windows"`.
 
 For rules that look at size, `sizes` creates files with that many bytes in them. Tests count
 files taking 64 KiB or more on disk as large:

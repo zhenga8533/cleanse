@@ -30,6 +30,8 @@ pub enum GitStatus {
         error: String,
     },
     Known(GitFacts),
+    /// Git wasn't read, as system cleanup never reads it.
+    NotChecked,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

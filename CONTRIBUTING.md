@@ -96,8 +96,9 @@ The reasoning is in the [decision records](docs/src/adr/README.md).
 ## Changes that need extra care
 
 Safety checks (`crates/cleanse-core/src/safety/`), plan execution (`crates/cleanse-exec/`), AI
-agent rules (`crates/cleanse-core/rules/ai-agents.toml`), and the elevated helper
-(`apps/elevate/`) always need a maintainer's review. In those PRs, describe what could go wrong and how the change prevents it,
+agent rules (`crates/cleanse-core/rules/ai-agents.toml`), system rules
+(`crates/cleanse-core/rules/system/`), and the elevated helper (`apps/elevate/`) always need a
+maintainer's review. In those PRs, describe what could go wrong and how the change prevents it,
 and add a test that would have caught the failure.
 
 ## Adding a rule
@@ -105,7 +106,9 @@ and add a test that would have caught the failure.
 Rules are TOML files in `crates/cleanse-core/rules/`, grouped by ecosystem. No Rust required:
 
 1. Add a `[[rule]]` to the matching file, or create a new file and add it to the `BUILTIN`
-   list in `crates/cleanse-core/src/rules.rs` (a test fails if you forget).
+   list in `crates/cleanse-core/src/rules.rs` (a test fails if you forget). System rules go in
+   `rules/system/` and the `BUILTIN_SYSTEM` list, and follow
+   [their own constraints](docs/src/rules.md#system-rules).
 2. Explain what it matches and how it comes back, and require real evidence: a marker file
    next to the directory, or a file inside it. A directory name alone isn't enough.
 3. Add at least one `[[rule.test]]` that matches and one that doesn't, ideally the lookalike

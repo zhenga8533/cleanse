@@ -1298,6 +1298,9 @@ fn browser_home(root: &Path) -> Vec<PathBuf> {
                 Base::Temp | Base::Downloads => {
                     panic!("{} keeps a cache in a folder everyone shares", rule.id)
                 }
+                Base::SystemRoot | Base::ProgramData | Base::Var => {
+                    panic!("{} keeps a cache in a system folder", rule.id)
+                }
             };
             let cache = base.as_ref().unwrap().join(location.path.replace('*', "1"));
             write(&cache.join("x"), "x");

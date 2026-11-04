@@ -1,7 +1,7 @@
 #![allow(
     unsafe_code,
-    reason = "file identity, ownership, sync root, token, and long name queries need Win32 calls \
-              that std doesn't wrap"
+    reason = "file identity, ownership, sync root, token, folder, and long name queries need Win32 \
+              calls that std doesn't wrap"
 )]
 
 use std::env;
@@ -12,7 +12,7 @@ use std::mem::size_of;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::ptr;
 
 use cleanse_model::{EntryKind, FileIdentity};
@@ -38,12 +38,16 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_SHARE_WRITE, FILE_STANDARD_INFO, FileAttributeTagInfo, FileIdInfo, FileStandardInfo,
     GetFileInformationByHandleEx, GetLongPathNameW, GetVolumeInformationByHandleW, READ_CONTROL,
 };
+use windows_sys::Win32::System::Registry::{
+    HKEY_LOCAL_MACHINE, RRF_NOEXPAND, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ, RegGetValueW,
+};
+use windows_sys::Win32::System::SystemInformation::GetSystemWindowsDirectoryW;
 use windows_sys::Win32::System::SystemServices::{
     FILE_PERSISTENT_ACLS, SECURITY_SERVICE_ID_BASE_RID,
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
-use crate::{FileFacts, FileOwner, ListedFacts};
+use crate::{FileFacts, FileOwner, ListedFacts, SystemFolders};
 
 /// Reparse tags with this bit stand in for another name: symbolic links, junctions, and mount
 /// points. They're the only reparse points treated as links.
@@ -271,6 +275,123 @@ fn is_service(sid: PSID) -> bool {
 pub(crate) fn temp_dir() -> PathBuf {
     let temp = env::temp_dir();
     long_path(&temp).unwrap_or(temp)
+}
+
+pub(crate) fn system_folders() -> io::Result<SystemFolders> {
+    let system_root = windows_folder()?;
+    let program_data = program_data(&system_root)?;
+    Ok(SystemFolders {
+        system_root: Some(system_root),
+        program_data: Some(program_data),
+        var: None,
+    })
+}
+
+/// The Windows folder as the system recorded it at startup, which `%SystemRoot%` and `%windir%`
+/// don't change.
+fn windows_folder() -> io::Result<PathBuf> {
+    const MAX_PATH: usize = 260;
+
+    let mut buffer = vec![0; MAX_PATH];
+    loop {
+        let size = u32::try_from(buffer.len()).expect("the buffer holds a path's length");
+        // SAFETY: `buffer` is writable for the `size` characters passed.
+        let length = unsafe { GetSystemWindowsDirectoryW(buffer.as_mut_ptr(), size) };
+        let length = usize::try_from(length).expect("a path's length fits in memory");
+        if length == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // A length that doesn't fit is the size needed, counting the NUL. Otherwise it doesn't
+        // count the NUL.
+        if length < buffer.len() {
+            buffer.truncate(length);
+            return Ok(PathBuf::from(OsString::from_wide(&buffer)));
+        }
+        buffer.resize(length, 0);
+    }
+}
+
+/// The `ProgramData` folder as the registry records it, usually `%SystemDrive%\ProgramData`. The
+/// shell's known-folder lookup expands that from the environment, so here `%SystemDrive%` is the
+/// drive of `windows`, the Windows folder, which is what it means. Any other variable is refused.
+fn program_data(windows: &Path) -> io::Result<PathBuf> {
+    const SYSTEM_DRIVE: &str = "%SystemDrive%";
+
+    let recorded = registry_text(
+        r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList",
+        "ProgramData",
+    )?;
+    let Some(Component::Prefix(drive)) = windows.components().next() else {
+        return Err(io::Error::other(format!(
+            "the Windows folder, {}, isn't on a drive",
+            windows.display()
+        )));
+    };
+    let mut folder = OsString::new();
+    let rest = match recorded.get(..SYSTEM_DRIVE.len()) {
+        Some(start) if start.eq_ignore_ascii_case(SYSTEM_DRIVE) => {
+            folder.push(drive.as_os_str());
+            &recorded[SYSTEM_DRIVE.len()..]
+        }
+        _ => &recorded,
+    };
+    folder.push(rest);
+    let folder = PathBuf::from(folder);
+    if rest.contains('%') || !folder.is_absolute() {
+        return Err(io::Error::other(format!(
+            "the registry records ProgramData as {recorded}, which isn't a full path or names an \
+             environment variable other than {SYSTEM_DRIVE}"
+        )));
+    }
+    Ok(folder)
+}
+
+/// A text value under `HKEY_LOCAL_MACHINE`, which only administrators can change, as it's stored:
+/// any environment variables in it aren't expanded.
+fn registry_text(key: &str, value: &str) -> io::Result<String> {
+    const FLAGS: u32 = RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ | RRF_NOEXPAND;
+
+    let key: Vec<u16> = key.encode_utf16().chain([0]).collect();
+    let value: Vec<u16> = value.encode_utf16().chain([0]).collect();
+    let mut size = 0;
+    // SAFETY: `key` and `value` are NUL-terminated. Without a buffer, the call only writes the
+    // size it needs, in bytes, to `size`, which is writable.
+    let error = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            key.as_ptr(),
+            value.as_ptr(),
+            FLAGS,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            &raw mut size,
+        )
+    };
+    if error != ERROR_SUCCESS {
+        return Err(io::Error::from_raw_os_error(error.cast_signed()));
+    }
+    let mut text = vec![0u16; (size as usize).div_ceil(size_of::<u16>())];
+    // SAFETY: `key` and `value` are NUL-terminated, `text` is writable for at least the `size`
+    // bytes passed, and `size` is writable.
+    let error = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            key.as_ptr(),
+            value.as_ptr(),
+            FLAGS,
+            ptr::null_mut(),
+            text.as_mut_ptr().cast(),
+            &raw mut size,
+        )
+    };
+    if error != ERROR_SUCCESS {
+        return Err(io::Error::from_raw_os_error(error.cast_signed()));
+    }
+    let length = text
+        .iter()
+        .position(|&unit| unit == 0)
+        .unwrap_or(text.len());
+    String::from_utf16(&text[..length]).map_err(io::Error::other)
 }
 
 fn long_path(path: &Path) -> Option<PathBuf> {

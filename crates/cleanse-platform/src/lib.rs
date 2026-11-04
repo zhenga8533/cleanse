@@ -170,6 +170,27 @@ impl KnownFolders {
     }
 }
 
+/// The folders the operating system keeps its own files in, where system cleanup works. Folders
+/// an OS doesn't have are `None`, and macOS has none of them.
+///
+/// They come from the operating system, never from environment variables such as `%SystemRoot%`,
+/// which a user can set for the elevated programs they start through `HKCU\Environment`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SystemFolders {
+    /// The Windows folder, usually `C:\Windows`.
+    pub system_root: Option<PathBuf>,
+    /// Where Windows programs keep data for every user, usually `C:\ProgramData`.
+    pub program_data: Option<PathBuf>,
+    /// `/var` on Linux.
+    pub var: Option<PathBuf>,
+}
+
+impl SystemFolders {
+    pub fn current() -> io::Result<Self> {
+        os::system_folders()
+    }
+}
+
 /// The real platform.
 #[derive(Debug)]
 pub struct System {

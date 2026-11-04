@@ -1,0 +1,147 @@
+# What the operating system saves when something crashes, for debugging or reporting it. As with
+# the user's crash dumps (../crash-dumps.toml), only the person who might do that knows whether
+# they still need one, so these are Review items. System cleanup quarantines them in its own
+# folder, which only administrators or root can read, since a crash's memory can hold anyone's
+# data (ADR 0010).
+
+# Windows Error Reporting keeps a copy of each report it sent in ReportArchive, a folder per
+# report, up to MaxArchiveCount, 1000 by default. Reports it hasn't sent yet wait in ReportQueue,
+# which isn't covered.
+# https://learn.microsoft.com/en-us/windows/win32/wer/wer-settings
+# https://learn.microsoft.com/en-us/windows-server/failover-clustering/troubleshooting-using-wer-reports
+[[rule]]
+id = "windows.error_report_archive"
+scope = "system"
+name = "Sent error reports"
+category = "logs"
+risk = "review"
+explain = "Reports of crashes and other problems that Windows Error Reporting already sent to Microsoft, and keeps a copy of."
+
+[rule.match]
+kind = "known_location"
+locations = [
+    { os = "windows", base = "program_data", path = "Microsoft/Windows/WER/ReportArchive/*" },
+]
+
+[[rule.test]]
+os = "windows"
+tree = [
+    "program_data/Microsoft/Windows/WER/ReportArchive/AppCrash_app.exe_1a2b3c_4d5e6f/Report.wer",
+    "program_data/Microsoft/Windows/WER/ReportArchive/Kernel_141_1a2b3c_4d5e6f/Report.wer",
+]
+matches = [
+    "program_data/Microsoft/Windows/WER/ReportArchive/AppCrash_app.exe_1a2b3c_4d5e6f",
+    "program_data/Microsoft/Windows/WER/ReportArchive/Kernel_141_1a2b3c_4d5e6f",
+]
+
+[[rule.test]]
+tree = [
+    "program_data/Microsoft/Windows/WER/ReportArchive/Report.wer",
+    "program_data/Microsoft/Windows/WER/ReportQueue/AppCrash_app.exe_1a2b3c_4d5e6f/Report.wer",
+    "program_data/Microsoft/Windows/WER/Temp/x",
+]
+matches = []
+
+# When Windows itself crashes, it saves its memory for debugging: the latest crash's in
+# %SystemRoot%\MEMORY.DMP, which the next crash replaces, and a small dump of each crash in
+# %SystemRoot%\Minidump. Windows deletes MEMORY.DMP on its own when the drive is low on space,
+# except on servers and PCs in a domain.
+# https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/memory-dump-file-options
+# https://learn.microsoft.com/en-us/archive/blogs/wer/kernel-dump-storage-and-clean-up-behavior-in-windows-7
+[[rule]]
+id = "windows.memory_dumps"
+scope = "system"
+name = "Windows memory dumps"
+category = "logs"
+risk = "review"
+explain = "Memory dumps Windows saved when it crashed, with a blue screen, for finding out why. Only someone debugging those crashes needs them."
+
+[rule.match]
+kind = "known_location"
+entry = "file"
+locations = [
+    { os = "windows", base = "system_root", path = "MEMORY.DMP" },
+    { os = "windows", base = "system_root", path = "Minidump/*.dmp" },
+]
+
+[[rule.test]]
+os = "windows"
+tree = [
+    "system_root/MEMORY.DMP",
+    "system_root/Minidump/103026-12345-01.dmp",
+    "system_root/Minidump/notes.txt",
+]
+matches = ["system_root/MEMORY.DMP", "system_root/Minidump/103026-12345-01.dmp"]
+
+[[rule.test]]
+tree = [
+    "system_root/MEMORY.DMP/x",
+    "system_root/LiveKernelReports/WATCHDOG/WATCHDOG-1.dmp",
+    "system_root/System32/MEMORY.DMP",
+]
+matches = []
+
+# systemd-coredump saves the memory of a program that crashed in /var/lib/systemd/coredump, as a
+# compressed core.<program>.<uid>.<boot id>.<pid>.<time> file that root owns. It removes old ones
+# on its own: by size whenever it saves one (MaxUse and KeepFree), and by age through
+# systemd-tmpfiles, after 2 weeks from systemd 256 on and after 3 days before that.
+# https://www.freedesktop.org/software/systemd/man/latest/coredump.conf.html
+# https://github.com/systemd/systemd/blob/main/tmpfiles.d/systemd.conf.in
+[[rule]]
+id = "linux.core_dumps"
+scope = "system"
+name = "Core dumps"
+category = "logs"
+risk = "review"
+explain = "The memory of programs that crashed, which systemd saved for debugging them, and coredumpctl lists. Only someone debugging those crashes needs them, and systemd removes old ones on its own."
+
+[rule.match]
+kind = "known_location"
+entry = "file"
+locations = [{ os = "linux", base = "var", path = "lib/systemd/coredump/core.*" }]
+
+[[rule.test]]
+os = "linux"
+tree = [
+    "var/lib/systemd/coredump/core.app.1000.0123456789abcdef0123456789abcdef.4242.1761800000000000.zst",
+    "var/lib/systemd/coredump/.#core.app.partial",
+]
+matches = [
+    "var/lib/systemd/coredump/core.app.1000.0123456789abcdef0123456789abcdef.4242.1761800000000000.zst",
+]
+
+[[rule.test]]
+tree = ["var/lib/systemd/coredump/core.app/x", "var/lib/apport/coredump/core.app.1000"]
+matches = []
+
+# Ubuntu's apport writes a report of each crash to /var/crash, as <program's path>.<uid>.crash.
+# It belongs to the user whose program crashed, or to root when the program had changed its
+# privileges, and system cleanup removes only root's (ADR 0010). apport's daily cron job removes
+# reports older than 7 days.
+# https://github.com/canonical/apport/blob/main/data/apport
+# https://github.com/canonical/apport/blob/main/etc/cron.daily/apport
+[[rule]]
+id = "ubuntu.crash_reports"
+scope = "system"
+name = "Crash reports"
+category = "logs"
+risk = "review"
+explain = "Reports of programs that crashed, which Ubuntu saved to send or for debugging them. Ubuntu removes them after a week on its own."
+
+[rule.match]
+kind = "known_location"
+entry = "file"
+locations = [{ os = "linux", base = "var", path = "crash/*.crash" }]
+
+[[rule.test]]
+os = "linux"
+tree = [
+    "var/crash/_usr_bin_app.0.crash",
+    "var/crash/_usr_bin_app.0.upload",
+    "var/crash/_usr_bin_app.0.uploaded",
+]
+matches = ["var/crash/_usr_bin_app.0.crash"]
+
+[[rule.test]]
+tree = ["var/crash/folder.crash/x", "var/lib/whoopsie/x.crash"]
+matches = []
