@@ -14,6 +14,7 @@ dist = false
 
 [dependencies]
 cleanse-desktop-views.workspace = true
+cleanse-elevate.workspace = true
 cleanse-engine.workspace = true
 cleanse-model.workspace = true
 # The system's folder picker, without Tauri's dialog plugin, which would also bring in its file
@@ -27,6 +28,7 @@ ts-rs.workspace = true
 tauri-build = { workspace = true, features = ["isolation"] }
 
 [dev-dependencies]
+cleanse-engine = { workspace = true, features = ["fake"] }
 serde_json.workspace = true
 tauri = { workspace = true, features = ["test"] }
 tempfile.workspace = true

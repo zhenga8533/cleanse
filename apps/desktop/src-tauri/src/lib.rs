@@ -2,11 +2,14 @@
 //! the session gave out and never take a path to remove (ADR 0009).
 
 mod commands;
+mod system;
 #[cfg(test)]
 mod tests;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+
+use system::SystemState;
 
 use cleanse_engine::{Engine, Session};
 use tauri::webview::NewWindowResponse;
@@ -64,7 +67,7 @@ impl AppState {
 
 /// Opens the app's window and runs until it's closed.
 pub fn run() {
-    configure(Builder::default())
+    configure(Builder::default(), SystemState::installed())
         .setup(|app| {
             open_window(app)?;
             Ok(())
@@ -79,10 +82,12 @@ pub(crate) fn context<R: Runtime>() -> tauri::Context<R> {
     tauri::generate_context!()
 }
 
-/// The app's state and commands, for any runtime, so tests can use a mock one.
-pub(crate) fn configure<R: Runtime>(builder: Builder<R>) -> Builder<R> {
+/// The app's state and commands, for any runtime, so tests can use a mock one, and with how it
+/// starts system cleanup's helper, so tests can serve one themselves.
+pub(crate) fn configure<R: Runtime>(builder: Builder<R>, system: Arc<SystemState>) -> Builder<R> {
     builder
         .manage(AppState::new())
+        .manage(system)
         .invoke_handler(tauri::generate_handler![
             commands::app_info,
             commands::folders,
@@ -102,6 +107,19 @@ pub(crate) fn configure<R: Runtime>(builder: Builder<R>) -> Builder<R> {
             commands::finish,
             commands::settings,
             commands::rules,
+            system::system_status,
+            system::system_scan,
+            system::system_cancel,
+            system::system_summary,
+            system::system_candidates,
+            system::system_explain,
+            system::system_clean,
+            system::system_quarantined,
+            system::system_restore,
+            system::system_purge,
+            system::system_history,
+            system::system_finish,
+            system::system_rules,
         ])
 }
 

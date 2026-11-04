@@ -26,6 +26,19 @@ pub struct AppInfo {
     pub elevated: bool,
 }
 
+/// Whether the app can do system cleanup, which its elevated helper does (ADR 0010).
+#[derive(Debug, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct SystemStatus {
+    /// System cleanup is for Windows and Linux.
+    pub supported: bool,
+    /// Why the app can't start its helper, if it can't.
+    pub unavailable: Option<String>,
+    /// The helper is running, so what's asked of it won't ask for administrator rights again.
+    pub running: bool,
+}
+
 /// The folders a scan covers.
 #[derive(Debug, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]

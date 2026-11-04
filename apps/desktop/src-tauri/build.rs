@@ -23,6 +23,19 @@ fn main() {
         "finish",
         "settings",
         "rules",
+        "system_status",
+        "system_scan",
+        "system_cancel",
+        "system_summary",
+        "system_candidates",
+        "system_explain",
+        "system_clean",
+        "system_quarantined",
+        "system_restore",
+        "system_purge",
+        "system_history",
+        "system_finish",
+        "system_rules",
     ]);
 
     // Tauri's Windows code needs Common Controls v6, which a program only gets if its manifest
