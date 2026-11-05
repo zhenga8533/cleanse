@@ -8,6 +8,21 @@ All notable changes to Cleanse are documented here. The format is based on
 
 ### Added
 
+- A Homebrew formula for the command line, on macOS and Linux:
+  `brew install zhenga8533/tap/cleanse-cli`.
+
+## [1.0.0] - 2026-11-05
+
+System cleanup. Cleanse now cleans the operating system's own folders on Windows and Linux as well
+as yours: Windows' temp folder, update downloads, error reports, and memory dumps, and Linux's
+core dumps and crash reports. That's the only thing it does as an administrator or root, with
+rules of its own, and it removes an item only if the item, and everything in it, belongs to the
+system. In the desktop app, a separate helper does that work, and the app's window still never
+runs as an administrator. For your own files, Cleanse now also keeps what belongs to other
+accounts.
+
+### Added
+
 - `cleanse system` cleans the operating system's own folders, as an administrator or root:
   Windows' temp folder, Windows Update's downloads, sent error reports, and memory dumps, and
   on Linux, core dumps and Ubuntu's crash reports. For apt's, dnf's, pacman's, and Delivery
@@ -30,11 +45,6 @@ All notable changes to Cleanse are documented here. The format is based on
   - It accepts only the app that started it, and only the IDs of what its own scan found.
   - The AppImage doesn't have it, and points to `cleanse system` instead. There's no System
     section on macOS.
-- The command line is on crates.io, as `cleanse-cli`. `cargo install --locked cleanse-cli` builds
-  it, and `cargo binstall cleanse-cli` gets the release's archive. The five crates it's built
-  from are published with it, as internal parts without a stable API.
-- A Homebrew formula for the command line, on macOS and Linux:
-  `brew install zhenga8533/tap/cleanse-cli`.
 
 ### Changed
 
@@ -223,7 +233,8 @@ and Linux. It never removes anything; cleanup arrives in 0.2.
   cloud-synced folders, folders containing possible secrets or virtual machine disks, and
   anything that couldn't be fully read.
 
-[Unreleased]: https://github.com/zhenga8533/cleanse/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/zhenga8533/cleanse/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/zhenga8533/cleanse/releases/tag/v1.0.0
 [0.5.0]: https://github.com/zhenga8533/cleanse/releases/tag/v0.5.0
 [0.3.0]: https://github.com/zhenga8533/cleanse/releases/tag/v0.3.0
 [0.2.0]: https://github.com/zhenga8533/cleanse/releases/tag/v0.2.0

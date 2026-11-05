@@ -41,6 +41,11 @@
     ],
     "macOS": {
       "signingIdentity": "-"
+    },
+    "windows": {
+      "wix": {
+        "upgradeCode": "25a11fd3-a6fe-5bc6-8105-18cfd5d1c721"
+      }
     }
   }
 }

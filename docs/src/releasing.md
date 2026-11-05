@@ -1,8 +1,9 @@
 # Releasing
 
 A release is a tag on `main`. Pushing the tag runs the release workflow, which builds the command
-line and the desktop app and publishes them as a GitHub Release, then publishes the command line
-to crates.io and its formula to the Homebrew tap. Only a maintainer pushes tags.
+line and the desktop app and publishes them as a GitHub Release, then commits the command line's
+formula to the Homebrew tap. Publishing the command line to crates.io is ready, but
+[off for now](#cratesio). Only a maintainer pushes tags.
 
 ## Preparing the release
 
@@ -55,9 +56,9 @@ than editing the workflow; dist's plan fails while they disagree. Its jobs:
    every file. It runs only if every build succeeded, so a failed build publishes nothing.
 6. **`custom-publish-crates`** runs
    [`publish-crates.yml`](https://github.com/zhenga8533/cleanse/blob/main/.github/workflows/publish-crates.yml)
-   once the release exists, and not for prereleases. It publishes `cleanse-cli` and the five
-   library crates it's built from to crates.io, leaving out any whose version crates.io already
-   has. See [crates.io](#cratesio).
+   once the release exists, and not for prereleases. Once crates.io publishing is on, it publishes
+   `cleanse-cli` and the five library crates it's built from to crates.io, leaving out any whose
+   version crates.io already has. Until then, it's skipped. See [crates.io](#cratesio).
 7. **`custom-publish-homebrew`** runs
    [`publish-homebrew.yml`](https://github.com/zhenga8533/cleanse/blob/main/.github/workflows/publish-homebrew.yml)
    beside it, and also not for prereleases. It commits the release's formula to the tap. See
@@ -99,8 +100,12 @@ it can write to.
 
 ## crates.io
 
-The release publishes six crates: `cleanse-cli`, which installs `cleanse`, and the crates it's
-built from, `cleanse-model`, `cleanse-platform`, `cleanse-core`, `cleanse-exec`, and
+**Off for now:** nothing is on crates.io yet. A release skips `custom-publish-crates` until the
+repository variable `PUBLISH_CRATES` is `true`, which waits on [turning it on](#turning-it-on).
+Until then, CI's dry run keeps the crates publishable.
+
+Once it's on, the release publishes six crates: `cleanse-cli`, which installs `cleanse`, and the
+crates it's built from, `cleanse-model`, `cleanse-platform`, `cleanse-core`, `cleanse-exec`, and
 `cleanse-engine`. Their descriptions say they're internal to `cleanse-cli`, with no stable API,
 so their versions are the CLI's and promise nothing about their own APIs.
 `cargo publish --workspace` finds them as the packages without `publish = false`, and publishes
@@ -117,29 +122,37 @@ is `release.yml`. That's the workflow a run started from, so it's `release.yml` 
 steps are in `publish-crates.yml`, which `release.yml` calls. So only `release.yml`'s runs can
 publish, not `publish-crates.yml`'s own runs on pull requests.
 
-**The first publish, at v1.0.0:** a trusted publisher can only be added to a crate that exists,
-so the first version is published by hand, before the tag:
+### Turning it on
 
-1. Merge the release-prep pull request, and hold other merges, as usual.
-2. On crates.io, create an API token with the `publish-new` and `publish-update` scopes, for
-   crates matching `cleanse-*`, that expires soon. Then publish what's on `main`:
+A trusted publisher can only be added to a crate that exists, so the first version is published by
+hand, from the latest release's tag:
+
+1. On crates.io, create an API token with the `publish-new` and `publish-update` scopes, for
+   crates matching `cleanse-*`, that expires soon. Then publish the latest release, `vX.Y.Z`:
 
    ```sh
-   git switch main
-   git pull --ff-only
+   git fetch --tags
+   git switch --detach vX.Y.Z
    cargo login          # paste the token
    cargo publish --workspace --locked
    cargo logout
+   git switch main
    ```
 
-3. In each crate's **Settings** on crates.io, add a trusted publisher: GitHub, owner `zhenga8533`,
+2. In each crate's **Settings** on crates.io, add a trusted publisher: GitHub, owner `zhenga8533`,
    repository `cleanse`, workflow `release.yml`, and no environment.
-4. Revoke the API token. Optionally, set each crate's publishing method restriction to trusted
+3. Revoke the API token. Optionally, set each crate's publishing method restriction to trusted
    publishing only, so that no API token can publish it.
-5. Tag as usual. `custom-publish-crates` finds all six crates already published, and publishes
-   nothing.
+4. Turn publishing on:
 
-From the next version on, the release publishes them.
+   ```sh
+   gh variable set PUBLISH_CRATES --body true --repo zhenga8533/cleanse
+   ```
+
+5. Add `cargo install --locked cleanse-cli` and `cargo binstall cleanse-cli` to the README's
+   install section, and crates.io to its roadmap.
+
+From the next release on, the release publishes them.
 
 ## Homebrew
 
@@ -202,8 +215,81 @@ when they match:
 
 After each release, check that its page has the five CLI archives, the two installer scripts, and
 the four desktop installers, each with a `.sha256`; that a CLI archive and a desktop installer
-verify; that the README's installer one-liners install the new version; that crates.io has
-the version of all six crates; and that the tap's `Formula/cleanse-cli.rb` names it.
+verify; that the README's installer one-liners install the new version; that the tap's
+`Formula/cleanse-cli.rb` names it; and, once crates.io publishing is on, that crates.io has the
+version of all six crates.
+
+## winget
+
+winget, Windows' package manager, has two packages for Cleanse:
+
+| Package | Installer | What it installs |
+|---|---|---|
+| `zhenga8533.Cleanse` | `Cleanse_X.Y.Z_x64_en-US.msi` | The desktop app, for all users, with its elevated helper |
+| `zhenga8533.Cleanse.CLI` | `cleanse-cli-x86_64-pc-windows-msvc.zip` | `cleanse`, as a portable command |
+
+Their manifests are in [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs), and
+each new version is a pull request there, which Microsoft's checks and reviewers approve. They
+install it on a test machine and scan it for malware. winget allows unsigned installers, but a
+new, unsigned one can be flagged by those checks.
+
+You submit each version by hand with Microsoft's
+[wingetcreate](https://github.com/microsoft/winget-create), after checking the release. The
+tools that submit from a workflow take only a classic token with the `public_repo` scope, which
+can push to every public repository of its account, this one included, and so could tag a
+release.
+
+**Signing in:** `wingetcreate token --store` signs you in to GitHub in your browser, and keeps
+the token on your machine. It needs to push to your fork of winget-pkgs, so it can write to your
+public repositories too. Once the pull requests are open, `wingetcreate token --clear` removes
+it.
+
+**The first submission,** once, for the latest release, which can be one from before v1.0.0:
+
+```powershell
+winget install Microsoft.WingetCreate
+wingetcreate token --store
+$version = "X.Y.Z"
+$release = "https://github.com/zhenga8533/cleanse/releases/download/v$version"
+wingetcreate new "$release/Cleanse_${version}_x64_en-US.msi"
+wingetcreate new "$release/cleanse-cli-x86_64-pc-windows-msvc.zip"
+```
+
+Each `new` downloads the installer, and reads its hash, and for the MSI its product and upgrade
+codes. It asks for the rest:
+
+| Prompt | The desktop app | The CLI |
+|---|---|---|
+| PackageIdentifier | `zhenga8533.Cleanse` | `zhenga8533.Cleanse.CLI` |
+| Publisher | `The Cleanse Contributors` | `The Cleanse Contributors` |
+| PackageName | `Cleanse` | `Cleanse CLI` |
+| License | `MIT OR Apache-2.0` | `MIT OR Apache-2.0` |
+| ShortDescription | `Find and safely remove the files you don't need` | `Find and safely remove reclaimable files, with an explanation for every item` |
+| In the zip | | `cleanse.exe`, a portable program, with the command alias `cleanse` |
+
+The publisher is the MSI's manufacturer, which is how winget recognizes the installed app. At the
+end, choose to submit: wingetcreate forks winget-pkgs to your account the first time, and opens
+the pull request. If Microsoft turns the packages down, the other ways to install Cleanse are
+unaffected. Once both are merged, add them to the README's install section.
+
+**Each release after that,** once it's checked:
+
+```powershell
+$version = "X.Y.Z"
+$release = "https://github.com/zhenga8533/cleanse/releases/download/v$version"
+wingetcreate update zhenga8533.Cleanse --version $version --urls "$release/Cleanse_${version}_x64_en-US.msi" --submit
+wingetcreate update zhenga8533.Cleanse.CLI --version $version --urls "$release/cleanse-cli-x86_64-pc-windows-msvc.zip" --submit
+```
+
+`update` keeps everything else from the last version's manifest, and reads the new installer's
+hash, and for the MSI its product code, which changes with every build.
+
+**Upgrades:** an MSI replaces an older version of itself only if both have the same upgrade
+code. `tauri.conf.json` pins Cleanse's as `bundle.windows.wix.upgradeCode`. It's the code Tauri
+derived from the product name for the earlier MSIs, v0.5.0's included, so they upgrade as before,
+and renaming the app can't change it. Never change it: Windows would install the next version
+beside the old one, and winget would see two apps. `desktop-installers.yml` checks that the MSI
+it builds still has it.
 
 ## When a release fails
 

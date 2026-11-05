@@ -82,6 +82,21 @@ jobs:
         run: cargo xtask helper
       - name: Build
         run: pnpm --dir apps/desktop tauri build ${{ matrix.build }}
+      # An MSI replaces an earlier version only if both have the same upgrade code, which
+      # tauri.conf.json pins. This is the code v0.5.0's MSI had (docs/src/releasing.md, winget).
+      - name: Check the MSI keeps its upgrade code
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $msi = (Get-ChildItem target/release/bundle/msi/*.msi)[0].FullName
+          $installer = New-Object -ComObject WindowsInstaller.Installer
+          $database = $installer.OpenDatabase($msi, 0)
+          $view = $database.OpenView("SELECT Value FROM Property WHERE Property = 'UpgradeCode'")
+          $view.Execute()
+          $code = $view.Fetch().StringData(1)
+          $view.Close()
+          Write-Output "UpgradeCode: $code"
+          if ($code -ne '{25A11FD3-A6FE-5BC6-8105-18CFD5D1C721}') { throw "the MSI's upgrade code is $code" }
       # Installed as a user's would be, the helper is beside the app in Program Files, where the
       # app looks for it, and runs from there.
       - name: Check the MSI installs the helper beside the app
