@@ -6,6 +6,18 @@ All notable changes to Cleanse are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- On Windows with UAC off, where everything you run runs as an administrator, Cleanse cleans
+  your own files instead of refusing to change anything. That includes `clean`, `apply`,
+  `restore`, `quarantine purge`, and `history --finish`, and the desktop app's buttons for them.
+  Every other check still applies. With UAC on, Cleanse still refuses while it runs elevated.
+  `cleanse doctor` and the app's settings say which applies
+  ([ADR 0011](https://github.com/zhenga8533/cleanse/blob/main/docs/src/adr/0011-cleanup-with-uac-off.md)).
+- On Windows, other accounts' home folders are protected, since an administrator could change
+  them. The desktop app's System section explains that it isn't available when UAC is off,
+  instead of telling you to open the app again without elevation.
+
 ## [1.0.0] - 2026-11-05
 
 System cleanup. Cleanse now cleans the operating system's own folders on Windows and Linux as well

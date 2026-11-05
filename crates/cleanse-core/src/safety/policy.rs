@@ -25,6 +25,10 @@ pub struct Protected {
     /// Folders inside a subtree that aren't protected by it, with everything inside them. They're
     /// `/`-separated paths relative to it, where `*` in a name matches any run of characters.
     pub except: Vec<String>,
+    /// More folders inside a subtree that aren't protected by it, with everything inside them,
+    /// given whole. They're recognized by identity as well, so a path that spells one another
+    /// way, such as with an 8.3 short name, is still inside it.
+    pub except_folders: Vec<PathBuf>,
 }
 
 /// Folders under the home folder whose contents are never cleaned. AI agents' folders hold
@@ -150,6 +154,8 @@ pub struct ProtectedPolicy {
     entries: Vec<(Vec<String>, Protected)>,
     /// Each entry's `except` folders, name by name, compared the same way.
     except_keys: Vec<Vec<Vec<String>>>,
+    /// Each entry's `except_folders`, as keys, with their identities where they could be read.
+    except_folders: Vec<Vec<(Vec<String>, Option<FileIdentity>)>>,
     /// Identities of subtree-protected locations, so a path inside one is recognized however
     /// it's spelled, such as through an 8.3 short name.
     subtree_ids: HashMap<FileIdentity, Vec<usize>>,
@@ -167,6 +173,7 @@ impl ProtectedPolicy {
             reach: Reach::Subtree,
             what: "a folder excluded in your settings".to_owned(),
             except: Vec::new(),
+            except_folders: Vec::new(),
         }));
         Self::new(locations, probe)
     }
@@ -215,6 +222,16 @@ impl ProtectedPolicy {
                 }
             }
         }
+        let except_folders = locations
+            .iter()
+            .map(|location| {
+                location
+                    .except_folders
+                    .iter()
+                    .map(|folder| (key(folder), identity_of(folder)))
+                    .collect()
+            })
+            .collect();
         Self {
             except_keys: locations
                 .iter()
@@ -226,6 +243,7 @@ impl ProtectedPolicy {
                         .collect()
                 })
                 .collect(),
+            except_folders,
             entries: locations
                 .into_iter()
                 .map(|location| (key(&location.path), location))
@@ -277,7 +295,7 @@ impl ProtectedPolicy {
             let contains = location_key.starts_with(&path_key);
             let inside = location.reach == Reach::Subtree
                 && path_key.starts_with(location_key)
-                && !self.excepted(index, &path_key);
+                && !self.excepted(index, &path_key, own, ancestors);
             if contains || inside {
                 return Some(&location.what);
             }
@@ -290,30 +308,43 @@ impl ProtectedPolicy {
                         .get(id)?
                         .iter()
                         .copied()
-                        .find(|&index| !self.excepted(index, &path_key))
+                        .find(|&index| !self.excepted(index, &path_key, own, ancestors))
                 })
             });
         by_identity.map(|index| self.entries[index].1.what.as_str())
     }
 
-    /// Whether the path is inside one of entry `index`'s exceptions, spelled the usual way. A
-    /// path reaching it another way, such as through a short name, stays protected, and so does
-    /// one through `.` or `..`, which `*` would otherwise match: `Temp/../System32` isn't in
-    /// `Temp/*`.
-    fn excepted(&self, index: usize, path_key: &[String]) -> bool {
+    /// Whether the path is inside one of entry `index`'s exceptions. One of its `except` folders
+    /// counts only spelled the usual way, so a path reaching it another way, such as through a
+    /// short name, stays protected. One of its `except_folders` counts by identity too: `own`
+    /// is the path's, and `ancestors` its parent folders'. A path through `.` or `..` stays
+    /// protected either way, since `*` would match them, and its ancestors are read from its
+    /// spelling: `Temp/../System32` isn't in `Temp/*`, and `home/../other` isn't in `home`.
+    fn excepted(
+        &self,
+        index: usize,
+        path_key: &[String],
+        own: Option<FileIdentity>,
+        ancestors: &[FileIdentity],
+    ) -> bool {
         let Some(inside) = path_key.strip_prefix(self.entries[index].0.as_slice()) else {
             return false;
         };
         if inside.iter().any(|name| name == "." || name == "..") {
             return false;
         }
-        self.except_keys[index].iter().any(|except| {
-            except.len() <= inside.len()
-                && except
-                    .iter()
-                    .zip(inside)
-                    .all(|(pattern, name)| wildcard_match(pattern, name))
-        })
+        let in_folder = self.except_folders[index].iter().any(|(folder, id)| {
+            path_key.starts_with(folder)
+                || id.is_some_and(|id| own == Some(id) || ancestors.contains(&id))
+        });
+        in_folder
+            || self.except_keys[index].iter().any(|except| {
+                except.len() <= inside.len()
+                    && except
+                        .iter()
+                        .zip(inside)
+                        .all(|(pattern, name)| wildcard_match(pattern, name))
+            })
     }
 }
 
@@ -377,6 +408,7 @@ impl Locations {
                 reach,
                 what: what.to_owned(),
                 except: Vec::new(),
+                except_folders: Vec::new(),
             });
         }
     }
@@ -393,6 +425,7 @@ impl Locations {
             reach: Reach::Subtree,
             what: what.to_owned(),
             except: except.into_iter().collect(),
+            except_folders: Vec::new(),
         });
     }
 }
@@ -426,6 +459,18 @@ fn user_locations(locations: &mut Locations, folders: &KnownFolders) {
                 .flat_map(|(_, inside)| inside.iter().map(|&inner| inner.to_owned()));
             locations.subtree_except(under(home, relative), what, except);
         }
+    }
+    // Every other account's home folder. Their permissions keep Cleanse out when it runs as
+    // this account, but not as an administrator, which it can on Windows with UAC off
+    // (ADR 0011).
+    if let Some(profiles) = &folders.user_profiles {
+        locations.0.push(Protected {
+            path: profiles.clone(),
+            reach: Reach::Subtree,
+            what: "another account's folders".to_owned(),
+            except: Vec::new(),
+            except_folders: folders.home.iter().cloned().collect(),
+        });
     }
 }
 

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use cleanse_engine::{Engine, Probe, SystemFolders, cloud_sync_detection};
+use cleanse_engine::{Elevation, Engine, Probe, SystemFolders, cloud_sync_detection};
 use cleanse_model::RuleId;
 use serde::Serialize;
 
@@ -27,7 +27,14 @@ pub fn run(engine: &Engine, args: &Args) -> crate::Result {
     );
     println!(
         "Running as administrator or root: {}",
-        if system.is_elevated() { "yes" } else { "no" }
+        match system.elevation() {
+            Elevation::None => "no",
+            Elevation::Elevated => "yes, so cleaning your own files is off",
+            Elevation::AlwaysElevated => {
+                "yes, as everything this account runs is, as with UAC off, so cleaning your own \
+                 files still works"
+            }
+        }
     );
     let config = engine.config();
     let disabled = config.disabled_rules.len();
@@ -102,6 +109,9 @@ fn print_json(engine: &Engine) -> crate::Result {
         os: &'static str,
         arch: &'static str,
         elevated: bool,
+        /// Everything the account runs is elevated, as on Windows with UAC off, so cleaning its
+        /// own files still works.
+        always_elevated: bool,
         /// Every built-in rule, counting those turned off.
         rules: usize,
         cloud_sync_detection: &'static str,
@@ -153,6 +163,7 @@ fn print_json(engine: &Engine) -> crate::Result {
         os: std::env::consts::OS,
         arch: std::env::consts::ARCH,
         elevated: engine.system().is_elevated(),
+        always_elevated: engine.system().elevation() == Elevation::AlwaysElevated,
         rules: engine.rules().rules().len() + config.disabled_rules.len(),
         cloud_sync_detection: cloud_sync_detection(),
         settings: Settings {

@@ -13,8 +13,8 @@ use cleanse_model::{Concern, RuleId};
 use cleanse_core::rules::Scope;
 
 use super::{
-    ApplyError, Cleanup, Config, Engine, Explanation, KnownFolders, Mode, NodeKind, Probe,
-    Progress, RuleSet, System, SystemFolders, removable_under,
+    ApplyError, Cleanup, Config, Elevation, Engine, Explanation, KnownFolders, Mode, NodeKind,
+    Probe, Progress, RuleSet, System, SystemFolders, removable_under,
 };
 
 /// Writes a file dated a day ago, so it doesn't count as recent activity.
@@ -416,7 +416,9 @@ fn the_system_engine_uses_only_system_rules_and_no_settings() {
     };
     assert!(expected, "{can_change:?}");
     assert_eq!(user.mode(), Mode::User);
-    assert_eq!(user.check_can_change().is_ok(), !elevated);
+    // With UAC off, as on GitHub's Windows runners, the user's cleanup runs elevated (ADR 0011).
+    let refuses = user.system().elevation() == Elevation::Elevated;
+    assert_eq!(user.check_can_change().is_ok(), !refuses);
 }
 
 /// A system engine whose system folders are under `root`, named after their bases.

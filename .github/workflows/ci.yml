@@ -59,10 +59,11 @@ jobs:
       - run: cargo nextest run --workspace --exclude cleanse-desktop --locked --no-fail-fast
       - run: cargo test --workspace --exclude cleanse-desktop --doc --locked
       # Packages the crates the release publishes to crates.io, and builds each from its package
-      # alone, so a file one needs but doesn't include fails here rather than at release.
+      # alone, so a file one needs but doesn't include fails here rather than at release. The
+      # xtask first cleans the builds of a run at the same version, which cargo would reuse.
       - name: Check the crates.io packages
         if: runner.os == 'Linux'
-        run: cargo publish --workspace --dry-run --locked
+        run: cargo xtask packages
 
   # System cleanup's tests that need root (ADR 0010). They're built as the runner's own user and
   # run from an archive, so nothing in `target` ends up belonging to root.

@@ -11,7 +11,7 @@ use std::process::Command;
 use std::time::{Duration, SystemTime};
 
 use cleanse_model::{Candidate, CandidateId, Category, Concern, EntryKind, FileIdentity, Risk};
-use cleanse_platform::{FakeProbe, FileFacts, FileOwner, KnownFolders, Probe, System};
+use cleanse_platform::{Elevation, FakeProbe, FileFacts, FileOwner, KnownFolders, Probe, System};
 use proptest::prelude::*;
 
 use super::{Assessor, Protected, ProtectedPolicy, Reach};
@@ -56,6 +56,7 @@ fn location(path: PathBuf, reach: Reach, what: &str) -> Protected {
         reach,
         what: what.into(),
         except: Vec::new(),
+        except_folders: Vec::new(),
     }
 }
 
@@ -198,6 +199,94 @@ fn protection_follows_file_identity_through_other_spellings() {
     );
     assert_eq!(
         policy.check(&fake_path(&["other"]), Some(identity(9)), &[identity(10)]),
+        None
+    );
+}
+
+/// An administrator can change other accounts' folders, which Cleanse runs as on Windows with
+/// UAC off (ADR 0011), so they're protected however it runs.
+#[test]
+fn other_accounts_folders_are_protected_but_not_your_own_however_its_spelled() {
+    let profiles = fake_path(&["Users"]);
+    let home = fake_path(&["Users", "me"]);
+    let folder = |id| FileFacts {
+        identity: identity(id),
+        kind: EntryKind::Dir,
+        links: 1,
+        allocated: 0,
+        cloud_synced: false,
+        offline: false,
+        owner: Some(FileOwner::CurrentUser),
+    };
+    let probe = FakeProbe::default()
+        .with_file(profiles.clone(), folder(1))
+        .with_file(home.clone(), folder(2));
+    let folders = KnownFolders {
+        home: Some(home.clone()),
+        temp: fake_path(&["temp"]),
+        user_profiles: Some(profiles),
+        ..KnownFolders::default()
+    };
+    let policy = ProtectedPolicy::for_system(&folders, &probe, &[]);
+    let theirs = Some("another account's folders");
+
+    assert_eq!(
+        policy.check(
+            &home.join("code").join("node_modules"),
+            None,
+            &[identity(3), identity(2), identity(1)]
+        ),
+        None
+    );
+    // Your home folder by another name, such as an 8.3 short name.
+    assert_eq!(
+        policy.check(
+            &fake_path(&["Users", "ME~1", "code", "node_modules"]),
+            None,
+            &[identity(3), identity(2), identity(1)]
+        ),
+        None
+    );
+    assert_eq!(
+        policy.check(
+            &fake_path(&["Users", "them", "code", "node_modules"]),
+            None,
+            &[identity(4), identity(5), identity(1)]
+        ),
+        theirs
+    );
+    // Shared ones too.
+    assert_eq!(
+        policy.check(&fake_path(&["Users", "Public", "Downloads"]), None, &[]),
+        theirs
+    );
+    // Its ancestors, read from how it's spelled, include your home folder, but it isn't in it.
+    assert_eq!(
+        policy.check(
+            &fake_path(&["Users", "me", "..", "them", "node_modules"]),
+            None,
+            &[identity(2), identity(1)]
+        ),
+        theirs
+    );
+}
+
+#[test]
+fn without_a_user_profiles_folder_nothing_more_is_protected() {
+    let home = fake_path(&["Users", "me"]);
+    let folders = KnownFolders {
+        home: Some(home),
+        temp: fake_path(&["temp"]),
+        ..KnownFolders::default()
+    };
+    let policy = ProtectedPolicy::for_system(&folders, &FakeProbe::default(), &[]);
+
+    assert_eq!(
+        policy.check(
+            &fake_path(&["Users", "them", "code", "node_modules"]),
+            None,
+            &[]
+        ),
         None
     );
 }
@@ -906,8 +995,8 @@ impl Probe for Running {
         self.system.known_folders()
     }
 
-    fn is_elevated(&self) -> bool {
-        false
+    fn elevation(&self) -> Elevation {
+        Elevation::None
     }
 
     fn running_processes(&self) -> io::Result<HashSet<String>> {
