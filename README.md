@@ -41,10 +41,12 @@ set `CARGO_HOME`, and add that folder to your `PATH`. Each release also has the 
 archive for x64 Windows, Intel and Apple silicon Macs, and x64 and ARM64 Linux, or you can
 [build it from source](#building-from-source).
 
-From v1.0.0, it's on crates.io as `cleanse-cli`. `cargo install --locked cleanse-cli` builds it,
-with Rust 1.99 or later and the C toolchain [building from source](#building-from-source) needs.
-`cargo binstall cleanse-cli` gets the release's archive instead. Both put it in Cargo's `bin`
-folder too.
+From v1.0.0, package managers have it too:
+
+- **Homebrew,** on macOS and Linux: `brew install zhenga8533/tap/cleanse-cli`.
+- **crates.io:** `cargo install --locked cleanse-cli` builds it, with Rust 1.99 or later and the
+  C toolchain [building from source](#building-from-source) needs. `cargo binstall cleanse-cli`
+  gets the release's archive instead. Both put it in Cargo's `bin` folder.
 
 Before using [`cleanse system`](#system-cleanup), install a copy that only administrators or root
 can change, since all of these put `cleanse` in a folder your own account can change. Download

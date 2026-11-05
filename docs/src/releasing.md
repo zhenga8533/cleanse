@@ -2,7 +2,7 @@
 
 A release is a tag on `main`. Pushing the tag runs the release workflow, which builds the command
 line and the desktop app and publishes them as a GitHub Release, then publishes the command line
-to crates.io. Only a maintainer pushes tags.
+to crates.io and its formula to the Homebrew tap. Only a maintainer pushes tags.
 
 ## Preparing the release
 
@@ -49,8 +49,8 @@ than editing the workflow; dist's plan fails while they disagree. Its jobs:
    [`desktop-installers.yml`](https://github.com/zhenga8533/cleanse/blob/main/.github/workflows/desktop-installers.yml).
    It builds the MSI on Windows, the universal disk image on macOS, ad-hoc signed, and the AppImage
    and deb on Ubuntu 22.04, writes a `.sha256` beside each, and attests them in a job of its own.
-4. **`build-global-artifacts`** makes the shell and PowerShell installers, `source.tar.gz`, and
-   `sha256.sum`.
+4. **`build-global-artifacts`** makes the shell and PowerShell installers, the Homebrew formula,
+   `source.tar.gz`, and `sha256.sum`.
 5. **`host`** creates the GitHub Release, with the changelog section as its notes, and uploads
    every file. It runs only if every build succeeded, so a failed build publishes nothing.
 6. **`custom-publish-crates`** runs
@@ -58,20 +58,31 @@ than editing the workflow; dist's plan fails while they disagree. Its jobs:
    once the release exists, and not for prereleases. It publishes `cleanse-cli` and the five
    library crates it's built from to crates.io, leaving out any whose version crates.io already
    has. See [crates.io](#cratesio).
+7. **`custom-publish-homebrew`** runs
+   [`publish-homebrew.yml`](https://github.com/zhenga8533/cleanse/blob/main/.github/workflows/publish-homebrew.yml)
+   beside it, and also not for prereleases. It commits the release's formula to the tap. See
+   [Homebrew](#homebrew).
 
 On pull requests, `release.yml` runs only `plan`, to check the config. `desktop-installers.yml`
 also runs on pull requests that change how the app is packaged, and you can run it by hand
 (`gh workflow run desktop-installers.yml`) to check the installers build before tagging. Neither
 attests anything; only a tag does. `publish-crates.yml` runs as a dry run on pull requests that
 change it, and CI's Linux test job runs `cargo publish --workspace --dry-run` on every pull
-request, which packages each crate and builds it from its package alone.
+request, which packages each crate and builds it from its package alone. `publish-homebrew.yml`
+runs only for a release, since there's no formula before one.
 
 ## Secrets
 
-There are none. The release uses only the `GITHUB_TOKEN` GitHub gives each run, which reaches
-only this repository and expires when the job ends. Publishing to crates.io needs no token
-either: crates.io trades the job's OIDC token for one of its own, which the job revokes when it
-ends. Each job gets only what it needs:
+There's one, for the Homebrew tap:
+
+| Secret | What it is | What it can write to | Used by |
+|---|---|---|---|
+| `HOMEBREW_TAP_TOKEN` | A fine-grained personal access token | Only `zhenga8533/homebrew-tap`: Contents, read and write | `custom-publish-homebrew` |
+
+Everything else uses the `GITHUB_TOKEN` GitHub gives each run, which reaches only this
+repository and expires when the job ends. Publishing to crates.io needs no secret: crates.io
+trades the job's OIDC token for one of its own, which the job revokes when it ends. Each job's
+`GITHUB_TOKEN` gets only what that job needs:
 
 | Job | Permissions |
 |---|---|
@@ -79,6 +90,7 @@ ends. Each job gets only what it needs:
 | The desktop installers' builds | `contents: read` |
 | The desktop installers' attest job | `contents: read`, `id-token: write`, `attestations: write` |
 | `custom-publish-crates` | `contents: read`, plus `id-token: write` for its crates.io token |
+| `custom-publish-homebrew` | `contents: read`. It writes to the tap with `HOMEBREW_TAP_TOKEN` |
 | `plan`, `build-global-artifacts`, `host`, `announce` | `contents: write`, which `host` needs to create the release |
 
 The builds aren't signed, so there are no signing keys or certificates either. macOS's ad-hoc
@@ -129,6 +141,39 @@ so the first version is published by hand, before the tag:
 
 From the next version on, the release publishes them.
 
+## Homebrew
+
+The tap is [`zhenga8533/homebrew-tap`](https://github.com/zhenga8533/homebrew-tap), so
+`brew install zhenga8533/tap/cleanse-cli` installs the command line on macOS and Linux, and
+`brew upgrade` updates it. dist writes the formula, `cleanse-cli.rb`, with the release's other
+installers. It downloads the release's archive for the system it's on, and checks it against the
+archive's SHA-256.
+
+`custom-publish-homebrew` copies the formula to the tap's `Formula/cleanse-cli.rb`, and commits it
+as `github-actions[bot]`, with the message `cleanse-cli X.Y.Z`. If the tap already has that
+formula, as when the job is rerun, it commits nothing.
+
+The job is this repository's own, rather than dist's Homebrew job, which would run with
+`release.yml`'s `contents: write` on this repository, after the release's files are uploaded.
+This one's `GITHUB_TOKEN` can only read, and the tap's token can write only to the tap.
+
+**Setting it up, once, before the first release that has the formula:**
+
+1. Create `zhenga8533/homebrew-tap` on GitHub, public, with a README, so that it has a branch to
+   commit to.
+2. Create a fine-grained personal access token for it: resource owner `zhenga8533`, only the
+   `homebrew-tap` repository, and the Contents permission set to read and write. Give it an
+   expiry, and note when to renew it.
+3. Add the token to this repository as the Actions secret `HOMEBREW_TAP_TOKEN`. This asks for the
+   value, so it doesn't end up in your shell's history:
+
+   ```sh
+   gh secret set HOMEBREW_TAP_TOKEN --repo zhenga8533/cleanse
+   ```
+
+Without the secret, the job fails before it does anything. With an expired token, it fails to
+check out the tap. Either way, set the secret, then rerun the failed job.
+
 ## Checking a release
 
 Anyone can check a download in two ways:
@@ -157,8 +202,8 @@ when they match:
 
 After each release, check that its page has the five CLI archives, the two installer scripts, and
 the four desktop installers, each with a `.sha256`; that a CLI archive and a desktop installer
-verify; that the README's installer one-liners install the new version; and that crates.io has
-the version of all six crates.
+verify; that the README's installer one-liners install the new version; that crates.io has
+the version of all six crates; and that the tap's `Formula/cleanse-cli.rb` names it.
 
 ## When a release fails
 
@@ -194,7 +239,9 @@ Neither had reached `host`.
 request, then release the next patch version with the steps above. If the release is broken or
 incomplete, say so at the top of its notes, and point to the fixed release.
 
-**If only `custom-publish-crates` failed,** the GitHub Release is already out. If the failure was
-GitHub's or crates.io's, or a crate had no trusted publisher yet, rerun the failed jobs once it's
-fixed. The job leaves out the crates it already published. If the crates themselves need a fix,
-release the next patch version; crates already published at this version stay as they are.
+**If only `custom-publish-crates` or `custom-publish-homebrew` failed,** the GitHub Release is
+already out. If the failure was GitHub's, crates.io's, or a missing trusted publisher or tap
+token, rerun the failed jobs once it's fixed: `custom-publish-crates` leaves out the crates it
+already published, and `custom-publish-homebrew` commits nothing if the tap is up to date. If the
+crates or the formula themselves need a fix, release the next patch version; what's already
+published at this version stays as it is.

@@ -33,6 +33,8 @@ All notable changes to Cleanse are documented here. The format is based on
 - The command line is on crates.io, as `cleanse-cli`. `cargo install --locked cleanse-cli` builds
   it, and `cargo binstall cleanse-cli` gets the release's archive. The five crates it's built
   from are published with it, as internal parts without a stable API.
+- A Homebrew formula for the command line, on macOS and Linux:
+  `brew install zhenga8533/tap/cleanse-cli`.
 
 ### Changed
 

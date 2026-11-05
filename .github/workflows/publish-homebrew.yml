@@ -1,0 +1,78 @@
+# Publishes the command line's Homebrew formula, which dist writes with the release's other
+# installers, to the tap, so `brew install zhenga8533/tap/cleanse-cli` installs the release. The
+# release workflow runs this once the GitHub Release exists (`publish-jobs` in
+# dist-workspace.toml). dist's own Homebrew job would work as well, but it would run with
+# release.yml's write access to this repository, which this one doesn't have.
+name: Publish Homebrew formula
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        description: dist's plan, as JSON, which names the formula and the version.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  # The same as `tap` in dist-workspace.toml.
+  TAP: zhenga8533/homebrew-tap
+
+jobs:
+  publish:
+    name: Publish to the Homebrew tap
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Find the formula
+        id: formula
+        env:
+          PLAN: ${{ inputs.plan }}
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "::error::the HOMEBREW_TAP_TOKEN secret isn't set (docs/src/releasing.md)"
+            exit 1
+          fi
+          formulas=$(jq -r '.releases[] | .app_version as $version
+            | .artifacts[] | select(endswith(".rb")) | [., $version] | @tsv' <<< "$PLAN")
+          if [ "$(wc -l <<< "$formulas")" -ne 1 ] || [ -z "$formulas" ]; then
+            echo "::error::the plan should name one formula, not: ${formulas:-none}"
+            exit 1
+          fi
+          IFS=$'\t' read -r file version <<< "$formulas"
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      # The tap's token stays in the checkout for the push. It can write only to the tap.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.TAP }}
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+          persist-credentials: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: artifacts-build-global
+          path: ${{ runner.temp }}/artifacts
+      - name: Commit and push the formula
+        env:
+          FILE: ${{ steps.formula.outputs.file }}
+          VERSION: ${{ steps.formula.outputs.version }}
+        working-directory: tap
+        run: |
+          mkdir -p Formula
+          cp "$RUNNER_TEMP/artifacts/$FILE" "Formula/$FILE"
+          git add "Formula/$FILE"
+          if git diff --cached --quiet; then
+            echo "Formula/$FILE is already this release's"
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -m "${FILE%.rb} $VERSION"
+          git push
