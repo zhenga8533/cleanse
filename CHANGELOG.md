@@ -33,6 +33,9 @@ All notable changes to Cleanse are documented here. The format is based on
 - The command line is on crates.io, as `cleanse-cli`. `cargo install --locked cleanse-cli` builds
   it, and `cargo binstall cleanse-cli` gets the release's archive. The five crates it's built
   from are published with it, as internal parts without a stable API.
+- A Scoop bucket for the command line on Windows, `zhenga8533/scoop-bucket`: after
+  `scoop bucket add zhenga8533 https://github.com/zhenga8533/scoop-bucket`,
+  `scoop install zhenga8533/cleanse` installs it.
 
 ### Changed
 

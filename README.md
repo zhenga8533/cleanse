@@ -46,6 +46,14 @@ with Rust 1.99 or later and the C toolchain [building from source](#building-fro
 `cargo binstall cleanse-cli` gets the release's archive instead. Both put it in Cargo's `bin`
 folder too.
 
+On Windows, [Scoop](https://scoop.sh) can install it from Cleanse's own bucket, and
+`scoop update cleanse` updates it:
+
+```powershell
+scoop bucket add zhenga8533 https://github.com/zhenga8533/scoop-bucket
+scoop install zhenga8533/cleanse
+```
+
 Before using [`cleanse system`](#system-cleanup), install a copy that only administrators or root
 can change, since all of these put `cleanse` in a folder your own account can change. Download
 the archive for your system from the release and check it, then on Linux (`aarch64` in place of
