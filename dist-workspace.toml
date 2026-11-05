@@ -30,6 +30,8 @@ local-artifacts-jobs = ["./desktop-installers"]
 # Build only the packages dist ships, the CLI, rather than the whole workspace: the desktop app
 # needs GTK's development files to compile on Linux, which the CLI's runners don't have.
 precise-builds = true
+# Publishes the CLI and its crates to crates.io, once the GitHub Release exists. See the workflow.
+publish-jobs = ["./publish-crates"]
 
 # Pin the generated workflow's actions by commit, like the other workflows.
 # Dependabot bumps to release.yml fail dist's up-to-date check until the
@@ -45,6 +47,8 @@ precise-builds = true
 [dist.github-custom-runners]
 aarch64-apple-darwin = "macos-15"
 
-# The desktop installers' job attests what it builds, as dist does for the CLI.
+# The desktop installers' job attests what it builds, as dist does for the CLI. Publishing to
+# crates.io trades the job's OIDC token for a short-lived crates.io token (trusted publishing).
 [dist.github-custom-job-permissions]
 "desktop-installers" = { contents = "read", attestations = "write", id-token = "write" }
+"publish-crates" = { contents = "read", id-token = "write" }

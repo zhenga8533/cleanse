@@ -1,10 +1,11 @@
 [package]
 name = "cleanse-engine"
-description = "Session API over the Cleanse scan, plan, and apply pipeline"
+description = "Session API over the Cleanse scan, plan, and apply pipeline. Internal to cleanse-cli, with no stable API."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
 
 [features]
 # Engines over fixtures, for other crates' tests.

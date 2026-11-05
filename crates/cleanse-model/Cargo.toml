@@ -1,10 +1,11 @@
 [package]
 name = "cleanse-model"
-description = "Shared data model for Cleanse: candidates, risk tiers, plans, and journal records"
+description = "Shared data model for Cleanse: candidates, risk tiers, plans, and journal records. Internal to cleanse-cli, with no stable API."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
 
 [dependencies]
 serde.workspace = true
