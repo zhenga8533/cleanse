@@ -1,7 +1,8 @@
 # Publishes the command line to crates.io: cleanse-cli and the library crates it's built from,
 # which `cargo publish --workspace` finds as every package not marked `publish = false`. The
 # release workflow runs this once the GitHub Release exists (`publish-jobs` in
-# dist-workspace.toml). It also runs, as a dry run, on pull requests that change it.
+# dist-workspace.toml), but it publishes only once PUBLISH_CRATES is set, below. It also runs, as
+# a dry run, on pull requests that change it.
 name: Publish crates
 
 on:
@@ -21,6 +22,10 @@ permissions:
 jobs:
   publish:
     name: Publish to crates.io
+    # Releases publish only once the repository variable PUBLISH_CRATES is `true`, which waits on
+    # the first publish by hand and the crates' trusted publishers (docs/src/releasing.md).
+    # Until then a release skips this job rather than failing it. Dry runs don't publish.
+    if: github.event_name == 'pull_request' || vars.PUBLISH_CRATES == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # The OIDC token is traded for a crates.io token that lasts only for this job (trusted

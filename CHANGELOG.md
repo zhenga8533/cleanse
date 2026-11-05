@@ -14,7 +14,7 @@ core dumps and crash reports. That's the only thing it does as an administrator 
 rules of its own, and it removes an item only if the item, and everything in it, belongs to the
 system. In the desktop app, a separate helper does that work, and the app's window still never
 runs as an administrator. For your own files, Cleanse now also keeps what belongs to other
-accounts. The command line is on crates.io too.
+accounts.
 
 ### Added
 
@@ -40,9 +40,6 @@ accounts. The command line is on crates.io too.
   - It accepts only the app that started it, and only the IDs of what its own scan found.
   - The AppImage doesn't have it, and points to `cleanse system` instead. There's no System
     section on macOS.
-- The command line is on crates.io, as `cleanse-cli`. `cargo install --locked cleanse-cli` builds
-  it, and `cargo binstall cleanse-cli` gets the release's archive. The five crates it's built
-  from are published with it, as internal parts without a stable API.
 
 ### Changed
 
