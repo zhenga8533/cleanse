@@ -13,7 +13,7 @@ removes anything you haven't approved.
 > back. [`cleanse system`](#system-cleanup) does the same for the operating system's own folders
 > on Windows and Linux, and the [desktop app](#desktop-app) does all of it in a window.
 > [v1.0.0](https://github.com/zhenga8533/cleanse/releases/tag/v1.0.0) has prebuilt binaries and
-> installers for both, not signed, and the command line is on crates.io.
+> installers for both, not signed.
 
 ## Install
 
@@ -41,13 +41,8 @@ set `CARGO_HOME`, and add that folder to your `PATH`. Each release also has the 
 archive for x64 Windows, Intel and Apple silicon Macs, and x64 and ARM64 Linux, or you can
 [build it from source](#building-from-source).
 
-From v1.0.0, it's on crates.io as `cleanse-cli`. `cargo install --locked cleanse-cli` builds it,
-with Rust 1.99 or later and the C toolchain [building from source](#building-from-source) needs.
-`cargo binstall cleanse-cli` gets the release's archive instead. Both put it in Cargo's `bin`
-folder too.
-
 Before using [`cleanse system`](#system-cleanup), install a copy that only administrators or root
-can change, since all of these put `cleanse` in a folder your own account can change. Download
+can change, since the installers put `cleanse` in a folder your own account can change. Download
 the archive for your system from the release and check it, then on Linux (`aarch64` in place of
 `x86_64` on ARM64):
 
@@ -224,8 +219,8 @@ Where a native tool is the right answer, Cleanse points you to it instead: `pnpm
 | M2 · v0.2 | Cleanup with quarantine, restore, a journal, and saved plans; AI agent and browser cache rules |
 | M3 · v0.3 | Removing files as well as folders, for temp files, logs, and crash dumps; disk analysis; large files and installers for review; advice for tools that clean themselves; CLI feature-complete |
 | M4 · v0.5 | Desktop app (Tauri + React): scan and clean, disk usage with a treemap, quarantine, history, and settings; installers for Windows, macOS, and Linux |
-| M5 · v1.0 | System cleanup on Windows and Linux, as an administrator or root, in the command line and the desktop app; keeping what belongs to other accounts; the command line on crates.io |
-| After 1.0 | Homebrew, Scoop, and winget packages. Signed builds: until then, Windows builds are unsigned and macOS builds are ad-hoc signed. |
+| M5 · v1.0 | System cleanup on Windows and Linux, as an administrator or root, in the command line and the desktop app; keeping what belongs to other accounts |
+| After 1.0 | crates.io, Homebrew, Scoop, and winget packages. Signed builds: until then, Windows builds are unsigned and macOS builds are ad-hoc signed. |
 
 The design is described in the [architecture](docs/src/architecture.md) and
 [safety model](docs/src/safety-model.md) docs.

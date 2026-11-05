@@ -1,8 +1,8 @@
 # Releasing
 
 A release is a tag on `main`. Pushing the tag runs the release workflow, which builds the command
-line and the desktop app and publishes them as a GitHub Release, then publishes the command line
-to crates.io. Only a maintainer pushes tags.
+line and the desktop app and publishes them as a GitHub Release. Publishing the command line to
+crates.io is ready, but [off for now](#cratesio). Only a maintainer pushes tags.
 
 ## Preparing the release
 
@@ -55,9 +55,9 @@ than editing the workflow; dist's plan fails while they disagree. Its jobs:
    every file. It runs only if every build succeeded, so a failed build publishes nothing.
 6. **`custom-publish-crates`** runs
    [`publish-crates.yml`](https://github.com/zhenga8533/cleanse/blob/main/.github/workflows/publish-crates.yml)
-   once the release exists, and not for prereleases. It publishes `cleanse-cli` and the five
-   library crates it's built from to crates.io, leaving out any whose version crates.io already
-   has. See [crates.io](#cratesio).
+   once the release exists, and not for prereleases. Once crates.io publishing is on, it publishes
+   `cleanse-cli` and the five library crates it's built from to crates.io, leaving out any whose
+   version crates.io already has. Until then, it's skipped. See [crates.io](#cratesio).
 
 On pull requests, `release.yml` runs only `plan`, to check the config. `desktop-installers.yml`
 also runs on pull requests that change how the app is packaged, and you can run it by hand
@@ -87,8 +87,12 @@ it can write to.
 
 ## crates.io
 
-The release publishes six crates: `cleanse-cli`, which installs `cleanse`, and the crates it's
-built from, `cleanse-model`, `cleanse-platform`, `cleanse-core`, `cleanse-exec`, and
+**Off for now:** nothing is on crates.io yet. A release skips `custom-publish-crates` until the
+repository variable `PUBLISH_CRATES` is `true`, which waits on [turning it on](#turning-it-on).
+Until then, CI's dry run keeps the crates publishable.
+
+Once it's on, the release publishes six crates: `cleanse-cli`, which installs `cleanse`, and the
+crates it's built from, `cleanse-model`, `cleanse-platform`, `cleanse-core`, `cleanse-exec`, and
 `cleanse-engine`. Their descriptions say they're internal to `cleanse-cli`, with no stable API,
 so their versions are the CLI's and promise nothing about their own APIs.
 `cargo publish --workspace` finds them as the packages without `publish = false`, and publishes
@@ -105,29 +109,37 @@ is `release.yml`. That's the workflow a run started from, so it's `release.yml` 
 steps are in `publish-crates.yml`, which `release.yml` calls. So only `release.yml`'s runs can
 publish, not `publish-crates.yml`'s own runs on pull requests.
 
-**The first publish, at v1.0.0:** a trusted publisher can only be added to a crate that exists,
-so the first version is published by hand, before the tag:
+### Turning it on
 
-1. Merge the release-prep pull request, and hold other merges, as usual.
-2. On crates.io, create an API token with the `publish-new` and `publish-update` scopes, for
-   crates matching `cleanse-*`, that expires soon. Then publish what's on `main`:
+A trusted publisher can only be added to a crate that exists, so the first version is published by
+hand, from the latest release's tag:
+
+1. On crates.io, create an API token with the `publish-new` and `publish-update` scopes, for
+   crates matching `cleanse-*`, that expires soon. Then publish the latest release, `vX.Y.Z`:
 
    ```sh
-   git switch main
-   git pull --ff-only
+   git fetch --tags
+   git switch --detach vX.Y.Z
    cargo login          # paste the token
    cargo publish --workspace --locked
    cargo logout
+   git switch main
    ```
 
-3. In each crate's **Settings** on crates.io, add a trusted publisher: GitHub, owner `zhenga8533`,
+2. In each crate's **Settings** on crates.io, add a trusted publisher: GitHub, owner `zhenga8533`,
    repository `cleanse`, workflow `release.yml`, and no environment.
-4. Revoke the API token. Optionally, set each crate's publishing method restriction to trusted
+3. Revoke the API token. Optionally, set each crate's publishing method restriction to trusted
    publishing only, so that no API token can publish it.
-5. Tag as usual. `custom-publish-crates` finds all six crates already published, and publishes
-   nothing.
+4. Turn publishing on:
 
-From the next version on, the release publishes them.
+   ```sh
+   gh variable set PUBLISH_CRATES --body true --repo zhenga8533/cleanse
+   ```
+
+5. Add `cargo install --locked cleanse-cli` and `cargo binstall cleanse-cli` to the README's
+   install section, and crates.io to its roadmap.
+
+From the next release on, the release publishes them.
 
 ## Checking a release
 
@@ -157,8 +169,8 @@ when they match:
 
 After each release, check that its page has the five CLI archives, the two installer scripts, and
 the four desktop installers, each with a `.sha256`; that a CLI archive and a desktop installer
-verify; that the README's installer one-liners install the new version; and that crates.io has
-the version of all six crates.
+verify; that the README's installer one-liners install the new version; and, once crates.io
+publishing is on, that crates.io has the version of all six crates.
 
 ## winget
 
