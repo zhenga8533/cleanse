@@ -52,11 +52,12 @@ sudo install -m 755 cleanse-cli-x86_64-unknown-linux-gnu/cleanse /usr/local/bin/
 sudo /usr/local/bin/cleanse system scan
 ```
 
-On Windows, in a terminal opened with Run as administrator:
+On Windows, in a terminal opened with Run as administrator, into a folder of its own, since
+`Program Files\Cleanse` is the desktop app's:
 
 ```powershell
-Expand-Archive -Force cleanse-cli-x86_64-pc-windows-msvc.zip "$env:ProgramFiles\Cleanse"
-& "$env:ProgramFiles\Cleanse\cleanse.exe" system scan
+Expand-Archive -Force cleanse-cli-x86_64-pc-windows-msvc.zip "$env:ProgramFiles\Cleanse CLI"
+& "$env:ProgramFiles\Cleanse CLI\cleanse.exe" system scan
 ```
 
 Running that copy by its full path, as these do, means no other `cleanse` on your path runs in its
