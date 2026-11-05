@@ -554,7 +554,7 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
 name = "cleanse-cli"
-version = "0.5.0"
+version = "1.0.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -568,7 +568,7 @@ dependencies = [
 
 [[package]]
 name = "cleanse-core"
-version = "0.5.0"
+version = "1.0.0"
 dependencies = [
  "cleanse-model",
  "cleanse-platform",
@@ -583,7 +583,7 @@ dependencies = [
 
 [[package]]
 name = "cleanse-desktop"
-version = "0.5.0"
+version = "1.0.0"
 dependencies = [
  "cleanse-desktop-views",
  "cleanse-elevate",
@@ -600,7 +600,7 @@ dependencies = [
 
 [[package]]
 name = "cleanse-desktop-views"
-version = "0.5.0"
+version = "1.0.0"
 dependencies = [
  "cleanse-engine",
  "cleanse-model",
@@ -610,7 +610,7 @@ dependencies = [
 
 [[package]]
 name = "cleanse-elevate"
-version = "0.5.0"
+version = "1.0.0"
 dependencies = [
  "cleanse-desktop-views",
  "cleanse-engine",
@@ -625,7 +625,7 @@ dependencies = [
 
 [[package]]
 name = "cleanse-engine"
-version = "0.5.0"
+version = "1.0.0"
 dependencies = [
  "cleanse-core",
  "cleanse-exec",
@@ -637,7 +637,7 @@ dependencies = [
 
 [[package]]
 name = "cleanse-exec"
-version = "0.5.0"
+version = "1.0.0"
 dependencies = [
  "cleanse-core",
  "cleanse-model",
@@ -650,7 +650,7 @@ dependencies = [
 
 [[package]]
 name = "cleanse-model"
-version = "0.5.0"
+version = "1.0.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -658,7 +658,7 @@ dependencies = [
 
 [[package]]
 name = "cleanse-platform"
-version = "0.5.0"
+version = "1.0.0"
 dependencies = [
  "cleanse-model",
  "dirs",

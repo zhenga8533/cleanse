@@ -7,13 +7,13 @@ mind. It looks for regenerable build output, package-manager caches, AI coding a
 and everyday junk; tells you why each item is safe to remove and how it comes back; and never
 removes anything you haven't approved.
 
-> **Status: pre-alpha.** The command line and the desktop app are complete: `cleanse scan` and
+> **Status: v1.0.** The command line and the desktop app are complete: `cleanse scan` and
 > `cleanse analyze` find what could be removed and where space goes, `cleanse explain` says why,
 > and `cleanse clean` deletes what you approve, or quarantines it so `cleanse restore` can put it
-> back. The [desktop app](#desktop-app) does the same in a window.
-> [v0.5.0](https://github.com/zhenga8533/cleanse/releases/tag/v0.5.0) has prebuilt binaries and
-> installers for both, not yet signed. [System cleanup](#system-cleanup) is on `main`, for the
-> next release.
+> back. [`cleanse system`](#system-cleanup) does the same for the operating system's own folders
+> on Windows and Linux, and the [desktop app](#desktop-app) does all of it in a window.
+> [v1.0.0](https://github.com/zhenga8533/cleanse/releases/tag/v1.0.0) has prebuilt binaries and
+> installers for both, not signed.
 
 ## Install
 
@@ -41,11 +41,6 @@ set `CARGO_HOME`, and add that folder to your `PATH`. Each release also has the 
 archive for x64 Windows, Intel and Apple silicon Macs, and x64 and ARM64 Linux, or you can
 [build it from source](#building-from-source).
 
-From v1.0.0, it's on crates.io as `cleanse-cli`. `cargo install --locked cleanse-cli` builds it,
-with Rust 1.99 or later and the C toolchain [building from source](#building-from-source) needs.
-`cargo binstall cleanse-cli` gets the release's archive instead. Both put it in Cargo's `bin`
-folder too.
-
 On Windows, [Scoop](https://scoop.sh) can install it from Cleanse's own bucket, and
 `scoop update cleanse` updates it:
 
@@ -55,9 +50,9 @@ scoop install zhenga8533/cleanse
 ```
 
 Before using [`cleanse system`](#system-cleanup), install a copy that only administrators or root
-can change, since all of these put `cleanse` in a folder your own account can change. Download
-the archive for your system from the release and check it, then on Linux (`aarch64` in place of
-`x86_64` on ARM64):
+can change, since the installers and Scoop put `cleanse` in a folder your own account can change.
+Download the archive for your system from the release and check it, then on Linux (`aarch64` in
+place of `x86_64` on ARM64):
 
 ```sh
 tar -xf cleanse-cli-x86_64-unknown-linux-gnu.tar.xz
@@ -91,8 +86,8 @@ installers:
 
 The Linux builds need glibc 2.35 or later (Ubuntu 22.04, Debian 12) and WebKitGTK 4.1.
 
-The installers aren't signed with a publisher's certificate, and won't be before 1.0, so the first
-time you open Cleanse, your system asks you to confirm it:
+The installers aren't signed with a publisher's certificate, so the first time you open Cleanse,
+your system asks you to confirm it:
 
 - **Windows:** SmartScreen says "Windows protected your PC". Choose **More info**, then **Run
   anyway**. If Smart App Control is on, it blocks unsigned programs outright, the command line
@@ -232,8 +227,8 @@ Where a native tool is the right answer, Cleanse points you to it instead: `pnpm
 | M2 · v0.2 | Cleanup with quarantine, restore, a journal, and saved plans; AI agent and browser cache rules |
 | M3 · v0.3 | Removing files as well as folders, for temp files, logs, and crash dumps; disk analysis; large files and installers for review; advice for tools that clean themselves; CLI feature-complete |
 | M4 · v0.5 | Desktop app (Tauri + React): scan and clean, disk usage with a treemap, quarantine, history, and settings; installers for Windows, macOS, and Linux |
-| M5 · v1.0 | Elevated system cleanup on Windows and Linux, package managers (current) |
-| After 1.0 | Signed builds. Until then, Windows builds are unsigned and macOS builds are ad-hoc signed. |
+| M5 · v1.0 | System cleanup on Windows and Linux, as an administrator or root, in the command line and the desktop app; keeping what belongs to other accounts |
+| After 1.0 | crates.io, Homebrew, Scoop, and winget packages. Signed builds: until then, Windows builds are unsigned and macOS builds are ad-hoc signed. |
 
 The design is described in the [architecture](docs/src/architecture.md) and
 [safety model](docs/src/safety-model.md) docs.
