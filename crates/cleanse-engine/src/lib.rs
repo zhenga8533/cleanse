@@ -448,7 +448,9 @@ impl Engine {
             .into_values()
             .filter(|detection| {
                 !matches!(detection.rule.target, Target::LargeFile {})
-                    || policy.check(&detection.path, None, &[]).is_none()
+                    || policy
+                        .check_on_disk(&detection.path, &self.system)
+                        .is_none()
             })
             .collect();
         // Checking who owns everything inside every item would make a system scan take minutes
@@ -495,9 +497,8 @@ impl Engine {
             matcher.match_entry(ancestor, Listed::of(&metadata))
         });
         let Some(detection) = detection else {
-            let identity = self.system.inspect(&path).ok().map(|facts| facts.identity);
             return Ok(Explanation::Unmatched {
-                protected: policy.check(&path, identity, &[]).map(str::to_owned),
+                protected: policy.check_on_disk(&path, &self.system).map(str::to_owned),
             });
         };
 

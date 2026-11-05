@@ -272,6 +272,40 @@ fn other_accounts_folders_are_protected_but_not_your_own_however_its_spelled() {
 }
 
 #[test]
+fn checking_on_disk_reads_the_identities_a_short_name_hides() {
+    let profiles = fake_path(&["Users"]);
+    let home = fake_path(&["Users", "me"]);
+    let short = fake_path(&["Users", "ME~1"]);
+    let folder = |id| FileFacts {
+        identity: identity(id),
+        kind: EntryKind::Dir,
+        links: 1,
+        allocated: 0,
+        cloud_synced: false,
+        offline: false,
+        owner: Some(FileOwner::CurrentUser),
+    };
+    let probe = FakeProbe::default()
+        .with_file(profiles.clone(), folder(1))
+        .with_file(home.clone(), folder(2))
+        .with_file(short.clone(), folder(2));
+    let folders = KnownFolders {
+        home: Some(home),
+        temp: fake_path(&["temp"]),
+        user_profiles: Some(profiles),
+        ..KnownFolders::default()
+    };
+    let policy = ProtectedPolicy::for_system(&folders, &probe, &[]);
+    let inside = short.join("code").join("node_modules");
+
+    assert_eq!(
+        policy.check(&inside, None, &[]),
+        Some("another account's folders")
+    );
+    assert_eq!(policy.check_on_disk(&inside, &probe), None);
+}
+
+#[test]
 fn without_a_user_profiles_folder_nothing_more_is_protected() {
     let home = fake_path(&["Users", "me"]);
     let folders = KnownFolders {

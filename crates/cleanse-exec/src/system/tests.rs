@@ -23,7 +23,7 @@ use cleanse_model::{
     CandidateId, Concern, Disposal, EntryOutcome, Outcome, Plan, PlanItem, QuarantineEntry,
     SkipReason,
 };
-use cleanse_platform::{Elevation, FileOwner, Probe, StagedSystem, System, SystemFolders};
+use cleanse_platform::{FileOwner, Probe, StagedSystem, System, SystemFolders};
 use serde_json::Value;
 use tempfile::TempDir;
 
@@ -310,6 +310,8 @@ fn wont_restore_into_a_folder_that_isnt_the_systems() {
 #[cfg(any(windows, target_os = "linux"))]
 #[test]
 fn runs_however_the_account_is_elevated() {
+    use cleanse_platform::Elevation;
+
     let mut fixture = Fixture::new();
 
     for elevation in [Elevation::Elevated, Elevation::AlwaysElevated] {

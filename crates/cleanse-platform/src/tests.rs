@@ -8,8 +8,7 @@ use std::time::{Duration, SystemTime};
 use cleanse_model::{EntryKind, FileIdentity};
 
 use crate::{
-    Elevation, FakeProbe, FileFacts, FileOwner, KnownFolders, Probe, System, SystemFolders,
-    process_name,
+    FakeProbe, FileFacts, FileOwner, KnownFolders, Probe, System, SystemFolders, process_name,
 };
 
 #[cfg(unix)]
@@ -473,6 +472,7 @@ fn only_a_persons_unfiltered_token_is_always_elevated() {
         TokenElevationTypeDefault, TokenElevationTypeFull, TokenElevationTypeLimited,
     };
 
+    use crate::Elevation;
     use crate::windows::elevation_of;
 
     for (elevated, kind, person, expected) in [

@@ -314,6 +314,15 @@ impl ProtectedPolicy {
         by_identity.map(|index| self.entries[index].1.what.as_str())
     }
 
+    /// [`check`](Self::check), reading the identities of `path` and its parent folders with
+    /// `probe`, so a path spelled another way, such as with an 8.3 short name, is still
+    /// recognized.
+    pub fn check_on_disk(&self, path: &Path, probe: &dyn Probe) -> Option<&str> {
+        let identity = |path: &Path| probe.inspect(path).ok().map(|facts| facts.identity);
+        let ancestors: Vec<FileIdentity> = path.ancestors().skip(1).filter_map(identity).collect();
+        self.check(path, identity(path), &ancestors)
+    }
+
     /// Whether the path is inside one of entry `index`'s exceptions. One of its `except` folders
     /// counts only spelled the usual way, so a path reaching it another way, such as through a
     /// short name, stays protected. One of its `except_folders` counts by identity too: `own`
