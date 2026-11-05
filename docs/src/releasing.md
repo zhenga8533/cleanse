@@ -160,6 +160,78 @@ the four desktop installers, each with a `.sha256`; that a CLI archive and a des
 verify; that the README's installer one-liners install the new version; and that crates.io has
 the version of all six crates.
 
+## winget
+
+winget, Windows' package manager, has two packages for Cleanse:
+
+| Package | Installer | What it installs |
+|---|---|---|
+| `zhenga8533.Cleanse` | `Cleanse_X.Y.Z_x64_en-US.msi` | The desktop app, for all users, with its elevated helper |
+| `zhenga8533.Cleanse.CLI` | `cleanse-cli-x86_64-pc-windows-msvc.zip` | `cleanse`, as a portable command |
+
+Their manifests are in [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs), and
+each new version is a pull request there, which Microsoft's checks and reviewers approve. They
+install it on a test machine and scan it for malware. winget allows unsigned installers, but a
+new, unsigned one can be flagged by those checks.
+
+You submit each version by hand with Microsoft's
+[wingetcreate](https://github.com/microsoft/winget-create), after checking the release. The
+tools that submit from a workflow take only a classic token with the `public_repo` scope, which
+can push to every public repository of its account, this one included, and so could tag a
+release.
+
+**Signing in:** `wingetcreate token --store` signs you in to GitHub in your browser, and keeps
+the token on your machine. It needs to push to your fork of winget-pkgs, so it can write to your
+public repositories too. Once the pull requests are open, `wingetcreate token --clear` removes
+it.
+
+**The first submission,** once, for the latest release, which can be one from before v1.0.0:
+
+```powershell
+winget install Microsoft.WingetCreate
+wingetcreate token --store
+$version = "X.Y.Z"
+$release = "https://github.com/zhenga8533/cleanse/releases/download/v$version"
+wingetcreate new "$release/Cleanse_${version}_x64_en-US.msi"
+wingetcreate new "$release/cleanse-cli-x86_64-pc-windows-msvc.zip"
+```
+
+Each `new` downloads the installer, and reads its hash, and for the MSI its product and upgrade
+codes. It asks for the rest:
+
+| Prompt | The desktop app | The CLI |
+|---|---|---|
+| PackageIdentifier | `zhenga8533.Cleanse` | `zhenga8533.Cleanse.CLI` |
+| Publisher | `The Cleanse Contributors` | `The Cleanse Contributors` |
+| PackageName | `Cleanse` | `Cleanse CLI` |
+| License | `MIT OR Apache-2.0` | `MIT OR Apache-2.0` |
+| ShortDescription | `Find and safely remove the files you don't need` | `Find and safely remove reclaimable files, with an explanation for every item` |
+| In the zip | | `cleanse.exe`, a portable program, with the command alias `cleanse` |
+
+The publisher is the MSI's manufacturer, which is how winget recognizes the installed app. At the
+end, choose to submit: wingetcreate forks winget-pkgs to your account the first time, and opens
+the pull request. If Microsoft turns the packages down, the other ways to install Cleanse are
+unaffected. Once both are merged, add them to the README's install section.
+
+**Each release after that,** once it's checked:
+
+```powershell
+$version = "X.Y.Z"
+$release = "https://github.com/zhenga8533/cleanse/releases/download/v$version"
+wingetcreate update zhenga8533.Cleanse --version $version --urls "$release/Cleanse_${version}_x64_en-US.msi" --submit
+wingetcreate update zhenga8533.Cleanse.CLI --version $version --urls "$release/cleanse-cli-x86_64-pc-windows-msvc.zip" --submit
+```
+
+`update` keeps everything else from the last version's manifest, and reads the new installer's
+hash, and for the MSI its product code, which changes with every build.
+
+**Upgrades:** an MSI replaces an older version of itself only if both have the same upgrade
+code. `tauri.conf.json` pins Cleanse's as `bundle.windows.wix.upgradeCode`. It's the code Tauri
+derived from the product name for the earlier MSIs, v0.5.0's included, so they upgrade as before,
+and renaming the app can't change it. Never change it: Windows would install the next version
+beside the old one, and winget would see two apps. `desktop-installers.yml` checks that the MSI
+it builds still has it.
+
 ## When a release fails
 
 **A tag is moved only if nothing was published from it.** Once a GitHub Release exists, even an
