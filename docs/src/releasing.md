@@ -1,7 +1,8 @@
 # Releasing
 
 A release is a tag on `main`. Pushing the tag runs the release workflow, which builds the command
-line and the desktop app and publishes them as a GitHub Release. Only a maintainer pushes tags.
+line and the desktop app and publishes them as a GitHub Release, then publishes the command line
+to crates.io. Only a maintainer pushes tags.
 
 ## Preparing the release
 
@@ -52,27 +53,81 @@ than editing the workflow; dist's plan fails while they disagree. Its jobs:
    `sha256.sum`.
 5. **`host`** creates the GitHub Release, with the changelog section as its notes, and uploads
    every file. It runs only if every build succeeded, so a failed build publishes nothing.
+6. **`custom-publish-crates`** runs
+   [`publish-crates.yml`](https://github.com/zhenga8533/cleanse/blob/main/.github/workflows/publish-crates.yml)
+   once the release exists, and not for prereleases. It publishes `cleanse-cli` and the five
+   library crates it's built from to crates.io, leaving out any whose version crates.io already
+   has. See [crates.io](#cratesio).
 
 On pull requests, `release.yml` runs only `plan`, to check the config. `desktop-installers.yml`
 also runs on pull requests that change how the app is packaged, and you can run it by hand
 (`gh workflow run desktop-installers.yml`) to check the installers build before tagging. Neither
-attests anything; only a tag does.
+attests anything; only a tag does. `publish-crates.yml` runs as a dry run on pull requests that
+change it, and CI's Linux test job runs `cargo publish --workspace --dry-run` on every pull
+request, which packages each crate and builds it from its package alone.
 
 ## Secrets
 
 There are none. The release uses only the `GITHUB_TOKEN` GitHub gives each run, which reaches
-only this repository and expires when the job ends. Each job gets only what it needs:
+only this repository and expires when the job ends. Publishing to crates.io needs no token
+either: crates.io trades the job's OIDC token for one of its own, which the job revokes when it
+ends. Each job gets only what it needs:
 
 | Job | Permissions |
 |---|---|
 | `build-local-artifacts` | `contents: read`, plus `id-token: write` and `attestations: write` to attest what it builds |
 | The desktop installers' builds | `contents: read` |
 | The desktop installers' attest job | `contents: read`, `id-token: write`, `attestations: write` |
+| `custom-publish-crates` | `contents: read`, plus `id-token: write` for its crates.io token |
 | `plan`, `build-global-artifacts`, `host`, `announce` | `contents: write`, which `host` needs to create the release |
 
 The builds aren't signed, so there are no signing keys or certificates either. macOS's ad-hoc
 signature needs none. A publish job that needs a secret adds it to this page, with the one place
 it can write to.
+
+## crates.io
+
+The release publishes six crates: `cleanse-cli`, which installs `cleanse`, and the crates it's
+built from, `cleanse-model`, `cleanse-platform`, `cleanse-core`, `cleanse-exec`, and
+`cleanse-engine`. Their descriptions say they're internal to `cleanse-cli`, with no stable API,
+so their versions are the CLI's and promise nothing about their own APIs.
+`cargo publish --workspace` finds them as the packages without `publish = false`, and publishes
+them in the order they depend on each other.
+
+A version on crates.io can't be replaced or deleted, only yanked. So the job leaves out each crate
+whose version is already there, and rerunning it after a failure carries on where it stopped.
+
+**Trusted publishing:** each crate on crates.io names a trusted publisher, this repository's
+`release.yml`. The job's
+[crates-io-auth-action](https://github.com/rust-lang/crates-io-auth-action) step trades the job's
+OIDC token for a crates.io token, which crates.io gives only if the OIDC token's `workflow_ref`
+is `release.yml`. That's the workflow a run started from, so it's `release.yml` even though the
+steps are in `publish-crates.yml`, which `release.yml` calls. So only `release.yml`'s runs can
+publish, not `publish-crates.yml`'s own runs on pull requests.
+
+**The first publish, at v1.0.0:** a trusted publisher can only be added to a crate that exists,
+so the first version is published by hand, before the tag:
+
+1. Merge the release-prep pull request, and hold other merges, as usual.
+2. On crates.io, create an API token with the `publish-new` and `publish-update` scopes, for
+   crates matching `cleanse-*`, that expires soon. Then publish what's on `main`:
+
+   ```sh
+   git switch main
+   git pull --ff-only
+   cargo login          # paste the token
+   cargo publish --workspace --locked
+   cargo logout
+   ```
+
+3. In each crate's **Settings** on crates.io, add a trusted publisher: GitHub, owner `zhenga8533`,
+   repository `cleanse`, workflow `release.yml`, and no environment.
+4. Revoke the API token. Optionally, set each crate's publishing method restriction to trusted
+   publishing only, so that no API token can publish it.
+5. Tag as usual. `custom-publish-crates` finds all six crates already published, and publishes
+   nothing.
+
+From the next version on, the release publishes them.
 
 ## Checking a release
 
@@ -102,7 +157,8 @@ when they match:
 
 After each release, check that its page has the five CLI archives, the two installer scripts, and
 the four desktop installers, each with a `.sha256`; that a CLI archive and a desktop installer
-verify; and that the README's installer one-liners install the new version.
+verify; that the README's installer one-liners install the new version; and that crates.io has
+the version of all six crates.
 
 ## When a release fails
 
@@ -137,3 +193,8 @@ Neither had reached `host`.
 **If something was published:** leave the tag and the release as they are. Fix the cause in a pull
 request, then release the next patch version with the steps above. If the release is broken or
 incomplete, say so at the top of its notes, and point to the fixed release.
+
+**If only `custom-publish-crates` failed,** the GitHub Release is already out. If the failure was
+GitHub's or crates.io's, or a crate had no trusted publisher yet, rerun the failed jobs once it's
+fixed. The job leaves out the crates it already published. If the crates themselves need a fix,
+release the next patch version; crates already published at this version stay as they are.

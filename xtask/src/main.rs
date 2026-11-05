@@ -16,7 +16,7 @@ const USAGE: &str = "\
 usage: cargo xtask <task>
 
 tasks:
-  ci                                run the same checks as CI: rustfmt, clippy, tests, cargo-deny, typos, taplo
+  ci                                run the same checks as CI: rustfmt, clippy, tests, crates.io packages, cargo-deny, typos, taplo
   desktop                           run the desktop app's checks: clippy, tests, bindings, Biome, types, frontend tests and build
   gen-tree <dir> [--entries <n>]    create a synthetic directory tree for benchmarks (default 200000 entries)
   helper                            build the desktop app's elevated helper for its installers, in apps/desktop/src-tauri/binaries
@@ -85,6 +85,20 @@ const CI_CHECKS: &[Check] = &[
             "--exclude",
             "cleanse-desktop",
             "--doc",
+            "--locked",
+        ],
+        install: None,
+    },
+    // Unlike CI, which checks out a clean tree, this runs before changes are committed, which
+    // `cargo publish` refuses without `--allow-dirty`.
+    Check {
+        name: "crates.io packages",
+        program: "cargo",
+        args: &[
+            "publish",
+            "--workspace",
+            "--dry-run",
+            "--allow-dirty",
             "--locked",
         ],
         install: None,

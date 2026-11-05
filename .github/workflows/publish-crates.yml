@@ -1,0 +1,101 @@
+# Publishes the command line to crates.io: cleanse-cli and the library crates it's built from,
+# which `cargo publish --workspace` finds as every package not marked `publish = false`. The
+# release workflow runs this once the GitHub Release exists (`publish-jobs` in
+# dist-workspace.toml). It also runs, as a dry run, on pull requests that change it.
+name: Publish crates
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        description: dist's plan, as JSON. Publishing doesn't need it.
+        required: true
+        type: string
+  pull_request:
+    paths:
+      - .github/workflows/publish-crates.yml
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # The OIDC token is traded for a crates.io token that lasts only for this job (trusted
+    # publishing). crates.io trusts tokens from release.yml alone, which is the workflow they
+    # name even when it calls this one, so a pull request's run here can't publish.
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        shell: bash
+    env:
+      DRY_RUN: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+      # `cargo publish --workspace` stops at a version that's already on crates.io, and versions
+      # there can't be replaced. So crates already published, by hand for a crate's first version
+      # or by an earlier try at this release, are left out, and a rerun carries on from there.
+      - name: Find what isn't on crates.io yet
+        id: unpublished
+        run: |
+          packages=$(cargo metadata --no-deps --format-version 1 --locked |
+            jq -r '.packages[] | select(.publish != []) | [.name, .version] | @tsv')
+          if [ -z "$packages" ]; then
+            echo "::error::no package in the workspace can be published"
+            exit 1
+          fi
+          published=()
+          unpublished=()
+          while IFS=$'\t' read -r name version; do
+            # The sparse index's path for a name of four or more characters, as all of these are.
+            status=$(curl --silent --show-error --output "$RUNNER_TEMP/index" --write-out '%{http_code}' \
+              "https://index.crates.io/${name:0:2}/${name:2:2}/$name")
+            case "$status" in
+              200)
+                if jq --exit-status --arg version "$version" 'select(.vers == $version)' \
+                  "$RUNNER_TEMP/index" > /dev/null; then
+                  published+=("$name")
+                else
+                  unpublished+=("$name")
+                fi
+                ;;
+              404) unpublished+=("$name") ;;
+              *)
+                echo "::error::crates.io's index answered $status for $name"
+                exit 1
+                ;;
+            esac
+          done <<< "$packages"
+          echo "Already on crates.io: ${published[*]:-none}"
+          echo "To publish: ${unpublished[*]:-none}"
+          echo "published=${published[*]}" >> "$GITHUB_OUTPUT"
+          if [ ${#unpublished[@]} -gt 0 ]; then
+            echo "any=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Get a crates.io token
+        id: auth
+        if: steps.unpublished.outputs.any == 'true' && env.DRY_RUN == 'false'
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
+      - name: Publish
+        if: steps.unpublished.outputs.any == 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          PUBLISHED: ${{ steps.unpublished.outputs.published }}
+        run: |
+          read -r -a names <<< "$PUBLISHED"
+          arguments=(--workspace --locked)
+          for name in "${names[@]}"; do
+            arguments+=(--exclude "$name")
+          done
+          if [ "$DRY_RUN" = true ]; then
+            arguments+=(--dry-run)
+          fi
+          cargo publish "${arguments[@]}"

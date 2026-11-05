@@ -1,10 +1,11 @@
 [package]
 name = "cleanse-platform"
-description = "Read-only, per-OS filesystem facts for Cleanse"
+description = "Read-only, per-OS filesystem facts for Cleanse. Internal to cleanse-cli, with no stable API."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
 
 [features]
 # Exposes `FakeProbe` and `StagedSystem` so other crates' tests can stage cloud placeholders, hard

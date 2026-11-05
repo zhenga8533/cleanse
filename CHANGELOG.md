@@ -30,6 +30,9 @@ All notable changes to Cleanse are documented here. The format is based on
   - It accepts only the app that started it, and only the IDs of what its own scan found.
   - The AppImage doesn't have it, and points to `cleanse system` instead. There's no System
     section on macOS.
+- The command line is on crates.io, as `cleanse-cli`. `cargo install --locked cleanse-cli` builds
+  it, and `cargo binstall cleanse-cli` gets the release's archive. The five crates it's built
+  from are published with it, as internal parts without a stable API.
 
 ### Changed
 

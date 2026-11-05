@@ -6,10 +6,24 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+readme = "../../README.md"
+keywords = ["disk-cleanup", "disk-space", "cache", "cleaner", "cli"]
+categories = ["command-line-utilities", "filesystem"]
 
 [[bin]]
 name = "cleanse"
 path = "src/main.rs"
+
+# For `cargo binstall cleanse-cli`: the release's archives, which dist makes. A tarball holds a
+# folder named after it, with the program inside, and the Windows zip holds the program alone.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }{ archive-suffix }"
+pkg-fmt = "txz"
+bin-dir = "{ name }-{ target }/{ bin }{ binary-ext }"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
+bin-dir = "{ bin }{ binary-ext }"
 
 [dependencies]
 cleanse-engine.workspace = true
