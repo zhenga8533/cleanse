@@ -6,6 +6,16 @@ All notable changes to Cleanse are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-05
+
+System cleanup. Cleanse now cleans the operating system's own folders on Windows and Linux as well
+as yours: Windows' temp folder, update downloads, error reports, and memory dumps, and Linux's
+core dumps and crash reports. That's the only thing it does as an administrator or root, with
+rules of its own, and it removes an item only if the item, and everything in it, belongs to the
+system. In the desktop app, a separate helper does that work, and the app's window still never
+runs as an administrator. For your own files, Cleanse now also keeps what belongs to other
+accounts. The command line is on crates.io too.
+
 ### Added
 
 - `cleanse system` cleans the operating system's own folders, as an administrator or root:
@@ -221,7 +231,8 @@ and Linux. It never removes anything; cleanup arrives in 0.2.
   cloud-synced folders, folders containing possible secrets or virtual machine disks, and
   anything that couldn't be fully read.
 
-[Unreleased]: https://github.com/zhenga8533/cleanse/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/zhenga8533/cleanse/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/zhenga8533/cleanse/releases/tag/v1.0.0
 [0.5.0]: https://github.com/zhenga8533/cleanse/releases/tag/v0.5.0
 [0.3.0]: https://github.com/zhenga8533/cleanse/releases/tag/v0.3.0
 [0.2.0]: https://github.com/zhenga8533/cleanse/releases/tag/v0.2.0
