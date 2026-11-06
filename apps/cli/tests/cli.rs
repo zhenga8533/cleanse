@@ -9,7 +9,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 use std::time::{Duration, SystemTime};
 
-use cleanse_engine::{Probe, System};
+use cleanse_engine::{Elevation, Probe, System};
 
 fn cleanse(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_cleanse"))
@@ -61,6 +61,26 @@ fn stderr(output: &Output) -> String {
 
 fn elevated() -> bool {
     System::new().unwrap().is_elevated()
+}
+
+/// Whether Cleanse refuses to change the user's own files here: as root, or as an administrator
+/// while UAC is on. With UAC off, as on CI's Windows runners, it doesn't (ADR 0011).
+fn refuses_changes() -> bool {
+    System::new().unwrap().elevation() == Elevation::Elevated
+}
+
+/// The tests named `when_elevated` that check the user's cleanup refuses. CI runs them as root,
+/// in a Linux job of its own, since its Windows runners have UAC off.
+fn refuses_or_skip() -> bool {
+    if refuses_changes() {
+        return true;
+    }
+    assert!(
+        std::env::var_os("CLEANSE_TEST_AS_ROOT").is_none(),
+        "CLEANSE_TEST_AS_ROOT is set, so this has to run as root"
+    );
+    eprintln!("skipped: needs root, or an administrator with UAC on");
+    false
 }
 
 fn node_modules_intact(root: &Path) -> bool {
@@ -398,10 +418,10 @@ fn clean_dry_run_stays_within_the_highest_tier() {
     assert!(report.contains("Nothing was selected"), "{report}");
 }
 
-/// Windows CI runs tests as an administrator, so that's where this gets checked.
+/// CI checks this as root, in its own Linux job.
 #[test]
-fn clean_refuses_to_delete_while_elevated() {
-    if !elevated() {
+fn clean_refuses_to_delete_when_elevated() {
+    if !refuses_or_skip() {
         return;
     }
     let root = fixture();
@@ -427,7 +447,7 @@ fn clean_refuses_to_delete_while_elevated() {
 #[cfg(unix)]
 #[test]
 fn clean_yes_deletes_the_preselected_items_and_journals_them() {
-    if elevated() {
+    if refuses_changes() {
         return;
     }
     let root = fixture();
@@ -473,10 +493,10 @@ fn restore_and_purge_need_to_be_told_what() {
     assert_eq!(purge.status.code(), Some(2));
 }
 
-/// Windows CI runs tests as an administrator, so that's where this gets checked.
+/// CI checks this as root, in its own Linux job.
 #[test]
-fn restore_and_purge_refuse_while_elevated() {
-    if !elevated() {
+fn restore_and_purge_refuse_when_elevated() {
+    if !refuses_or_skip() {
         return;
     }
 
@@ -538,7 +558,7 @@ fn quarantine_says_when_its_empty() {
 #[cfg(unix)]
 #[test]
 fn restore_rejects_an_id_that_isnt_in_quarantine() {
-    if elevated() {
+    if refuses_changes() {
         return;
     }
     let home = tempfile::tempdir().unwrap();
@@ -617,10 +637,10 @@ fn history_says_when_nothing_has_been_changed() {
     );
 }
 
-/// Windows CI runs tests as an administrator, so that's where this gets checked.
+/// CI checks this as root, in its own Linux job.
 #[test]
-fn finishing_refuses_while_elevated() {
-    if !elevated() {
+fn finishing_refuses_when_elevated() {
+    if !refuses_or_skip() {
         return;
     }
 
@@ -710,7 +730,7 @@ fn apply_without_a_terminal_asks_for_yes_and_removes_nothing() {
 
 #[test]
 fn apply_says_when_a_file_isnt_a_plan() {
-    if elevated() {
+    if refuses_changes() {
         return;
     }
     let dir = tempfile::tempdir().unwrap();
@@ -729,7 +749,7 @@ fn apply_says_when_a_file_isnt_a_plan() {
 
 #[test]
 fn apply_removes_nothing_when_nothing_is_selected() {
-    if elevated() {
+    if refuses_changes() {
         return;
     }
     let root = fixture();
@@ -747,10 +767,10 @@ fn apply_removes_nothing_when_nothing_is_selected() {
     assert!(node_modules_intact(root.path()));
 }
 
-/// Windows CI runs tests as an administrator, so that's where this gets checked.
+/// CI checks this as root, in its own Linux job.
 #[test]
-fn apply_refuses_while_elevated() {
-    if !elevated() {
+fn apply_refuses_when_elevated() {
+    if !refuses_or_skip() {
         return;
     }
     let root = fixture();
@@ -772,7 +792,7 @@ fn apply_refuses_while_elevated() {
 #[cfg(unix)]
 #[test]
 fn apply_yes_removes_the_selected_items_in_a_saved_plan() {
-    if elevated() {
+    if refuses_changes() {
         return;
     }
     let root = fixture();

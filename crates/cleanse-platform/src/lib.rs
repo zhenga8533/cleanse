@@ -49,8 +49,14 @@ pub trait Probe: Send + Sync {
 
     fn known_folders(&self) -> &KnownFolders;
 
-    /// Whether the process runs as an administrator (Windows) or root (Unix).
-    fn is_elevated(&self) -> bool;
+    /// Whether, and how, the process runs as an administrator (Windows) or root (Unix).
+    fn elevation(&self) -> Elevation;
+
+    /// Whether the process runs as an administrator (Windows) or root (Unix), however it came
+    /// to.
+    fn is_elevated(&self) -> bool {
+        self.elevation() != Elevation::None
+    }
 
     /// The names of the programs running now, for every user, as [`process_name`] gives them.
     fn running_processes(&self) -> io::Result<HashSet<String>>;
@@ -98,6 +104,23 @@ pub struct FileFacts {
     pub offline: bool,
     /// Who owns it, or `None` if that couldn't be read.
     pub owner: Option<FileOwner>,
+}
+
+/// Whether the process runs as an administrator or root, and whether its account has a way to
+/// run without, which decides whether the user's cleanup may change anything (ADR 0011).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Elevation {
+    /// Neither an administrator nor root.
+    #[default]
+    None,
+    /// An administrator or root, while the account also runs things without those rights: a
+    /// program started with Run as administrator while UAC is on, or `sudo`.
+    Elevated,
+    /// An administrator on Windows whose account has no unelevated way to run anything, so
+    /// everything it runs has these rights: UAC is off, or the account is one UAC doesn't
+    /// filter, such as the built-in Administrator. Service accounts, such as `SYSTEM`, are
+    /// [`Elevated`](Self::Elevated) instead.
+    AlwaysElevated,
 }
 
 /// Who owns a file or directory, as far as deciding whether Cleanse may remove it goes.
@@ -155,6 +178,8 @@ pub struct KnownFolders {
     /// `~/.local/share` on Linux.
     pub data_local: Option<PathBuf>,
     pub temp: PathBuf,
+    /// The folder every account's home folder is made in, `C:\Users` by default, on Windows.
+    pub user_profiles: Option<PathBuf>,
 }
 
 impl KnownFolders {
@@ -172,6 +197,7 @@ impl KnownFolders {
             config: dirs::config_dir(),
             data_local: dirs::data_local_dir(),
             temp: os::temp_dir(),
+            user_profiles: os::user_profiles(),
         }
     }
 
@@ -228,7 +254,7 @@ impl SystemFolders {
 #[derive(Debug)]
 pub struct System {
     known_folders: KnownFolders,
-    elevated: bool,
+    elevation: Elevation,
     user: os::User,
 }
 
@@ -236,10 +262,11 @@ impl System {
     /// Reads the known folders, the process's elevation, and the account it runs as once, up
     /// front.
     pub fn new() -> io::Result<Self> {
+        let user = os::current_user()?;
         Ok(Self {
             known_folders: KnownFolders::current(),
-            elevated: os::is_elevated()?,
-            user: os::current_user()?,
+            elevation: os::elevation(&user)?,
+            user,
         })
     }
 }
@@ -247,10 +274,20 @@ impl System {
 #[cfg(any(test, feature = "fake"))]
 impl System {
     /// Overrides the elevation read at startup, for tests on CI runners, which run as an
-    /// administrator on Windows.
+    /// administrator on Windows: `true` is [`Elevation::Elevated`].
     #[must_use]
-    pub fn elevated(mut self, elevated: bool) -> Self {
-        self.elevated = elevated;
+    pub fn elevated(self, elevated: bool) -> Self {
+        self.with_elevation(if elevated {
+            Elevation::Elevated
+        } else {
+            Elevation::None
+        })
+    }
+
+    /// Overrides the elevation read at startup.
+    #[must_use]
+    pub fn with_elevation(mut self, elevation: Elevation) -> Self {
+        self.elevation = elevation;
         self
     }
 
@@ -272,8 +309,8 @@ impl Probe for System {
         &self.known_folders
     }
 
-    fn is_elevated(&self) -> bool {
-        self.elevated
+    fn elevation(&self) -> Elevation {
+        self.elevation
     }
 
     fn running_processes(&self) -> io::Result<HashSet<String>> {

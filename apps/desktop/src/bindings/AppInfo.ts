@@ -2,6 +2,8 @@
 
 export type AppInfo = { version: string, 
 /**
- * Cleanse runs as an administrator or root, so it won't change anything.
+ * Cleanse runs as an administrator or root while the account could run it without, so it
+ * won't change anything. It's false on Windows with UAC off, where everything the account
+ * runs is elevated, so Cleanse changes things as usual (ADR 0011).
  */
 elevated: boolean, };

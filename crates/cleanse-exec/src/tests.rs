@@ -12,7 +12,7 @@ use cleanse_model::{
     CandidateId, Concern, Disposal, EntryKind, EntryOutcome, Outcome, Plan, PlanItem,
     QuarantineEntry, RuleId, SavedItem, SavedPlan, Size, SkipReason,
 };
-use cleanse_platform::{KnownFolders, Probe, System};
+use cleanse_platform::{Elevation, KnownFolders, Probe, System};
 use serde_json::Value;
 use tempfile::TempDir;
 
@@ -454,6 +454,62 @@ fn refuses_to_run_elevated() {
 
     assert!(matches!(result, Err(ApplyError::Elevated)), "{result:?}");
     fixture.assert_web_untouched();
+}
+
+#[test]
+fn the_users_cleanup_refuses_only_while_it_could_run_unelevated() {
+    let fixture = Fixture::new();
+
+    for (elevation, allowed) in [
+        (Elevation::None, true),
+        (Elevation::Elevated, false),
+        (Elevation::AlwaysElevated, true),
+    ] {
+        let system = System::new().unwrap().with_elevation(elevation);
+        let result = Executor::new(
+            &fixture.rules,
+            &system,
+            &Config::default(),
+            fixture.data.path().into(),
+        )
+        .check_can_change();
+
+        if allowed {
+            assert!(result.is_ok(), "{elevation:?}: {result:?}");
+        } else {
+            assert!(
+                matches!(result, Err(ApplyError::Elevated)),
+                "{elevation:?}: {result:?}"
+            );
+        }
+    }
+}
+
+/// With UAC off, everything the account runs is elevated, so there's no way to run Cleanse
+/// without, and the user's cleanup goes ahead with every other check (ADR 0011).
+#[test]
+fn removes_while_the_account_is_always_elevated() {
+    let fixture = Fixture::new();
+    let plan = fixture.plan();
+    let always = System::new()
+        .unwrap()
+        .with_elevation(Elevation::AlwaysElevated);
+
+    let outcomes = Executor::new(
+        &fixture.rules,
+        &always,
+        &Config::default(),
+        fixture.data.path().into(),
+    )
+    .apply(&plan, &|_| {}, &AtomicBool::new(false))
+    .unwrap()
+    .outcomes;
+
+    assert!(
+        matches!(&outcomes[..], [Outcome::Deleted { .. }]),
+        "{outcomes:?}"
+    );
+    assert!(!fixture.node_modules().exists());
 }
 
 #[test]
