@@ -35,7 +35,7 @@ pub use cleanse_exec::{
     Action, Applied, ApplyError, Handled, History, Leftover, Listing, PlanFileError, Run, helper,
     load_plan, save_plan,
 };
-pub use cleanse_platform::{KnownFolders, Probe, System, SystemFolders};
+pub use cleanse_platform::{Elevation, KnownFolders, Probe, System, SystemFolders};
 pub use session::{
     Cleaned, Explained, Finished, FolderEntry, FolderView, HandledEntries, Page, RuleSummary,
     ScanId, SectionSummary, Session, SessionError, Summary,
@@ -95,7 +95,8 @@ pub fn cloud_sync_detection() -> &'static str {
 /// Which cleanup an [`Engine`] is for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
-    /// The user's own files. Nothing is changed while elevated.
+    /// The user's own files. Nothing is changed while elevated, unless the account has no way
+    /// to run without, as on Windows with UAC off (ADR 0011).
     User,
     /// The operating system's folders, changed only while elevated (ADR 0010).
     System,
@@ -288,8 +289,8 @@ impl Engine {
         }
     }
 
-    /// Why nothing can be changed now, if so: the user's cleanup changes nothing while elevated,
-    /// and system cleanup only while elevated.
+    /// Why nothing can be changed now, if so: the user's cleanup changes nothing while elevated
+    /// when it could run without, and system cleanup only while elevated.
     pub fn check_can_change(&self) -> Result<(), ApplyError> {
         self.executor()?.check_can_change()
     }
@@ -447,7 +448,9 @@ impl Engine {
             .into_values()
             .filter(|detection| {
                 !matches!(detection.rule.target, Target::LargeFile {})
-                    || policy.check(&detection.path, None, &[]).is_none()
+                    || policy
+                        .check_on_disk(&detection.path, &self.system)
+                        .is_none()
             })
             .collect();
         // Checking who owns everything inside every item would make a system scan take minutes
@@ -494,9 +497,8 @@ impl Engine {
             matcher.match_entry(ancestor, Listed::of(&metadata))
         });
         let Some(detection) = detection else {
-            let identity = self.system.inspect(&path).ok().map(|facts| facts.identity);
             return Ok(Explanation::Unmatched {
-                protected: policy.check(&path, identity, &[]).map(str::to_owned),
+                protected: policy.check_on_disk(&path, &self.system).map(str::to_owned),
             });
         };
 

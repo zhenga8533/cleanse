@@ -4,7 +4,16 @@ import type { KnownFolder } from "./KnownFolder";
 /**
  * How Cleanse is set up on this system, as `cleanse doctor` reports it.
  */
-export type SettingsView = { version: string, os: string, arch: string, elevated: boolean, 
+export type SettingsView = { version: string, os: string, arch: string, 
+/**
+ * Cleanse runs as an administrator or root, however it came to.
+ */
+elevated: boolean, 
+/**
+ * Everything the account runs is elevated, as on Windows with UAC off, so cleaning its own
+ * files still works.
+ */
+alwaysElevated: boolean, 
 /**
  * The settings file, unless this system has no folder for app settings.
  */

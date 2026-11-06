@@ -2,15 +2,16 @@ import { mockIPC } from "@tauri-apps/api/mocks";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it } from "vitest";
+import type { SettingsView } from "../bindings/SettingsView";
 import { RULE_VIEWS, SETTINGS } from "../dev/sample";
 import { findGrid } from "../test/grids";
 import { matches, SettingsScreen } from "./SettingsScreen";
 
-function engine(): void {
+function engine(settings: SettingsView = SETTINGS): void {
   mockIPC((cmd) => {
     switch (cmd) {
       case "settings":
-        return SETTINGS;
+        return settings;
       case "rules":
         return RULE_VIEWS;
       default:
@@ -31,6 +32,25 @@ it("reports how Cleanse is set up, as `cleanse doctor` does", async () => {
   expect(doctor.textContent).toContain("C:\\Users\\sample\\code\\keep");
   expect(doctor.textContent).toContain("1.0 GiB or more on disk");
   expect(doctor.textContent).toContain("Temp folderC:\\Users\\sample\\AppData\\Local\\Temp");
+  expect(doctor.textContent).toContain("Running as administrator or rootNo");
+});
+
+it("says whether cleaning works when Cleanse runs elevated", async () => {
+  for (const [settings, says] of [
+    [{ ...SETTINGS, elevated: true }, "Yes, so cleaning your own files is off"],
+    [
+      { ...SETTINGS, elevated: true, alwaysElevated: true },
+      "Yes, as everything this account runs is, as with UAC off, so cleaning your own files still works",
+    ],
+  ] as const) {
+    engine(settings);
+    const { unmount } = render(<SettingsScreen />);
+    const doctor = await screen.findByRole("region", {
+      name: "Cleanse 0.0.0-preview on windows (x86_64)",
+    });
+    expect(doctor.textContent).toContain(`Running as administrator or root${says}`);
+    unmount();
+  }
 });
 
 it("shows a rule in detail when it's opened, and goes back on closing", async () => {

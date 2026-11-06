@@ -3,14 +3,14 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use crate::{FileFacts, FileOwner, KnownFolders, Probe, System, process_name};
+use crate::{Elevation, FileFacts, FileOwner, KnownFolders, Probe, System, process_name};
 
 /// A [`Probe`] that answers only what a test has told it.
 #[derive(Debug, Default)]
 pub struct FakeProbe {
     files: HashMap<PathBuf, FileFacts>,
     known_folders: KnownFolders,
-    elevated: bool,
+    elevation: Elevation,
     running: HashSet<String>,
     booted_at: Option<SystemTime>,
     admins_only: HashSet<PathBuf>,
@@ -30,9 +30,19 @@ impl FakeProbe {
         self
     }
 
+    /// `true` is [`Elevation::Elevated`].
     #[must_use]
-    pub fn elevated(mut self, elevated: bool) -> Self {
-        self.elevated = elevated;
+    pub fn elevated(self, elevated: bool) -> Self {
+        self.with_elevation(if elevated {
+            Elevation::Elevated
+        } else {
+            Elevation::None
+        })
+    }
+
+    #[must_use]
+    pub fn with_elevation(mut self, elevation: Elevation) -> Self {
+        self.elevation = elevation;
         self
     }
 
@@ -73,8 +83,8 @@ impl Probe for FakeProbe {
         &self.known_folders
     }
 
-    fn is_elevated(&self) -> bool {
-        self.elevated
+    fn elevation(&self) -> Elevation {
+        self.elevation
     }
 
     fn running_processes(&self) -> io::Result<HashSet<String>> {
@@ -109,7 +119,7 @@ pub struct StagedSystem {
     system: System,
     owners: HashMap<PathBuf, Option<FileOwner>>,
     private: HashSet<PathBuf>,
-    elevated: bool,
+    elevation: Elevation,
     booted_at: SystemTime,
 }
 
@@ -119,7 +129,7 @@ impl StagedSystem {
             system: System::new()?,
             owners: HashMap::new(),
             private: HashSet::new(),
-            elevated: true,
+            elevation: Elevation::Elevated,
             booted_at: SystemTime::now(),
         })
     }
@@ -138,9 +148,19 @@ impl StagedSystem {
         self
     }
 
+    /// `true` is [`Elevation::Elevated`], which it starts as.
     #[must_use]
-    pub fn elevated(mut self, elevated: bool) -> Self {
-        self.elevated = elevated;
+    pub fn elevated(self, elevated: bool) -> Self {
+        self.with_elevation(if elevated {
+            Elevation::Elevated
+        } else {
+            Elevation::None
+        })
+    }
+
+    #[must_use]
+    pub fn with_elevation(mut self, elevation: Elevation) -> Self {
+        self.elevation = elevation;
         self
     }
 }
@@ -160,8 +180,8 @@ impl Probe for StagedSystem {
         self.system.known_folders()
     }
 
-    fn is_elevated(&self) -> bool {
-        self.elevated
+    fn elevation(&self) -> Elevation {
+        self.elevation
     }
 
     fn running_processes(&self) -> io::Result<HashSet<String>> {

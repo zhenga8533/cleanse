@@ -21,7 +21,7 @@ use cleanse_desktop_views::{
 use cleanse_elevate::client::Client;
 use cleanse_elevate::protocol::{Request, Response};
 use cleanse_engine::helper::{self, HelperProcess};
-use cleanse_engine::{Engine, Probe, System};
+use cleanse_engine::{Elevation, Engine, Probe, System};
 use tauri::ipc::Channel;
 use tauri::{Runtime, State, WebviewWindow};
 
@@ -52,14 +52,17 @@ struct Installed;
 impl Installed {
     fn find() -> Result<helper::Installed, String> {
         let system = System::new().map_err(message)?;
-        if system.is_elevated() {
-            return Err(
-                "Cleanse is running as an administrator or root. Open it again without \
-                        elevation, and system cleanup will ask for administrator rights itself."
-                    .to_owned(),
-            );
+        match system.elevation() {
+            Elevation::None => helper::find(&system).map_err(message),
+            Elevation::Elevated => Err("Cleanse is running as an administrator or root. Open it \
+                 again without elevation, and system cleanup will ask for administrator rights \
+                 itself."
+                .to_owned()),
+            Elevation::AlwaysElevated => Err("Windows runs everything this account starts as an \
+                 administrator, as it does with UAC off, and the app doesn't start its helper \
+                 from an elevated window."
+                .to_owned()),
         }
-        helper::find(&system).map_err(message)
     }
 }
 

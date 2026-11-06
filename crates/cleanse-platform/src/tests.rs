@@ -443,6 +443,90 @@ fn finds_the_home_and_temp_folders() {
     assert!(folders.temp.is_dir());
 }
 
+#[cfg(windows)]
+#[test]
+fn the_user_profiles_folder_holds_the_home_folder() {
+    let folders = KnownFolders::current();
+
+    let profiles = folders.user_profiles.unwrap();
+    assert!(profiles.is_dir(), "{}", profiles.display());
+    assert!(
+        folders.home.as_deref().unwrap().starts_with(&profiles),
+        "{}",
+        profiles.display()
+    );
+}
+
+#[cfg(not(windows))]
+#[test]
+fn only_windows_has_a_user_profiles_folder() {
+    assert_eq!(KnownFolders::current().user_profiles, None);
+}
+
+/// With UAC on, an administrator's elevated programs get a full token with an unelevated twin,
+/// and with it off, the full token alone, which is what services get too.
+#[cfg(windows)]
+#[test]
+fn only_a_persons_unfiltered_token_is_always_elevated() {
+    use windows_sys::Win32::Security::{
+        TokenElevationTypeDefault, TokenElevationTypeFull, TokenElevationTypeLimited,
+    };
+
+    use crate::Elevation;
+    use crate::windows::elevation_of;
+
+    for (elevated, kind, person, expected) in [
+        // A standard account, or an administrator's unelevated programs with UAC on.
+        (false, TokenElevationTypeDefault, true, Elevation::None),
+        (false, TokenElevationTypeLimited, true, Elevation::None),
+        // Run as administrator, with UAC on.
+        (true, TokenElevationTypeFull, true, Elevation::Elevated),
+        // An administrator with UAC off, or the built-in Administrator.
+        (
+            true,
+            TokenElevationTypeDefault,
+            true,
+            Elevation::AlwaysElevated,
+        ),
+        // A service account, such as SYSTEM.
+        (true, TokenElevationTypeDefault, false, Elevation::Elevated),
+    ] {
+        assert_eq!(
+            elevation_of(elevated, kind, person),
+            expected,
+            "{elevated} {kind} {person}"
+        );
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn only_local_domain_and_entra_accounts_are_peoples() {
+    use crate::windows::is_person_sid;
+
+    for (sid, person) in [
+        // A domain's built-in Administrator, and an account in it.
+        ("S-1-5-21-1004336348-1177238915-682003330-500", true),
+        ("S-1-5-21-1004336348-1177238915-682003330-1001", true),
+        // A Microsoft Entra ID account.
+        ("S-1-12-1-1234567890-1234567890-1234567890-1234567890", true),
+        // SYSTEM, LOCAL SERVICE, and NETWORK SERVICE.
+        ("S-1-5-18", false),
+        ("S-1-5-19", false),
+        ("S-1-5-20", false),
+        // NT SERVICE\TrustedInstaller.
+        (
+            "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464",
+            false,
+        ),
+        // The Administrators group, and an IIS application pool's account.
+        ("S-1-5-32-544", false),
+        ("S-1-5-82-1-2-3-4-5", false),
+    ] {
+        assert_eq!(is_person_sid(sid).unwrap(), person, "{sid}");
+    }
+}
+
 /// GitHub's Windows runners set `%TEMP%` with short names, like `C:\Users\RUNNER~1\...`.
 #[test]
 fn the_temp_folder_is_given_by_its_long_names() {

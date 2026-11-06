@@ -62,7 +62,13 @@ function Doctor({ settings, rules }: { settings: SettingsView; rules: number }) 
       </h2>
       <dl className="facts">
         <dt>Running as administrator or root</dt>
-        <dd>{settings.elevated ? "Yes" : "No"}</dd>
+        <dd>
+          {settings.alwaysElevated
+            ? "Yes, as everything this account runs is, as with UAC off, so cleaning your own files still works"
+            : settings.elevated
+              ? "Yes, so cleaning your own files is off"
+              : "No"}
+        </dd>
         <dt>Rules</dt>
         <dd>
           {settings.disabledRules.length === 0

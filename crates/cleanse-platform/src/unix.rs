@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use cleanse_model::{EntryKind, FileIdentity};
 
-use crate::{FileFacts, FileOwner, ListedFacts, SystemFolders};
+use crate::{Elevation, FileFacts, FileOwner, ListedFacts, SystemFolders};
 
 /// `st_blocks` counts 512-byte units on Linux and macOS, whatever the filesystem's block size.
 const STAT_BLOCK_BYTES: u64 = 512;
@@ -46,6 +46,11 @@ pub(crate) fn inspect(path: &Path, user: &User) -> io::Result<FileFacts> {
 
 pub(crate) fn temp_dir() -> PathBuf {
     env::temp_dir()
+}
+
+/// Unix has no one folder that every account's home is made in.
+pub(crate) fn user_profiles() -> Option<PathBuf> {
+    None
 }
 
 /// Whether the folder at `path` is one only root can change: a real folder, not a link, that root
@@ -130,10 +135,16 @@ fn is_dataless(_: &Metadata) -> bool {
     false
 }
 
+/// Root is always [`Elevation::Elevated`]: whoever runs Cleanse as root has an account of their
+/// own to run it as, and `sudo` is a choice made each time.
 #[expect(
     clippy::unnecessary_wraps,
     reason = "matches the Windows version, which can fail"
 )]
-pub(crate) fn is_elevated() -> io::Result<bool> {
-    Ok(rustix::process::geteuid().is_root())
+pub(crate) fn elevation(user: &User) -> io::Result<Elevation> {
+    Ok(if user.0 == 0 {
+        Elevation::Elevated
+    } else {
+        Elevation::None
+    })
 }

@@ -22,7 +22,9 @@ use ts_rs::TS;
 #[ts(export, export_to = "../../src/bindings/")]
 pub struct AppInfo {
     pub version: String,
-    /// Cleanse runs as an administrator or root, so it won't change anything.
+    /// Cleanse runs as an administrator or root while the account could run it without, so it
+    /// won't change anything. It's false on Windows with UAC off, where everything the account
+    /// runs is elevated, so Cleanse changes things as usual (ADR 0011).
     pub elevated: bool,
 }
 
@@ -783,7 +785,11 @@ pub struct SettingsView {
     pub version: String,
     pub os: String,
     pub arch: String,
+    /// Cleanse runs as an administrator or root, however it came to.
     pub elevated: bool,
+    /// Everything the account runs is elevated, as on Windows with UAC off, so cleaning its own
+    /// files still works.
+    pub always_elevated: bool,
     /// The settings file, unless this system has no folder for app settings.
     pub path: Option<String>,
     /// The settings file exists. Without one, the defaults apply.

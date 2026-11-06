@@ -472,6 +472,7 @@ export const SETTINGS: SettingsView = {
   os: "windows",
   arch: "x86_64",
   elevated: false,
+  alwaysElevated: false,
   path: `${HOME}\\AppData\\Roaming\\cleanse\\config.toml`,
   exists: true,
   exclude: [`${HOME}\\code\\keep`],

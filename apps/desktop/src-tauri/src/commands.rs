@@ -19,7 +19,7 @@ use cleanse_desktop_views::{
     self as views, AppInfo, CleanReport, Details, EntryItem, Folders, HistoryView, ItemPage,
     KnownFolder, QuarantineView, Results, RuleView, ScanProgress, SettingsView, lossy,
 };
-use cleanse_engine::{FolderEntry, Probe, ScanId, SessionError, cloud_sync_detection};
+use cleanse_engine::{Elevation, FolderEntry, Probe, ScanId, SessionError, cloud_sync_detection};
 use cleanse_model::{CandidateId, Category, RuleId};
 use rfd::AsyncFileDialog;
 use tauri::ipc::{Channel, IpcResponse};
@@ -32,7 +32,7 @@ pub(crate) fn app_info(state: State<'_, AppState>) -> Result<AppInfo, String> {
     let session = state.session()?;
     Ok(AppInfo {
         version: env!("CARGO_PKG_VERSION").to_owned(),
-        elevated: session.engine().system().is_elevated(),
+        elevated: session.engine().system().elevation() == Elevation::Elevated,
     })
 }
 
@@ -283,6 +283,7 @@ pub(crate) fn settings(state: State<'_, AppState>) -> Result<SettingsView, Strin
         os: std::env::consts::OS.to_owned(),
         arch: std::env::consts::ARCH.to_owned(),
         elevated: engine.system().is_elevated(),
+        always_elevated: engine.system().elevation() == Elevation::AlwaysElevated,
         path: engine.config_path().map(lossy),
         exists: engine.config_path().is_some_and(Path::exists),
         exclude: config.exclude.iter().map(|path| lossy(path)).collect(),

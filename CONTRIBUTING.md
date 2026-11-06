@@ -41,6 +41,7 @@ correctness is high. This guide covers setup, conventions, and how changes are r
 | Run the CLI | `cargo run --bin cleanse -- <args>` |
 | Run the tests | `cargo nextest run --workspace` |
 | Run every CI check | `cargo xtask ci` |
+| Check the crates.io packages build, before committing | `cargo xtask packages --allow-dirty` |
 | Run the desktop app | `pnpm --dir apps/desktop install`, then `pnpm --dir apps/desktop tauri dev` |
 | Preview the desktop UI in a browser, with sample data | `pnpm --dir apps/desktop dev`, then open http://localhost:1420 |
 | Run the desktop app's checks | `cargo xtask desktop` |
