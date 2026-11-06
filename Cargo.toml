@@ -13,20 +13,20 @@ members = [
 default-members = ["apps/cli", "apps/desktop/views", "apps/elevate", "crates/*", "xtask"]
 
 [workspace.package]
-version = "1.1.0"
+version = "1.1.1"
 edition = "2024"
 rust-version = "1.99"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/zhenga8533/cleanse"
 
 [workspace.dependencies]
-cleanse-core = { path = "crates/cleanse-core", version = "1.1.0" }
-cleanse-desktop-views = { path = "apps/desktop/views", version = "1.1.0" }
-cleanse-elevate = { path = "apps/elevate", version = "1.1.0" }
-cleanse-engine = { path = "crates/cleanse-engine", version = "1.1.0" }
-cleanse-exec = { path = "crates/cleanse-exec", version = "1.1.0" }
-cleanse-model = { path = "crates/cleanse-model", version = "1.1.0" }
-cleanse-platform = { path = "crates/cleanse-platform", version = "1.1.0" }
+cleanse-core = { path = "crates/cleanse-core", version = "1.1.1" }
+cleanse-desktop-views = { path = "apps/desktop/views", version = "1.1.1" }
+cleanse-elevate = { path = "apps/elevate", version = "1.1.1" }
+cleanse-engine = { path = "crates/cleanse-engine", version = "1.1.1" }
+cleanse-exec = { path = "crates/cleanse-exec", version = "1.1.1" }
+cleanse-model = { path = "crates/cleanse-model", version = "1.1.1" }
+cleanse-platform = { path = "crates/cleanse-platform", version = "1.1.1" }
 
 clap = { version = "4.5", features = ["derive"] }
 clap_complete = "4.6"

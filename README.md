@@ -12,7 +12,7 @@ removes anything you haven't approved.
 > and `cleanse clean` deletes what you approve, or quarantines it so `cleanse restore` can put it
 > back. [`cleanse system`](#system-cleanup) does the same for the operating system's own folders
 > on Windows and Linux, and the [desktop app](#desktop-app) does all of it in a window.
-> [v1.1.0](https://github.com/zhenga8533/cleanse/releases/tag/v1.1.0) has prebuilt binaries and
+> [v1.1.1](https://github.com/zhenga8533/cleanse/releases/tag/v1.1.1) has prebuilt binaries and
 > installers for both, not signed.
 
 ## Install
