@@ -248,6 +248,47 @@ and renaming the app can't change it. Never change it: Windows would install the
 beside the old one, and winget would see two apps. `desktop-installers.yml` checks that the MSI
 it builds still has it.
 
+## Scoop
+
+The bucket is [`zhenga8533/scoop-bucket`](https://github.com/zhenga8533/scoop-bucket), made from
+Scoop's [bucket template](https://github.com/ScoopInstaller/BucketTemplate). Its
+`bucket/cleanse.json` installs the CLI's Windows zip, with `cleanse` on the path.
+
+**A release needs nothing from you.** The bucket's Excavator workflow runs every four hours. When
+the latest GitHub release is newer than the manifest, it updates the version and the zip's URL,
+takes the hash from the zip's `.sha256`, and commits. It does that with the bucket's own
+`GITHUB_TOKEN`, so this repository has no secret for it. The manifest's parts that make this work:
+
+- `"checkver": "github"`: the latest release's tag, without the `v`.
+- `autoupdate`: the zip's URL with `v$version` in it, and
+  `"hash": { "url": "$url.sha256", "regex": "$sha256" }`, which finds the 64-character hash in
+  dist's `<hash> *<file>` line.
+
+To update the bucket sooner, run Excavator by hand:
+
+```sh
+gh workflow run excavator.yml --repo zhenga8533/scoop-bucket
+```
+
+**Setting it up, once:**
+
+1. On the template, choose **Use this template**, and create `zhenga8533/scoop-bucket`, public.
+2. In its `bin/auto-pr.ps1`, replace `<username>/<bucketname>` with `zhenga8533/scoop-bucket`,
+   and describe the bucket in its README.
+3. Add `bucket/cleanse.json`, for the latest release and its zip's SHA-256, which GitHub
+   records for each file it hosts:
+
+   ```sh
+   gh api repos/zhenga8533/cleanse/releases/latest --jq '.assets[] | select(.name == "cleanse-cli-x86_64-pc-windows-msvc.zip") | .digest | ltrimstr("sha256:")'
+   ```
+4. Check that it installs:
+
+   ```powershell
+   scoop bucket add zhenga8533 https://github.com/zhenga8533/scoop-bucket
+   scoop install zhenga8533/cleanse
+   cleanse --version
+   ```
+
 ## When a release fails
 
 **A tag is moved only if nothing was published from it.** Once a GitHub Release exists, even an
