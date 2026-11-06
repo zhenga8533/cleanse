@@ -20,6 +20,7 @@ tasks:
   desktop                           run the desktop app's checks: clippy, tests, bindings, Biome, types, frontend tests and build
   gen-tree <dir> [--entries <n>]    create a synthetic directory tree for benchmarks (default 200000 entries)
   helper                            build the desktop app's elevated helper for its installers, in apps/desktop/src-tauri/binaries
+  packages [--allow-dirty]          package the crates the release publishes to crates.io, and build each from its package
   help                              show this message";
 
 struct Check {
@@ -34,6 +35,20 @@ const PNPM: &str = if cfg!(windows) { "pnpm.cmd" } else { "pnpm" };
 
 /// Where the desktop app's TypeScript bindings are, which its Rust tests write.
 const BINDINGS: &str = "apps/desktop/src/bindings";
+
+/// The packages `cargo publish --workspace` publishes: every one without `publish = false`.
+const PUBLISHED: &[&str] = &[
+    "cleanse-model",
+    "cleanse-platform",
+    "cleanse-core",
+    "cleanse-exec",
+    "cleanse-engine",
+    "cleanse-cli",
+];
+
+/// Where the packages check builds, apart from everything else, so cleaning it there rebuilds
+/// nothing else.
+const PACKAGE_CHECK_TARGET: &str = "target/package-check";
 
 /// Where the desktop app's installers take its elevated helper from, as
 /// `apps/desktop/src-tauri/installer/` says.
@@ -85,20 +100,6 @@ const CI_CHECKS: &[Check] = &[
             "--exclude",
             "cleanse-desktop",
             "--doc",
-            "--locked",
-        ],
-        install: None,
-    },
-    // Unlike CI, which checks out a clean tree, this runs before changes are committed, which
-    // `cargo publish` refuses without `--allow-dirty`.
-    Check {
-        name: "crates.io packages",
-        program: "cargo",
-        args: &[
-            "publish",
-            "--workspace",
-            "--dry-run",
-            "--allow-dirty",
             "--locked",
         ],
         install: None,
@@ -199,6 +200,14 @@ fn main() -> ExitCode {
         Some("desktop") => desktop(),
         Some("gen-tree") => gen_tree::run(&args[1..]),
         Some("helper") => helper(),
+        Some("packages") => match &args[1..] {
+            [] => report(&packages(false)),
+            [flag] if flag == "--allow-dirty" => report(&packages(true)),
+            _ => {
+                eprintln!("usage: cargo xtask packages [--allow-dirty]");
+                ExitCode::from(2)
+            }
+        },
         Some("help" | "-h" | "--help") => {
             println!("{USAGE}");
             ExitCode::SUCCESS
@@ -215,7 +224,56 @@ fn main() -> ExitCode {
 }
 
 fn ci() -> ExitCode {
-    report(&run_checks(CI_CHECKS))
+    let mut failed = run_checks(CI_CHECKS);
+    // Unlike CI, which checks out a clean tree, this runs before changes are committed, which
+    // `cargo publish` refuses without `--allow-dirty`.
+    failed.extend(packages(true));
+    report(&failed)
+}
+
+/// Packages the crates crates.io gets, as the release does, and builds each from its package
+/// alone, so a file one needs but doesn't include fails here rather than at release.
+///
+/// That build takes the other crates from their packages too, as from a registry, and cargo
+/// never rebuilds a registry crate at a version it has already built. So after a change at the
+/// same version, it would build against the old code. Cleaning the crates' builds first keeps
+/// it to the code being packaged.
+fn packages(allow_dirty: bool) -> Vec<&'static str> {
+    const NAME: &str = "crates.io packages";
+    eprintln!("\n==> {NAME}");
+    let mut clean = Command::new("cargo");
+    clean.args(["clean", "--target-dir", PACKAGE_CHECK_TARGET]);
+    for package in PUBLISHED {
+        clean.args(["--package", package]);
+    }
+    let mut publish = Command::new("cargo");
+    publish.args([
+        "publish",
+        "--workspace",
+        "--dry-run",
+        "--locked",
+        "--target-dir",
+        PACKAGE_CHECK_TARGET,
+    ]);
+    if allow_dirty {
+        publish.arg("--allow-dirty");
+    }
+    if succeeds(&mut clean) && succeeds(&mut publish) {
+        Vec::new()
+    } else {
+        vec![NAME]
+    }
+}
+
+/// Runs `command`, saying why if it couldn't.
+fn succeeds(command: &mut Command) -> bool {
+    match command.status() {
+        Ok(status) => status.success(),
+        Err(err) => {
+            eprintln!("could not run `{}`: {err}", command.get_program().display());
+            false
+        }
+    }
 }
 
 fn desktop() -> ExitCode {

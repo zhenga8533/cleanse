@@ -27,8 +27,9 @@ use windows_sys::Win32::Security::{
     GetSecurityDescriptorControl, GetSidIdentifierAuthority, GetSidSubAuthority,
     GetSidSubAuthorityCount, GetTokenInformation, INHERIT_ONLY_ACE, IsWellKnownSid,
     OBJECT_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
-    SE_DACL_PROTECTED, SECURITY_NT_AUTHORITY, TOKEN_ELEVATION, TOKEN_QUERY, TOKEN_USER,
-    TokenElevation, TokenUser, WELL_KNOWN_SID_TYPE, WinBuiltinAdministratorsSid,
+    SE_DACL_PROTECTED, SECURITY_NT_AUTHORITY, TOKEN_ELEVATION, TOKEN_ELEVATION_TYPE,
+    TOKEN_INFORMATION_CLASS, TOKEN_QUERY, TOKEN_USER, TokenElevation, TokenElevationType,
+    TokenElevationTypeDefault, TokenUser, WELL_KNOWN_SID_TYPE, WinBuiltinAdministratorsSid,
     WinLocalServiceSid, WinLocalSystemSid, WinNetworkServiceSid,
 };
 use windows_sys::Win32::Storage::CloudFilters::{
@@ -44,17 +45,19 @@ use windows_sys::Win32::Storage::FileSystem::{
     FileAttributeTagInfo, FileIdInfo, FileStandardInfo, GetFileInformationByHandleEx,
     GetLongPathNameW, GetVolumeInformationByHandleW, READ_CONTROL, WRITE_DAC, WRITE_OWNER,
 };
+use windows_sys::Win32::System::Com::CoTaskMemFree;
 use windows_sys::Win32::System::Registry::{
     HKEY_LOCAL_MACHINE, RRF_NOEXPAND, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ, RegGetValueW,
 };
 use windows_sys::Win32::System::SystemInformation::GetSystemWindowsDirectoryW;
 use windows_sys::Win32::System::SystemServices::{
     ACCESS_ALLOWED_ACE_TYPE, ACCESS_DENIED_ACE_TYPE, FILE_PERSISTENT_ACLS, MAXIMUM_ALLOWED,
-    SECURITY_SERVICE_ID_BASE_RID,
+    SECURITY_NT_NON_UNIQUE, SECURITY_SERVICE_ID_BASE_RID,
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+use windows_sys::Win32::UI::Shell::{FOLDERID_UserProfiles, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
 
-use crate::{FileFacts, FileOwner, ListedFacts, SystemFolders};
+use crate::{Elevation, FileFacts, FileOwner, ListedFacts, SystemFolders};
 
 #[cfg(any(test, feature = "privileged"))]
 pub mod launch;
@@ -807,26 +810,135 @@ fn process_token() -> io::Result<OwnedHandle> {
     Ok(unsafe { OwnedHandle::from_raw_handle(token) })
 }
 
-pub(crate) fn is_elevated() -> io::Result<bool> {
+pub(crate) fn elevation(user: &User) -> io::Result<Elevation> {
     let token = process_token()?;
-    let mut elevation = TOKEN_ELEVATION::default();
+    // SAFETY: `TokenElevation` returns a `TOKEN_ELEVATION`, a `u32`, and `TokenElevationType`
+    // a `TOKEN_ELEVATION_TYPE`, an `i32`.
+    let (elevation, kind) = unsafe {
+        (
+            token_information::<TOKEN_ELEVATION>(&token, TokenElevation)?,
+            token_information::<TOKEN_ELEVATION_TYPE>(&token, TokenElevationType)?,
+        )
+    };
+    Ok(elevation_of(
+        elevation.TokenIsElevated != 0,
+        kind,
+        is_person(user.sid()),
+    ))
+}
+
+/// An elevated token has an unelevated twin for the same sign-in only when its type is
+/// `TokenElevationTypeFull`. `TokenElevationTypeDefault` means Windows gave the account this
+/// token alone, so everything it runs is elevated: UAC is off, or the account is one UAC
+/// doesn't filter, such as the built-in Administrator.
+pub(crate) fn elevation_of(elevated: bool, kind: TOKEN_ELEVATION_TYPE, person: bool) -> Elevation {
+    if !elevated {
+        Elevation::None
+    } else if kind == TokenElevationTypeDefault && person {
+        Elevation::AlwaysElevated
+    } else {
+        Elevation::Elevated
+    }
+}
+
+/// The token information of `class`, which is a `T`.
+///
+/// # Safety
+///
+/// `T` must be the fixed-size type `class` returns, valid whatever bytes it holds.
+unsafe fn token_information<T: Default>(
+    token: &OwnedHandle,
+    class: TOKEN_INFORMATION_CLASS,
+) -> io::Result<T> {
+    let mut information = T::default();
     let mut written = 0;
-    // SAFETY: `token` is open with `TOKEN_QUERY` access, `elevation` is a writable
-    // `TOKEN_ELEVATION` (what `TokenElevation` returns) of exactly the size passed, and
-    // `written` is writable.
+    // SAFETY: `token` is open with `TOKEN_QUERY` access, `information` is a writable `T`, the
+    // type `class` returns, of exactly the size passed, and `written` is writable.
     let ok = unsafe {
         GetTokenInformation(
             token.as_raw_handle(),
-            TokenElevation,
-            (&raw mut elevation).cast(),
-            byte_size::<TOKEN_ELEVATION>(),
+            class,
+            (&raw mut information).cast(),
+            byte_size::<T>(),
             &raw mut written,
         )
     };
     if ok == 0 {
         return Err(io::Error::last_os_error());
     }
-    Ok(elevation.TokenIsElevated != 0)
+    Ok(information)
+}
+
+/// Whether `sid`, a valid SID, is a person's account rather than a service's: a local or domain
+/// account, S-1-5-21-…, or a Microsoft Entra ID one, S-1-12-1-….
+fn is_person(sid: PSID) -> bool {
+    /// Microsoft Entra ID's authority, 12, which `windows-sys` has no name for.
+    const ENTRA_ID_AUTHORITY: [u8; 6] = [0, 0, 0, 0, 0, 12];
+
+    // SAFETY: `sid` is a valid SID, so its authority and count of subauthorities can be read.
+    let (authority, count) = unsafe {
+        (
+            (*GetSidIdentifierAuthority(sid)).Value,
+            *GetSidSubAuthorityCount(sid),
+        )
+    };
+    if count == 0 {
+        return false;
+    }
+    // SAFETY: `sid` is a valid SID with at least one subauthority.
+    let first = unsafe { *GetSidSubAuthority(sid, 0) };
+    (authority == SECURITY_NT_AUTHORITY.Value && first == SECURITY_NT_NON_UNIQUE.cast_unsigned())
+        || (authority == ENTRA_ID_AUTHORITY && first == 1)
+}
+
+/// Whether the account whose SID is `text`, such as `S-1-5-18`, counts as a person's.
+#[cfg(test)]
+pub(crate) fn is_person_sid(text: &str) -> io::Result<bool> {
+    use windows_sys::Win32::Security::Authorization::ConvertStringSidToSidW;
+
+    let wide: Vec<u16> = text.encode_utf16().chain([0]).collect();
+    let mut sid = ptr::null_mut();
+    // SAFETY: `wide` is NUL-terminated, and `sid` is writable.
+    if unsafe { ConvertStringSidToSidW(wide.as_ptr(), &raw mut sid) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let person = is_person(sid);
+    // SAFETY: `ConvertStringSidToSidW` allocated `sid` for the caller to free with `LocalFree`,
+    // and nothing uses it after this.
+    unsafe { LocalFree(sid.cast()) };
+    Ok(person)
+}
+
+/// `FOLDERID_UserProfiles`, where Windows makes every account's home folder.
+pub(crate) fn user_profiles() -> Option<PathBuf> {
+    let folder_id = FOLDERID_UserProfiles;
+    let mut path = ptr::null_mut();
+    // SAFETY: `folder_id` is a valid GUID, a null token means this process's, and `path` is
+    // writable.
+    let result = unsafe {
+        SHGetKnownFolderPath(
+            &raw const folder_id,
+            KF_FLAG_DEFAULT.cast_unsigned(),
+            ptr::null_mut(),
+            &raw mut path,
+        )
+    };
+    let folder = (result >= 0 && !path.is_null()).then(|| {
+        // SAFETY: on success, `path` is a NUL-terminated string that stays valid until it's
+        // freed below.
+        let wide = unsafe {
+            let mut length = 0;
+            while *path.add(length) != 0 {
+                length += 1;
+            }
+            std::slice::from_raw_parts(path, length)
+        };
+        PathBuf::from(OsString::from_wide(wide))
+    });
+    // SAFETY: Windows allocated `path`, or left it null, and it must be freed whether the call
+    // succeeded or not. Nothing uses it after this.
+    unsafe { CoTaskMemFree(path.cast()) };
+    folder
 }
 
 fn byte_size<T>() -> u32 {

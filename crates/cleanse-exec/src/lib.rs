@@ -32,7 +32,7 @@ use cleanse_model::{
     Candidate, CandidateId, Concern, Disposal, EntryOutcome, Outcome, Plan, PlanItem,
     QuarantineEntry, Risk, SkipReason,
 };
-use cleanse_platform::{Probe, SystemFolders, privileged};
+use cleanse_platform::{Elevation, Probe, SystemFolders, privileged};
 
 use journal::{Journal, Record};
 use quarantine::Quarantine;
@@ -81,7 +81,8 @@ pub struct Handled {
 #[derive(Debug)]
 pub enum ApplyError {
     /// Elevation would let Cleanse remove files the user's own account couldn't, such as other
-    /// users' files, so it refuses.
+    /// users' files, so it refuses while the account has an unelevated way to run it. On Windows
+    /// with UAC off, it has none, and the user's cleanup still runs (ADR 0011).
     Elevated,
     /// System cleanup changes things only as an administrator or root.
     NotElevated,
@@ -172,14 +173,15 @@ impl<'a> Executor<'a> {
         })
     }
 
-    /// Why nothing can be changed now, if so: the user's cleanup refuses to run elevated, and
-    /// system cleanup only runs elevated, and each only with its own rules.
+    /// Why nothing can be changed now, if so: the user's cleanup refuses to run elevated when it
+    /// could run without, and system cleanup only runs elevated, and each only with its own
+    /// rules.
     pub fn check_can_change(&self) -> Result<(), ApplyError> {
-        let (scope, elevation) = match self.cleanup {
-            Cleanup::User { .. } => (Scope::User, !self.probe.is_elevated()),
+        let (scope, allowed) = match self.cleanup {
+            Cleanup::User { .. } => (Scope::User, self.probe.elevation() != Elevation::Elevated),
             Cleanup::System { .. } => (Scope::System, self.probe.is_elevated()),
         };
-        if !elevation {
+        if !allowed {
             return Err(match self.cleanup {
                 Cleanup::User { .. } => ApplyError::Elevated,
                 Cleanup::System { .. } => ApplyError::NotElevated,

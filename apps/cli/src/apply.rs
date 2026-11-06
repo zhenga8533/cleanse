@@ -2,7 +2,7 @@ use std::error::Error;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use cleanse_engine::{ApplyError, Engine, Probe, load_plan};
+use cleanse_engine::{Engine, load_plan};
 
 use crate::clean::{aborted, confirm, remove};
 use crate::exit::USAGE;
@@ -26,9 +26,7 @@ pub fn run(engine: &Engine, args: &Args) -> Result<ExitCode, Box<dyn Error>> {
         );
         return Ok(ExitCode::from(USAGE));
     }
-    if engine.system().is_elevated() {
-        return Err(ApplyError::Elevated.into());
-    }
+    engine.check_can_change()?;
     let saved = load_plan(&args.plan)
         .map_err(|error| format!("couldn't read the plan {}: {error}", args.plan.display()))?;
 

@@ -309,6 +309,21 @@ fn wont_restore_into_a_folder_that_isnt_the_systems() {
 
 #[cfg(any(windows, target_os = "linux"))]
 #[test]
+fn runs_however_the_account_is_elevated() {
+    use cleanse_platform::Elevation;
+
+    let mut fixture = Fixture::new();
+
+    for elevation in [Elevation::Elevated, Elevation::AlwaysElevated] {
+        fixture.probe = fixture.probe.with_elevation(elevation);
+        let result = fixture.executor().check_can_change();
+
+        assert!(result.is_ok(), "{elevation:?}: {result:?}");
+    }
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+#[test]
 fn changes_nothing_unless_elevated() {
     let mut fixture = Fixture::new();
     let plan = fixture.plan(Disposal::Delete);

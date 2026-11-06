@@ -105,6 +105,22 @@ fn the_window_can_call_the_apps_commands() {
     assert_eq!(folders["home"], true);
 }
 
+/// Elevated with UAC on, the app changes nothing, but with UAC off, where everything the account
+/// runs is elevated, it does (ADR 0011). Tests run however the machine runs them, so this checks
+/// the two agree.
+#[test]
+fn the_app_refuses_changes_only_while_it_could_run_unelevated() {
+    let app = TestApp::new();
+
+    let info = app.invoke("app_info", json!({})).unwrap();
+    let settings = app.invoke("settings", json!({})).unwrap();
+
+    let elevated = settings["elevated"].as_bool().unwrap();
+    let always = settings["alwaysElevated"].as_bool().unwrap();
+    assert!(elevated || !always, "{settings}");
+    assert_eq!(info["elevated"], elevated && !always, "{info} {settings}");
+}
+
 #[test]
 fn the_window_cant_call_tauris_own_commands_or_plugins() {
     let app = TestApp::new();

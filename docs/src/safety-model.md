@@ -66,8 +66,11 @@ blocks, including any new kind of concern until it's deliberately classified.
 7. **Ownership and elevation.** An item must belong to the account Cleanse runs as, or on
    Windows to the Administrators group, which owns what that account's elevated programs make.
    Items another account or the operating system owns are blocked, and so are items whose owner
-   can't be read. Drives that don't record owners, such as FAT and exFAT, pass this gate. The
-   main app refuses to apply a plan while running as administrator or root.
+   can't be read. Drives that don't record owners, such as FAT and exFAT, pass this gate. On
+   Windows, other accounts' home folders are protected locations too. Cleanse refuses to change
+   anything while running as an administrator or root if the account could run it without.
+   With UAC off, everything the account runs is elevated, so it doesn't refuse
+   ([ADR 0011](adr/0011-cleanup-with-uac-off.md)).
 
 Every match is measured in one walk that doesn't follow links: its size, file count, newest
 modification time, and anything inside that couldn't be read, is another filesystem, looks like
@@ -153,8 +156,10 @@ contents that couldn't be read, and other filesystems mounted inside.
 
 ## Execution and recovery
 
-- Nothing is removed while Cleanse runs as an administrator or root, or if it can't start a
-  journal.
+- Nothing is removed while Cleanse runs as an administrator or root and the account could run
+  it without, or if it can't start a journal. On Windows with UAC off, there's no way to run it
+  without, so cleanup goes ahead with every other check
+  ([ADR 0011](adr/0011-cleanup-with-uac-off.md)).
 - Before acting, each item is re-checked: it still exists, it's still the same file or folder
   (by identity, not just path), it's still not a link, its rule still recognizes it, and it still
   passes every gate. It's also skipped if its tier has risen, or a new kind of warning has

@@ -63,8 +63,12 @@ On pull requests, `release.yml` runs only `plan`, to check the config. `desktop-
 also runs on pull requests that change how the app is packaged, and you can run it by hand
 (`gh workflow run desktop-installers.yml`) to check the installers build before tagging. Neither
 attests anything; only a tag does. `publish-crates.yml` runs as a dry run on pull requests that
-change it, and CI's Linux test job runs `cargo publish --workspace --dry-run` on every pull
-request, which packages each crate and builds it from its package alone.
+change it, and CI's Linux test job runs `cargo xtask packages` on every pull request.
+- **What it does:** packages each crate, and builds it from its package alone, with
+  `cargo publish --workspace --dry-run`.
+- **Why the xtask:** that build takes the other crates from their packages too, as if from a
+  registry, and cargo never rebuilds a registry crate at a version it has already built. So it
+  first cleans those crates' builds, in a target folder of its own.
 
 ## Secrets
 
