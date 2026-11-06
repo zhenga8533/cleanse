@@ -6,6 +6,19 @@ All notable changes to Cleanse are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-06
+
+Cleaning with UAC off. On Windows machines where User Account Control is turned off, everything
+runs as an administrator, so Cleanse refused to clean anything there, and told you to open it
+again without elevation, which couldn't be done. It now cleans your own files on those machines,
+with every other check, and keeps other accounts' home folders out of reach. With UAC on, an
+elevated Cleanse still refuses, as before.
+
+### Added
+
+- `cleanse doctor --json` has `always_elevated`, true where everything the account runs is
+  elevated, as on Windows with UAC off.
+
 ### Changed
 
 - On Windows with UAC off, where everything you run runs as an administrator, Cleanse cleans
@@ -240,7 +253,8 @@ and Linux. It never removes anything; cleanup arrives in 0.2.
   cloud-synced folders, folders containing possible secrets or virtual machine disks, and
   anything that couldn't be fully read.
 
-[Unreleased]: https://github.com/zhenga8533/cleanse/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/zhenga8533/cleanse/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/zhenga8533/cleanse/releases/tag/v1.1.0
 [1.0.0]: https://github.com/zhenga8533/cleanse/releases/tag/v1.0.0
 [0.5.0]: https://github.com/zhenga8533/cleanse/releases/tag/v0.5.0
 [0.3.0]: https://github.com/zhenga8533/cleanse/releases/tag/v0.3.0
