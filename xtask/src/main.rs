@@ -9,6 +9,7 @@ mod gen_tree;
 
 use std::env;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
@@ -49,6 +50,10 @@ const PUBLISHED: &[&str] = &[
 /// Where the packages check builds, apart from everything else, so cleaning it there rebuilds
 /// nothing else.
 const PACKAGE_CHECK_TARGET: &str = "target/package-check";
+
+/// The Cargo home the packages check gives cargo instead of the user's, so the packages cargo
+/// unpacks there are the check's own to clear.
+const PACKAGE_CHECK_HOME: &str = "target/package-check/cargo-home";
 
 /// Where the desktop app's installers take its elevated helper from, as
 /// `apps/desktop/src-tauri/installer/` says.
@@ -235,19 +240,30 @@ fn ci() -> ExitCode {
 /// alone, so a file one needs but doesn't include fails here rather than at release.
 ///
 /// That build takes the other crates from their packages too, as from a registry, and cargo
-/// never rebuilds a registry crate at a version it has already built. So after a change at the
-/// same version, it would build against the old code. Cleaning the crates' builds first keeps
-/// it to the code being packaged.
+/// neither unpacks again nor rebuilds a registry crate at a version it already has. So after a
+/// change at the same version, it would build against the old code. Clearing the unpacked
+/// packages and cleaning the crates' builds first keeps it to the code being packaged.
+///
+/// Cargo unpacks them into its home, under `registry/src`, so the check gives cargo a home of its
+/// own rather than clearing the user's.
 fn packages(allow_dirty: bool) -> Vec<&'static str> {
     const NAME: &str = "crates.io packages";
     eprintln!("\n==> {NAME}");
+    // Absolute, so it means the same to what cargo runs from other folders, such as build scripts.
+    let home = match std::path::absolute(PACKAGE_CHECK_HOME) {
+        Ok(home) => home,
+        Err(err) => {
+            eprintln!("could not make {PACKAGE_CHECK_HOME} absolute: {err}");
+            return vec![NAME];
+        }
+    };
     let mut clean = Command::new("cargo");
     clean.args(["clean", "--target-dir", PACKAGE_CHECK_TARGET]);
     for package in PUBLISHED {
         clean.args(["--package", package]);
     }
     let mut publish = Command::new("cargo");
-    publish.args([
+    publish.env("CARGO_HOME", &home).args([
         "publish",
         "--workspace",
         "--dry-run",
@@ -258,11 +274,42 @@ fn packages(allow_dirty: bool) -> Vec<&'static str> {
     if allow_dirty {
         publish.arg("--allow-dirty");
     }
-    if succeeds(&mut clean) && succeeds(&mut publish) {
+    if succeeds(&mut clean) && clear_unpacked_packages(&home) && succeeds(&mut publish) {
         Vec::new()
     } else {
         vec![NAME]
     }
+}
+
+/// Removes the packages cargo unpacked from the packages check's temporary registry in `home`.
+///
+/// Cargo unpacks each registry's packages into a folder named for its host, and a registry on
+/// the file system, as the temporary one is, has none, so its folder's name starts with `-`.
+/// Leaving crates.io's spares unpacking every dependency again.
+fn clear_unpacked_packages(home: &Path) -> bool {
+    let unpacked = home.join("registry").join("src");
+    let entries = match fs::read_dir(&unpacked) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return true,
+        Err(err) => {
+            eprintln!("could not read {}: {err}", unpacked.display());
+            return false;
+        }
+    };
+    for entry in entries {
+        let result = entry.and_then(|entry| {
+            if entry.file_name().to_string_lossy().starts_with('-') {
+                fs::remove_dir_all(entry.path())
+            } else {
+                Ok(())
+            }
+        });
+        if let Err(err) = result {
+            eprintln!("could not clear {}: {err}", unpacked.display());
+            return false;
+        }
+    }
+    true
 }
 
 /// Runs `command`, saying why if it couldn't.
