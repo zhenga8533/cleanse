@@ -7,7 +7,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use cleanse_desktop_views::{self as views, HistoryView, QuarantineView, ScanProgress};
-use cleanse_engine::{ScanId, Session, SessionError};
+use cleanse_engine::{ScanId, Session, SessionError, paced};
 use cleanse_model::{CandidateId, RuleId};
 
 use crate::protocol::{self, MAX_REQUEST, ProtocolError, Request, Response, VERSION};
@@ -151,15 +151,15 @@ fn handle(session: &Session, request: Request, output: &Mutex<impl Write + Send>
         }
         Request::Clean { scan, items } => {
             let ids: Vec<CandidateId> = items.into_iter().map(CandidateId).collect();
-            let throttle = Throttle::default();
-            session
-                .clean(ScanId(scan), &ids, &|done| {
-                    if throttle.due() {
-                        let _ = send(output, &Response::CleanProgress { done });
-                    }
-                })
-                .and_then(|cleaned| views::clean_report(session, ScanId(scan), cleaned))
-                .map(|report| Response::Cleaned { report })
+            paced(
+                PROGRESS_INTERVAL,
+                |progress| {
+                    let _ = send(output, &Response::CleanProgress { progress });
+                },
+                |report| session.clean(ScanId(scan), &ids, &|removal| report(removal.into())),
+            )
+            .and_then(|cleaned| views::clean_report(session, ScanId(scan), cleaned))
+            .map(|report| Response::Cleaned { report })
         }
         Request::Quarantined {} => session
             .quarantined()

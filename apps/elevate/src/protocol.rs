@@ -8,13 +8,13 @@ use std::fmt;
 use std::io::{self, BufRead, Read, Write};
 
 use cleanse_desktop_views::{
-    CleanReport, Details, Handled, HistoryView, ItemPage, QuarantineView, Results, ScanProgress,
-    Section,
+    CleanProgress, CleanReport, Details, Handled, HistoryView, ItemPage, QuarantineView, Results,
+    ScanProgress, Section,
 };
 use serde::{Deserialize, Serialize};
 
 /// The window and the helper are installed together, so they must speak the same version.
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 /// The longest request the helper reads. A cleanup naming [`MAX_IDS`] items fits well within it.
 pub const MAX_REQUEST: usize = 1024 * 1024;
 /// The longest response the window reads: a page of items, or a long history.
@@ -117,9 +117,9 @@ pub enum Response {
     ScanProgress {
         progress: ScanProgress,
     },
-    /// How many items a cleanup has dealt with, before its [`Response::Cleaned`].
+    /// How far a cleanup has got, before its [`Response::Cleaned`].
     CleanProgress {
-        done: usize,
+        progress: CleanProgress,
     },
     Results {
         results: Results,

@@ -6,6 +6,13 @@ All notable changes to Cleanse are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- While a cleanup runs, the desktop app and `cleanse clean` and `apply` show the item being
+  removed, and count it as the one they're on. Before, they counted only the items finished, and
+  could miss the update about the next one, so a folder of many thousands of files, such as
+  npm's cache, looked stuck on the item before it.
+
 ## [1.1.0] - 2026-11-06
 
 Cleaning with UAC off. On Windows machines where User Account Control is turned off, everything

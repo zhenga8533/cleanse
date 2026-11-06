@@ -3,12 +3,15 @@ import { mockIPC } from "@tauri-apps/api/mocks";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it } from "vitest";
+import type { CleanProgress } from "../bindings/CleanProgress";
 import type { CleanReport } from "../bindings/CleanReport";
 import type { Item } from "../bindings/Item";
 import type { Section } from "../bindings/Section";
 import { details, HOME_FOLDER, ITEMS, results } from "../dev/sample";
 import { findGrid } from "../test/grids";
 import { ScanScreen } from "./ScanScreen";
+
+const NODE_MODULES = "C:\\Users\\sample\\code\\web\\node_modules";
 
 const REPORT: CleanReport = {
   deleted: { items: 2, size: { logical: 3212, onDisk: 3212 * 1024 * 1024, guaranteed: 0 } },
@@ -19,6 +22,9 @@ const REPORT: CleanReport = {
   failed: [],
   journal: "C:\\journal.jsonl",
 };
+
+/** While set, a cleanup reports its first item and waits for this before it finishes. */
+let cleaning: Promise<CleanReport> | null = null;
 
 /** Answers the commands with the sample results, and records each call. */
 function engine(): { cmd: string; args: Record<string, unknown> }[] {
@@ -43,6 +49,10 @@ function engine(): { cmd: string; args: Record<string, unknown> }[] {
         return details(item, section);
       }
       case "clean":
+        if (cleaning) {
+          (args.progress as Channel<CleanProgress>).onmessage({ done: 0, current: NODE_MODULES });
+          return cleaning;
+        }
         return REPORT;
       default:
         throw new Error(`unexpected command ${cmd}`);
@@ -150,6 +160,27 @@ it("cleans what was chosen once confirmed, and reports what happened", async () 
   // The results are read again, without what was removed, and nothing stays chosen.
   expect(await screen.findByRole("heading", { name: /^Can be removed: 1 item/ })).toBeTruthy();
   expect(screen.getByText("Nothing selected")).toBeTruthy();
+});
+
+it("says which item a cleanup is removing, counting it as the one it's on", async () => {
+  const { user } = await scanned();
+  let finish: (report: CleanReport) => void = () => {};
+  cleaning = new Promise((resolve) => {
+    finish = resolve;
+  });
+
+  try {
+    await user.click(screen.getByRole("button", { name: "Clean…" }));
+    await user.click(await screen.findByRole("button", { name: "Delete" }));
+
+    const progress = await screen.findByRole("progressbar", { name: "Removing 1 of 2" });
+    expect(progress.getAttribute("aria-valuetext")).toBe(`Removing 1 of 2: ${NODE_MODULES}`);
+    expect(within(progress).getByText(NODE_MODULES).getAttribute("title")).toBe(NODE_MODULES);
+    finish(REPORT);
+    expect(await screen.findByRole("region", { name: "Cleanup finished" })).toBeTruthy();
+  } finally {
+    cleaning = null;
+  }
 });
 
 it("turns cleaning off while elevated", async () => {

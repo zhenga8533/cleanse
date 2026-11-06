@@ -168,7 +168,9 @@ pub(crate) struct Reporter {
 }
 
 impl Reporter {
-    const INTERVAL: Duration = Duration::from_millis(100);
+    /// The line's width, which each message is padded to, to cover the one before.
+    const WIDTH: usize = 60;
+    pub(crate) const INTERVAL: Duration = Duration::from_millis(100);
 
     pub(crate) fn new() -> Self {
         let interactive = io::stderr().is_terminal();
@@ -186,8 +188,22 @@ impl Reporter {
         });
     }
 
-    pub(crate) fn removing(&self, done: usize, total: usize) {
-        self.show(|| format!("Removing {done} of {total}"));
+    /// The item being removed, named `current`, or how many are finished once there's none.
+    /// Removal progress comes paced, so each update is shown.
+    pub(crate) fn removing(&self, done: usize, total: usize, current: Option<&str>) {
+        if self.last.is_none() {
+            return;
+        }
+        let total = format::count(total as u64);
+        let message = match current {
+            Some(name) => {
+                let start = format!("Removing {} of {total}: ", format::count((done + 1) as u64));
+                let room = Self::WIDTH.saturating_sub(start.chars().count());
+                format!("{start}{}", shorten(name, room))
+            }
+            None => format!("Removing {} of {total}", format::count(done as u64)),
+        };
+        Self::write(&message);
     }
 
     fn show(&self, message: impl FnOnce() -> String) {
@@ -197,16 +213,30 @@ impl Reporter {
             return;
         }
         *last = Instant::now();
-        eprint!("\r{:<60}", message());
+        Self::write(&message());
+    }
+
+    fn write(message: &str) {
+        eprint!("\r{message:<width$}", width = Self::WIDTH);
         // Progress is best-effort; a failed flush only delays the next update.
         let _ = io::stderr().flush();
     }
 
     pub(crate) fn clear(&self) {
         if self.last.is_some() {
-            eprint!("\r{:<60}\r", "");
+            eprint!("\r{:<width$}\r", "", width = Self::WIDTH);
         }
     }
+}
+
+/// `name`, cut to `room` characters with an ellipsis if it's longer, so the line doesn't wrap and
+/// leave a line behind that `\r` can't reach.
+fn shorten(name: &str, room: usize) -> String {
+    if name.chars().count() <= room {
+        return name.to_owned();
+    }
+    let kept: String = name.chars().take(room.saturating_sub(1)).collect();
+    format!("{kept}…")
 }
 
 /// The first lines of a scan's report: what was scanned, how much, and how long it took.
@@ -497,7 +527,15 @@ mod tests {
         Size,
     };
 
-    use super::advised;
+    use super::{advised, shorten};
+
+    #[test]
+    fn a_name_too_long_for_the_progress_line_ends_in_an_ellipsis() {
+        assert_eq!(shorten("_cacache", 20), "_cacache");
+        assert_eq!(shorten("_cacache", 8), "_cacache");
+        assert_eq!(shorten("node_modules", 8), "node_mo…");
+        assert_eq!(shorten("ドキュメント", 4), "ドキュ…");
+    }
 
     fn candidate(rule: &str, risk: Risk, concerns: Vec<Concern>) -> Candidate {
         let found = Match {

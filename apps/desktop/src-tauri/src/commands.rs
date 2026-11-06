@@ -16,10 +16,12 @@ use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use cleanse_desktop_views::{
-    self as views, AppInfo, CleanReport, Details, EntryItem, Folders, HistoryView, ItemPage,
-    KnownFolder, QuarantineView, Results, RuleView, ScanProgress, SettingsView, lossy,
+    self as views, AppInfo, CleanProgress, CleanReport, Details, EntryItem, Folders, HistoryView,
+    ItemPage, KnownFolder, QuarantineView, Results, RuleView, ScanProgress, SettingsView, lossy,
 };
-use cleanse_engine::{Elevation, FolderEntry, Probe, ScanId, SessionError, cloud_sync_detection};
+use cleanse_engine::{
+    Elevation, FolderEntry, Probe, ScanId, SessionError, cloud_sync_detection, paced,
+};
 use cleanse_model::{CandidateId, Category, RuleId};
 use rfd::AsyncFileDialog;
 use tauri::ipc::{Channel, IpcResponse};
@@ -206,18 +208,17 @@ pub(crate) async fn clean(
     state: State<'_, AppState>,
     scan: u64,
     items: Vec<u64>,
-    progress: Channel<usize>,
+    progress: Channel<CleanProgress>,
 ) -> Result<CleanReport, String> {
     let session = state.session()?;
     run(move || {
         let scan = ScanId(scan);
         let ids: Vec<CandidateId> = items.into_iter().map(CandidateId).collect();
-        let throttle = Throttle::default();
-        let cleaned = session.clean(scan, &ids, &|done| {
-            if throttle.due() {
-                tell(&progress, done);
-            }
-        })?;
+        let cleaned = paced(
+            Throttle::INTERVAL,
+            |update| tell(&progress, update),
+            |report| session.clean(scan, &ids, &|removal| report(removal.into())),
+        )?;
         views::clean_report(&session, scan, cleaned)
     })
     .await
@@ -366,7 +367,7 @@ pub(crate) fn message(error: impl Display) -> String {
 pub(crate) struct Throttle(Mutex<Option<Instant>>);
 
 impl Throttle {
-    const INTERVAL: Duration = Duration::from_millis(100);
+    pub(crate) const INTERVAL: Duration = Duration::from_millis(100);
 
     pub(crate) fn due(&self) -> bool {
         let mut last = self.0.lock().unwrap_or_else(PoisonError::into_inner);
