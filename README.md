@@ -41,10 +41,17 @@ set `CARGO_HOME`, and add that folder to your `PATH`. Each release also has the 
 archive for x64 Windows, Intel and Apple silicon Macs, and x64 and ARM64 Linux, or you can
 [build it from source](#building-from-source).
 
+On macOS and Linux, Homebrew can install it from Cleanse's own tap, and `brew upgrade` updates
+it:
+
+```sh
+brew install zhenga8533/tap/cleanse-cli
+```
+
 Before using [`cleanse system`](#system-cleanup), install a copy that only administrators or root
-can change, since the installers put `cleanse` in a folder your own account can change. Download
-the archive for your system from the release and check it, then on Linux (`aarch64` in place of
-`x86_64` on ARM64):
+can change, since the installers and Homebrew put `cleanse` in a folder your own account can
+change. Download the archive for your system from the release and check it, then on Linux
+(`aarch64` in place of `x86_64` on ARM64):
 
 ```sh
 tar -xf cleanse-cli-x86_64-unknown-linux-gnu.tar.xz
