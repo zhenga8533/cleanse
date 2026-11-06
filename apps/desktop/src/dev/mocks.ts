@@ -1,6 +1,7 @@
 import type { Channel } from "@tauri-apps/api/core";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import type { AppInfo } from "../bindings/AppInfo";
+import type { CleanProgress } from "../bindings/CleanProgress";
 import type { CleanReport } from "../bindings/CleanReport";
 import type { Folders } from "../bindings/Folders";
 import type { Handled } from "../bindings/Handled";
@@ -120,7 +121,7 @@ export function installMocks(): void {
           items,
         );
       case "clean":
-        return clean(args.items as number[], args.progress as Channel<number>);
+        return clean(args.items as number[], args.progress as Channel<CleanProgress>);
       case "quarantined":
         return quarantine;
       case "restore":
@@ -164,7 +165,7 @@ export function installMocks(): void {
   });
 
   /** Removes everything but the Review items, which are skipped as if they'd changed. */
-  async function clean(ids: number[], progress: Channel<number>): Promise<CleanReport> {
+  async function clean(ids: number[], progress: Channel<CleanProgress>): Promise<CleanReport> {
     const report: CleanReport = {
       deleted: { items: 0, size: { logical: 0, onDisk: 0, guaranteed: 0 } },
       quarantined: { items: 0, size: { logical: 0, onDisk: 0, guaranteed: 0 } },
@@ -173,9 +174,9 @@ export function installMocks(): void {
       journal: `${HOME_FOLDER}\\AppData\\Local\\cleanse\\journal\\run-1.jsonl`,
     };
     for (const [done, id] of ids.entries()) {
-      progress.onmessage(done);
-      await pause(200);
       const found = find(id);
+      progress.onmessage({ done, current: found ? found[0].path : null });
+      await pause(200);
       if (!found) {
         continue;
       }
@@ -191,6 +192,7 @@ export function installMocks(): void {
       removed += item.size.onDisk;
       items[section] = items[section].filter((other) => other.id !== id);
     }
+    progress.onmessage({ done: ids.length, current: null });
     return report;
   }
 }

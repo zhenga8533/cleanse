@@ -4,7 +4,8 @@ use std::fs::{self, File};
 use std::path::Path;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
-use std::time::{Duration, SystemTime};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime};
 
 use cleanse_model::{Outcome, Plan, PlanItem, Risk};
 
@@ -14,7 +15,7 @@ use cleanse_core::rules::Scope;
 
 use super::{
     ApplyError, Cleanup, Config, Elevation, Engine, Explanation, KnownFolders, Mode, NodeKind,
-    Probe, Progress, RuleSet, System, SystemFolders, removable_under,
+    Probe, Progress, RuleSet, System, SystemFolders, paced, removable_under,
 };
 
 /// Writes a file dated a day ago, so it doesn't count as recent activity.
@@ -265,7 +266,12 @@ fn applies_what_was_approved_from_a_scan() {
     let applied = engine
         .apply(
             &plan,
-            &|done| progress.lock().unwrap().push(done),
+            &|removal| {
+                progress
+                    .lock()
+                    .unwrap()
+                    .push((removal.done, removal.current.is_some()));
+            },
             &AtomicBool::new(false),
         )
         .unwrap();
@@ -277,7 +283,7 @@ fn applies_what_was_approved_from_a_scan() {
     assert!(!root.path().join("web/node_modules").exists());
     assert!(root.path().join("web/package.json").exists());
     assert!(applied.journal.starts_with(journal.path()));
-    assert_eq!(*progress.lock().unwrap(), [1]);
+    assert_eq!(*progress.lock().unwrap(), [(0, true), (1, false)]);
 }
 
 #[test]
@@ -486,4 +492,51 @@ fn a_system_scan_looks_only_directly_inside_the_folders_the_rules_name() {
     };
     assert_eq!(scanned, expected_roots);
     assert_eq!(found, expected_found);
+}
+
+/// A report just before a slow step is sent during it, not only once it's over, and reports that
+/// come faster than the interval are thinned out.
+#[test]
+fn paced_progress_sends_the_newest_report_during_a_slow_step() {
+    let interval = Duration::from_millis(20);
+    let sent = Mutex::new(Vec::new());
+
+    paced(
+        interval,
+        |report: u32| sent.lock().unwrap().push(report),
+        |report| {
+            for number in 0..=1000 {
+                report(number);
+            }
+            thread::sleep(interval * 10);
+            assert!(
+                sent.lock().unwrap().contains(&1000),
+                "{:?}",
+                sent.lock().unwrap()
+            );
+        },
+    );
+
+    let sent = sent.into_inner().unwrap();
+    assert_eq!(sent.last(), Some(&1000));
+    assert!(sent.len() < 20, "{sent:?}");
+}
+
+#[test]
+fn paced_progress_sends_the_last_report_as_soon_as_the_work_ends() {
+    let sent = Mutex::new(Vec::new());
+    let started = Instant::now();
+
+    let result = paced(
+        Duration::from_secs(3600),
+        |report: u32| sent.lock().unwrap().push(report),
+        |report| {
+            report(7);
+            "done"
+        },
+    );
+
+    assert_eq!(result, "done");
+    assert_eq!(sent.into_inner().unwrap(), [7]);
+    assert!(started.elapsed() < Duration::from_secs(60));
 }

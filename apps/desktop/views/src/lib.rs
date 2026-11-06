@@ -429,6 +429,25 @@ impl Details {
     }
 }
 
+/// How far a cleanup has got: how many items are finished, and the one being removed now,
+/// while there is one.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct CleanProgress {
+    pub done: usize,
+    pub current: Option<String>,
+}
+
+impl From<engine::Removal<'_>> for CleanProgress {
+    fn from(removal: engine::Removal<'_>) -> Self {
+        Self {
+            done: removal.done,
+            current: removal.current.map(lossy),
+        }
+    }
+}
+
 /// What a cleanup did.
 #[derive(Debug, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]

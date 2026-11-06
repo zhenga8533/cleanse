@@ -205,7 +205,12 @@ fn cleans_by_id_and_drops_what_it_removed() {
 
     let cleaned = fixture
         .session
-        .clean(scan, &ids, &|done| progress.lock().unwrap().push(done))
+        .clean(scan, &ids, &|removal| {
+            progress
+                .lock()
+                .unwrap()
+                .push((removal.done, removal.current.is_some()));
+        })
         .unwrap();
 
     assert!(
@@ -213,7 +218,7 @@ fn cleans_by_id_and_drops_what_it_removed() {
         "{cleaned:?}"
     );
     assert!(cleaned.journal.is_some());
-    assert_eq!(*progress.lock().unwrap(), [1]);
+    assert_eq!(*progress.lock().unwrap(), [(0, true), (1, false)]);
     assert!(!fixture.path("web/node_modules").exists());
     let summary = fixture.session.summary(scan).unwrap();
     assert_eq!(summary.sections[0].items, 0);
