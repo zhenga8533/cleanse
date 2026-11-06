@@ -6,6 +6,13 @@ All notable changes to Cleanse are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-06
+
+Cleanup progress that names what it's removing. A cleanup's progress counted only the items it
+had finished, and often missed the update about the next one, so a long removal, such as npm's
+cache of many thousands of files, looked stuck on the item before it. The desktop app and the
+command line now show the item being removed.
+
 ### Fixed
 
 - While a cleanup runs, the desktop app and `cleanse clean` and `apply` show the item being
@@ -260,7 +267,8 @@ and Linux. It never removes anything; cleanup arrives in 0.2.
   cloud-synced folders, folders containing possible secrets or virtual machine disks, and
   anything that couldn't be fully read.
 
-[Unreleased]: https://github.com/zhenga8533/cleanse/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/zhenga8533/cleanse/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/zhenga8533/cleanse/releases/tag/v1.1.1
 [1.1.0]: https://github.com/zhenga8533/cleanse/releases/tag/v1.1.0
 [1.0.0]: https://github.com/zhenga8533/cleanse/releases/tag/v1.0.0
 [0.5.0]: https://github.com/zhenga8533/cleanse/releases/tag/v0.5.0
