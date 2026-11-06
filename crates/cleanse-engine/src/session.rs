@@ -24,7 +24,7 @@ use cleanse_model::{
 
 use crate::{
     Analysis, ApplyError, Engine, Handled, History, Leftover, Listing, NodeId, NodeKind, Progress,
-    Rule, Section, Usage, removable_under,
+    Removal, Rule, Section, Usage, removable_under,
 };
 
 /// Names one scan. Every candidate and folder a session gives out is named with the scan it's
@@ -472,7 +472,7 @@ impl Session {
         &self,
         scan: ScanId,
         ids: &[CandidateId],
-        progress: &dyn Fn(usize),
+        progress: &dyn Fn(Removal<'_>),
     ) -> Result<Cleaned, SessionError> {
         let _busy = self.start()?;
         let (plan, order) = self.read(scan, |current| {

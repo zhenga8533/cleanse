@@ -3,6 +3,7 @@
 //! The CLI and desktop app call only this crate. It owns progress reporting, cancellation, and
 //! the in-memory scan results, so front-ends never touch the filesystem directly.
 
+mod pace;
 mod session;
 #[cfg(test)]
 mod tests;
@@ -32,10 +33,11 @@ pub use cleanse_core::rules::{
     Base, Entry, Location, Os, Rule, RuleError, RuleSet, RuleTest, Target,
 };
 pub use cleanse_exec::{
-    Action, Applied, ApplyError, Handled, History, Leftover, Listing, PlanFileError, Run, helper,
-    load_plan, save_plan,
+    Action, Applied, ApplyError, Handled, History, Leftover, Listing, PlanFileError, Removal, Run,
+    helper, load_plan, save_plan,
 };
 pub use cleanse_platform::{Elevation, KnownFolders, Probe, System, SystemFolders};
+pub use pace::paced;
 pub use session::{
     Cleaned, Explained, Finished, FolderEntry, FolderView, HandledEntries, Page, RuleSummary,
     ScanId, SectionSummary, Session, SessionError, Summary,
@@ -512,12 +514,13 @@ impl Engine {
     }
 
     /// Removes the items in `plan` that are still what was approved and still pass every
-    /// safety check, recording each one in the journal. `progress` gets the number of items
-    /// done so far. Setting `cancel` skips the items not yet reached.
+    /// safety check, recording each one in the journal. `progress` hears as each item's removal
+    /// starts, and once more when they're all finished. Setting `cancel` skips the items not
+    /// yet reached.
     pub fn apply(
         &self,
         plan: &Plan,
-        progress: &dyn Fn(usize),
+        progress: &dyn Fn(Removal<'_>),
         cancel: &AtomicBool,
     ) -> Result<Applied, ApplyError> {
         self.executor()?.apply(plan, progress, cancel)
