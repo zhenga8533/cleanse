@@ -15,11 +15,23 @@ import { ItemDetails } from "./ItemDetails";
 import { ResultsView } from "./ResultsView";
 import { type Chosen, total } from "./selection";
 
+/** Which item a cleanup is on: the one after those finished, while one is being removed. */
+function removing(cleanup: { done: number; current: string | null; total: number }): number {
+  return cleanup.current === null ? cleanup.done : Math.min(cleanup.done + 1, cleanup.total);
+}
+
 /** What's running, if anything. Only one scan or cleanup runs at a time. */
 type Running =
   | { kind: "nothing" }
   | { kind: "scan"; progress: ScanProgress | null; cancelling: boolean }
-  | { kind: "cleanup"; done: number; total: number; cancelling: boolean };
+  | {
+      kind: "cleanup";
+      done: number;
+      /** The item being removed, while there is one. */
+      current: string | null;
+      total: number;
+      cancelling: boolean;
+    };
 
 interface Props {
   /** Cleanse runs elevated, so it won't remove anything. */
@@ -82,11 +94,13 @@ export function ScanScreen({ elevated, onResults = () => {} }: Props) {
     setConfirming(false);
     setError(null);
     setReport(null);
-    setRunning({ kind: "cleanup", done: 0, total: ids.length, cancelling: false });
+    setRunning({ kind: "cleanup", done: 0, current: null, total: ids.length, cancelling: false });
     try {
       setReport(
-        await cleanup.clean(results.scan, ids, (done) =>
-          setRunning((running) => (running.kind === "cleanup" ? { ...running, done } : running)),
+        await cleanup.clean(results.scan, ids, ({ done, current }) =>
+          setRunning((running) =>
+            running.kind === "cleanup" ? { ...running, done, current } : running,
+          ),
         ),
       );
       setChosen(new Map());
@@ -145,7 +159,8 @@ export function ScanScreen({ elevated, onResults = () => {} }: Props) {
         )}
         {running.kind === "cleanup" && (
           <Activity
-            label={`Removing ${count(running.done)} of ${count(running.total)}`}
+            label={`Removing ${count(removing(running))} of ${count(running.total)}`}
+            detail={running.current}
             done={running.total > 0 ? running.done / running.total : null}
             onCancel={cancel}
             isCancelling={running.cancelling}

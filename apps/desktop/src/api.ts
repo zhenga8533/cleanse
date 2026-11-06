@@ -3,6 +3,7 @@
 
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type { AppInfo } from "./bindings/AppInfo";
+import type { CleanProgress } from "./bindings/CleanProgress";
 import type { CleanReport } from "./bindings/CleanReport";
 import type { Details } from "./bindings/Details";
 import type { Folders } from "./bindings/Folders";
@@ -84,7 +85,7 @@ export function folder(
 export function clean(
   scan: number,
   items: number[],
-  onProgress: (done: number) => void,
+  onProgress: (progress: CleanProgress) => void,
 ): Promise<CleanReport> {
   return invoke("clean", { scan, items, progress: new Channel(onProgress) });
 }

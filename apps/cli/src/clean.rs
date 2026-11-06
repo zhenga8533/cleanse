@@ -1,11 +1,11 @@
 use std::cmp::Reverse;
 use std::error::Error;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::AtomicBool;
 
-use cleanse_engine::{Applied, Engine, Scan};
+use cleanse_engine::{Applied, Engine, Scan, paced};
 use cleanse_model::{Candidate, Disposal, Outcome, Plan, PlanItem, Risk, Size};
 use inquire::{Confirm, InquireError, MultiSelect};
 use serde::Serialize;
@@ -136,14 +136,30 @@ fn clean(engine: &Engine, paths: &[PathBuf], args: &Choosing) -> Result<ExitCode
 /// Removes the plan's items, showing progress, and reports what happened to each.
 pub(crate) fn remove(engine: &Engine, plan: &Plan) -> Result<ExitCode, Box<dyn Error>> {
     let reporter = Reporter::new();
-    let count = plan.items.len();
-    let applied = engine.apply(
-        plan,
-        &|done| reporter.removing(done, count),
-        &AtomicBool::new(false),
+    let total = plan.items.len();
+    let applied = paced(
+        Reporter::INTERVAL,
+        |(done, current): (usize, Option<String>)| {
+            reporter.removing(done, total, current.as_deref());
+        },
+        |report| {
+            engine.apply(
+                plan,
+                &|removal| report((removal.done, removal.current.map(name))),
+                &AtomicBool::new(false),
+            )
+        },
     );
     reporter.clear();
     Ok(report(engine, plan, &applied?))
+}
+
+/// What a progress line calls an item: its own name.
+fn name(path: &Path) -> String {
+    path.file_name().map_or_else(
+        || path.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    )
 }
 
 /// What can be removed, largest first: everything but what's protected.

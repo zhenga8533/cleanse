@@ -306,7 +306,17 @@ code {
 .progress {
   display: grid;
   flex: 1;
+  min-width: 0;
   gap: 6px;
+}
+
+/* One line, cut short, with the whole of it in its tooltip. */
+.progress .detail {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.9em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .bar {

@@ -2,6 +2,7 @@
 
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, SystemTime};
 
@@ -436,6 +437,56 @@ fn cancelling_leaves_the_items_not_yet_reached() {
 
     assert_eq!(applied.outcomes, [skipped(SkipReason::Cancelled)]);
     fixture.assert_web_untouched();
+}
+
+/// One folder can take minutes, so each item is reported as its removal starts.
+#[test]
+fn reports_each_item_as_its_removal_starts_and_when_all_are_finished() {
+    let fixture = Fixture::new();
+    let plan = fixture.plan();
+    let reports = Mutex::new(Vec::new());
+
+    fixture
+        .executor()
+        .apply(
+            &plan,
+            &|removal| {
+                reports
+                    .lock()
+                    .unwrap()
+                    .push((removal.done, removal.current.map(Path::to_path_buf)));
+            },
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+
+    assert_eq!(
+        reports.into_inner().unwrap(),
+        [(0, Some(plan.items[0].path.clone())), (1, None)]
+    );
+}
+
+#[test]
+fn a_cancelled_run_reports_only_that_its_finished() {
+    let fixture = Fixture::new();
+    let plan = fixture.plan();
+    let reports = Mutex::new(Vec::new());
+
+    fixture
+        .executor()
+        .apply(
+            &plan,
+            &|removal| {
+                reports
+                    .lock()
+                    .unwrap()
+                    .push((removal.done, removal.current.map(Path::to_path_buf)));
+            },
+            &AtomicBool::new(true),
+        )
+        .unwrap();
+
+    assert_eq!(reports.into_inner().unwrap(), [(1, None)]);
 }
 
 #[test]

@@ -20,7 +20,7 @@ use std::fmt;
 use std::fs;
 use std::io;
 use std::mem;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 
@@ -66,6 +66,16 @@ pub struct Applied {
     pub journal: PathBuf,
     /// One per plan item, in the plan's order.
     pub outcomes: Vec<Outcome>,
+}
+
+/// How far a run has got, as [`Executor::apply`] reports it when it starts on each item, and
+/// once more when it's finished them all.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Removal<'a> {
+    /// The items finished, whatever happened to each.
+    pub done: usize,
+    /// The item being removed now, or `None` once every item is finished.
+    pub current: Option<&'a Path>,
 }
 
 /// What restoring or purging quarantined items did.
@@ -262,12 +272,13 @@ impl<'a> Executor<'a> {
     }
 
     /// Removes each item in `plan` that is still what was approved and still passes every
-    /// safety check, in order. `progress` gets the number of items done so far. Setting
-    /// `cancel` skips the items not yet reached.
+    /// safety check, in order. `progress` hears as each item's removal starts, since one folder
+    /// can take minutes, and once more when they're all finished. Setting `cancel` skips the
+    /// items not yet reached.
     pub fn apply(
         &self,
         plan: &Plan,
-        progress: &dyn Fn(usize),
+        progress: &dyn Fn(Removal<'_>),
         cancel: &AtomicBool,
     ) -> Result<Applied, ApplyError> {
         self.check_can_change()?;
@@ -302,12 +313,18 @@ impl<'a> Executor<'a> {
                 skipped(SkipReason::JournalUnavailable)
             } else if cancel.load(Ordering::Relaxed) {
                 skipped(SkipReason::Cancelled)
-            } else if let Ok(outcome) = self.remove(item, &matcher, &assessor, &mut journal) {
-                outcome
             } else {
-                // The journal failed before anything was touched.
-                journal_ok = false;
-                skipped(SkipReason::JournalUnavailable)
+                progress(Removal {
+                    done: outcomes.len(),
+                    current: Some(&item.path),
+                });
+                if let Ok(outcome) = self.remove(item, &matcher, &assessor, &mut journal) {
+                    outcome
+                } else {
+                    // The journal failed before anything was touched.
+                    journal_ok = false;
+                    skipped(SkipReason::JournalUnavailable)
+                }
             };
             if journal_ok && let Some(path) = item.path.to_str() {
                 let done = Record::Done {
@@ -317,8 +334,11 @@ impl<'a> Executor<'a> {
                 journal_ok = journal.record(&done).is_ok();
             }
             outcomes.push(outcome);
-            progress(outcomes.len());
         }
+        progress(Removal {
+            done: outcomes.len(),
+            current: None,
+        });
         let journal_path = journal.path().to_owned();
         if journal_ok {
             // Every outcome is already on disk, so a missing end marker loses nothing.

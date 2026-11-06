@@ -15,8 +15,8 @@ use std::io::{BufRead, Write};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use cleanse_desktop_views::{
-    self as views, CleanReport, Details, HistoryView, ItemPage, QuarantineView, Results, RuleView,
-    ScanProgress, SystemStatus,
+    self as views, CleanProgress, CleanReport, Details, HistoryView, ItemPage, QuarantineView,
+    Results, RuleView, ScanProgress, SystemStatus,
 };
 use cleanse_elevate::client::Client;
 use cleanse_elevate::protocol::{Request, Response};
@@ -361,18 +361,16 @@ pub(crate) async fn system_clean<R: Runtime>(
     state: State<'_, Arc<SystemState>>,
     scan: u64,
     items: Vec<u64>,
-    progress: Channel<usize>,
+    progress: Channel<CleanProgress>,
 ) -> Result<CleanReport, String> {
     let system = Arc::clone(&state);
     let window = owner(&window);
     blocking(move || {
-        let throttle = Throttle::default();
         let request = Request::Clean { scan, items };
+        // The helper paces these, so each one is passed on.
         let response = system.ask(window, &request, &mut |response| {
-            if let Response::CleanProgress { done } = response
-                && throttle.due()
-            {
-                tell(&progress, done);
+            if let Response::CleanProgress { progress: update } = response {
+                tell(&progress, update);
             }
         })?;
         answer_or_err(&request, response, |response| match response {
