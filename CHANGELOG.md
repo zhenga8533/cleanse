@@ -6,6 +6,11 @@ All notable changes to Cleanse are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- In the desktop app, ticking an item's checkbox could scroll the whole window down into empty
+  space, with a second scroll bar beside the section's own. The window no longer scrolls.
+
 ## [1.1.1] - 2026-11-06
 
 Cleanup progress that names what it's removing. A cleanup's progress counted only the items it
