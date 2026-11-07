@@ -53,7 +53,7 @@ pub(crate) fn delete(
     // before anything is removed.
     if let Err(error) = fs::rename(path, tombstone) {
         return Outcome::Failed {
-            error: format!("Couldn't start removing it: {error}"),
+            error: not_moved("Couldn't start removing it", &error),
         };
     }
 
@@ -64,6 +64,29 @@ pub(crate) fn delete(
         return put_back(path, tombstone);
     }
     finish(tombstone, kind, size)
+}
+
+/// Why moving an item failed, after `what` couldn't be done.
+///
+/// Windows won't move a file, or a folder, while a program has it or anything inside it open,
+/// and says only that access is denied, or that it's in use. Its own users are rarely denied
+/// moving their own files, so a program having it open is what that almost always means.
+pub(crate) fn not_moved(what: &str, error: &io::Error) -> String {
+    /// `ERROR_ACCESS_DENIED` and `ERROR_SHARING_VIOLATION`.
+    const IN_USE: [i32; 2] = [5, 32];
+    if cfg!(windows)
+        && error
+            .raw_os_error()
+            .is_some_and(|code| IN_USE.contains(&code))
+    {
+        format!(
+            "{what}: Windows wouldn't move it, which usually means a program has it, or a file \
+             inside it, open, such as an editor, a dev server or a build. Close that program and \
+             try again ({error})"
+        )
+    } else {
+        format!("{what}: {error}")
+    }
 }
 
 /// Removes the approved `kind` of item at `tombstone`, or what's left of it after a removal that

@@ -82,6 +82,18 @@ code {
   overflow-wrap: anywhere;
 }
 
+/* Not shown, but read out by screen readers and copied with the text around it. Inline rather
+   than absolutely positioned, which would put it on a line of its own in copied text. */
+.visually-hidden {
+  display: inline-block;
+  width: 1px;
+  height: 1px;
+  margin-right: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 /* A column, since the banners come and go and the sections take whatever height is left. */
 .app {
   display: flex;
@@ -163,7 +175,12 @@ code {
   outline-offset: 2px;
 }
 
+/* Positioned, so what's absolutely positioned inside is placed in the section and scrolls with
+   it. React Aria's checkboxes keep their input there, visually hidden; placed against the page
+   instead, the inputs below the fold made the whole window scroll, and focusing one on a click
+   scrolled it into empty space. */
 .panel {
+  position: relative;
   padding: 24px 32px 0;
   overflow: auto;
   outline: none;

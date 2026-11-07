@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { Button } from "react-aria-components";
 import type { CleanReport } from "../bindings/CleanReport";
 import { bytes, items } from "../format";
+import { Separator } from "../Separator";
 
 interface Props {
   report: CleanReport;
@@ -45,7 +46,10 @@ export function CleanReportView({ report, onDismiss }: Props) {
               <ul className="problems">
                 {problems.map((problem) => (
                   <li key={problem.path}>
-                    <span className="path">{problem.path}</span>
+                    <span className="path">
+                      {problem.path}
+                      <Separator />
+                    </span>
                     <span className="item-note warns">{problem.reason}</span>
                   </li>
                 ))}

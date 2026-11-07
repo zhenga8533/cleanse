@@ -72,8 +72,9 @@ change it, and CI's Linux test job runs `cargo xtask packages` on every pull req
 - **What it does:** packages each crate, and builds it from its package alone, with
   `cargo publish --workspace --dry-run`.
 - **Why the xtask:** that build takes the other crates from their packages too, as if from a
-  registry, and cargo never rebuilds a registry crate at a version it has already built. So it
-  first cleans those crates' builds, in a target folder of its own.
+  registry, and cargo neither unpacks again nor rebuilds a registry crate at a version it already
+  has. So it first clears those crates' unpacked packages and builds, in a target folder and a
+  Cargo home of its own.
 
 `publish-homebrew.yml` runs only for a release, since there's no formula before one.
 
