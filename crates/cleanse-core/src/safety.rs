@@ -13,6 +13,7 @@ mod tests;
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{self, Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -25,7 +26,7 @@ pub use system::{SystemRoots, scan_folders};
 
 use crate::git::GitStatus;
 use crate::rules::{Detection, Target};
-use crate::scan::{Measurement, measure, measure_with};
+use crate::scan::{Measurement, measure_with};
 
 /// A file modified more recently than this suggests something is using the directory, such as
 /// a running build or dev server pausing between writes.
@@ -46,6 +47,8 @@ pub struct Assessor<'p> {
     /// Read the first time a match's rule keeps items until they're idle. `None` if it couldn't
     /// be read.
     booted_at: OnceLock<Option<SystemTime>>,
+    /// Once set, measuring goes no deeper. See [`Assessor::stopping_on`].
+    stop: Option<&'p AtomicBool>,
 }
 
 /// Which cleanup an [`Assessor`] checks items for.
@@ -80,6 +83,7 @@ impl<'p> Assessor<'p> {
             identities: Mutex::default(),
             running: OnceLock::new(),
             booted_at: OnceLock::new(),
+            stop: None,
         })
     }
 
@@ -107,6 +111,7 @@ impl<'p> Assessor<'p> {
             identities: Mutex::default(),
             running: OnceLock::new(),
             booted_at: OnceLock::new(),
+            stop: None,
         }
     }
 
@@ -114,6 +119,14 @@ impl<'p> Assessor<'p> {
     /// on Windows. That takes a file handle per entry, which can take minutes for an item with
     /// hundreds of thousands of files, so system cleanup does it right before removing an item
     /// rather than when scanning (ADR 0010).
+    /// Measures each item only until `stop` is set, so an assessment made after then leaves out
+    /// whatever it didn't reach, and mustn't be acted on.
+    #[must_use]
+    pub fn stopping_on(mut self, stop: &'p AtomicBool) -> Self {
+        self.stop = Some(stop);
+        self
+    }
+
     #[must_use]
     pub fn thorough(mut self) -> Self {
         if let Cleanup::System { thorough, .. } = &mut self.cleanup {
@@ -139,10 +152,12 @@ impl<'p> Assessor<'p> {
         let system_gates = self.system_gates(detection);
         let system_roots = system_gates.map(|(roots, _)| roots);
         let measured = match system_gates {
-            Some((_, thorough)) => measure_with(path, |entry| {
-                system::entry_concern(self.probe, entry, thorough)
-            }),
-            None => measure(path),
+            Some((_, thorough)) => measure_with(
+                path,
+                |entry| system::entry_concern(self.probe, entry, thorough),
+                self.stop,
+            ),
+            None => measure_with(path, |_| None, self.stop),
         };
         let mut measurement = measured.as_ref().cloned().unwrap_or_default();
         // Anything other than the kind of item the rule matched means it changed since the scan.

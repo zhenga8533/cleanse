@@ -4,11 +4,14 @@ use std::fs::{self, File, FileTimes};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, SystemTime};
 
 use cleanse_model::EntryKind;
 
-use super::{Descend, DirFiles, WalkReport, distinct_roots, measure, walk, walk_with};
+use super::{
+    Descend, DirFiles, WalkReport, distinct_roots, measure, measure_with, walk, walk_with,
+};
 
 /// Walks `root`, returning every entry relative to it, sorted. Directory sizes are zeroed
 /// because they differ between filesystems.
@@ -102,6 +105,21 @@ fn measures_contents_and_notes_what_the_safety_checks_need() {
     assert!(measurement.newest_modified.is_some());
     assert_eq!((measurement.unreadable, measurement.mounts), (0, 0));
     assert!(!measurement.shared);
+}
+
+/// Stopping cleanup cuts measuring the item it's on short, so it goes no deeper.
+#[test]
+fn measuring_goes_no_deeper_once_stopped() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(root.path().join("a.txt"), "ab").unwrap();
+    fs::create_dir(root.path().join("sub")).unwrap();
+    fs::write(root.path().join("sub/b.txt"), "cde").unwrap();
+
+    let whole = measure_with(root.path(), |_| None, Some(&AtomicBool::new(false))).unwrap();
+    let stopped = measure_with(root.path(), |_| None, Some(&AtomicBool::new(true))).unwrap();
+
+    assert_eq!((whole.files, whole.size.logical), (2, 5));
+    assert_eq!((stopped.files, stopped.size.logical), (1, 2));
 }
 
 /// Sets when a file or folder was last modified and opened.

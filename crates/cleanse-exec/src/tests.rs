@@ -3,7 +3,7 @@
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
 
 use cleanse_core::config::Config;
@@ -466,6 +466,91 @@ fn reports_each_item_as_its_removal_starts_and_when_all_are_finished() {
     );
 }
 
+/// Stopping while an item is checked, right before it's removed, leaves it untouched: stopping
+/// cut the check short, so what it found can't be relied on.
+#[test]
+fn stopping_as_an_item_starts_leaves_it_untouched() {
+    let fixture = Fixture::new();
+    let plan = fixture.plan();
+    let cancel = AtomicBool::new(false);
+
+    let applied = fixture
+        .executor()
+        .apply(
+            &plan,
+            &|removal| {
+                if removal.current.is_some() {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+            },
+            &cancel,
+        )
+        .unwrap();
+
+    assert_eq!(applied.outcomes, [skipped(SkipReason::Cancelled)]);
+    fixture.assert_web_untouched();
+}
+
+/// What a removal stopped partway leaves stays in its tombstone, which History lists and can
+/// remove.
+#[test]
+fn stopping_partway_leaves_the_rest_for_history_to_remove() {
+    let fixture = Fixture::new();
+    let identity = fixture
+        .system
+        .inspect(&fixture.node_modules())
+        .unwrap()
+        .identity;
+    let leftover = interrupt_removal(&fixture, identity);
+
+    let outcome = delete::finish(
+        &leftover.tombstone,
+        EntryKind::Dir,
+        Size::default(),
+        &AtomicBool::new(true),
+    );
+
+    assert!(
+        matches!(&outcome, Outcome::Failed { error }
+            if error.starts_with("Stopped before all of it was removed")
+                && error.ends_with("History can remove the rest")),
+        "{outcome:?}"
+    );
+    assert!(leftover.tombstone.join("left-pad/index.js").exists());
+    let history = fixture.executor().history().unwrap();
+    assert_eq!(history.leftovers, std::slice::from_ref(&leftover));
+    let applied = fixture.executor().finish(&history.leftovers).unwrap();
+    assert!(
+        matches!(&applied.outcomes[..], [Outcome::Deleted { .. }]),
+        "{applied:?}"
+    );
+    assert!(!leftover.tombstone.exists());
+}
+
+/// A folder's contents go from many threads at once, folders inside folders included.
+#[test]
+fn deletes_a_folder_of_many_files_and_folders() {
+    let fixture = Fixture::new();
+    for package in 0..8 {
+        for folder in 0..5 {
+            for file in 0..10 {
+                let name = format!("web/node_modules/p{package}/lib/d{folder}/f{file}.js");
+                write_old(&fixture.path(&name), "x");
+            }
+        }
+    }
+    let plan = fixture.plan();
+
+    let outcomes = fixture.apply(&plan);
+
+    assert!(
+        matches!(&outcomes[..], [Outcome::Deleted { size }] if size.logical == 4 + 400),
+        "{outcomes:?}"
+    );
+    assert!(!fixture.node_modules().exists());
+    fixture.assert_no_tombstones();
+}
+
 #[test]
 fn a_cancelled_run_reports_only_that_its_finished() {
     let fixture = Fixture::new();
@@ -597,6 +682,7 @@ fn puts_back_whatever_replaced_the_folder_before_it_moved() {
         EntryKind::Dir,
         other,
         Size::default(),
+        &AtomicBool::new(false),
     );
 
     assert_eq!(outcome, skipped(SkipReason::Replaced));

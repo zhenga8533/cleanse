@@ -643,6 +643,7 @@ dependencies = [
  "cleanse-model",
  "cleanse-platform",
  "junction",
+ "rayon",
  "serde",
  "serde_json",
  "tempfile",

@@ -13,8 +13,18 @@ All notable changes to Cleanse are documented here. The format is based on
   denied.
 - In the desktop app, text copied from a cleanup's report, or from History, keeps each path
   apart from what's said about it.
+- A cleanup removes what's inside a folder from many threads at once, so folders of many small
+  files, such as `node_modules`, Rust's `target`, and npm's cache, go several times as fast:
+  about five times on a Windows laptop with endpoint protection. Each folder is still emptied
+  through its handle, so links inside are removed as links, never followed
+  ([ADR 0012](docs/src/adr/0012-remove-folders-through-handles.md)).
 
 ### Fixed
+
+- Stopping a cleanup takes effect partway through the item it's on, rather than once that item
+  is done, which for a large folder could take minutes. An item still being checked is left
+  untouched. What's left of one being removed stays out of sight in its tombstone, and History
+  can remove the rest.
 
 - In the desktop app, ticking an item's checkbox could scroll the whole window down into empty
   space, with a second scroll bar beside the section's own. The window no longer scrolls.

@@ -5,6 +5,8 @@ disallowed-methods = [
     { path = "std::fs::remove_file", reason = "only cleanse-exec may delete (ADR 0002)" },
     { path = "std::fs::remove_dir", reason = "only cleanse-exec may delete (ADR 0002)" },
     { path = "std::fs::remove_dir_all", reason = "only cleanse-exec may delete (ADR 0002)" },
+    { path = "cleanse_platform::privileged::Folder::remove_file", reason = "only cleanse-exec may delete (ADR 0002)", allow-invalid = true },
+    { path = "cleanse_platform::privileged::Folder::remove_folder", reason = "only cleanse-exec may delete (ADR 0002)", allow-invalid = true },
     { path = "std::fs::rename", reason = "only cleanse-exec may move files (ADR 0002)" },
     { path = "std::fs::copy", reason = "only cleanse-exec may write files (ADR 0002)" },
     { path = "std::fs::write", reason = "only cleanse-exec may write files (ADR 0002)" },
