@@ -1119,10 +1119,63 @@ fn leaves_a_file_a_program_has_open() {
     drop(open);
 
     assert!(
-        matches!(&outcomes[..], [Outcome::Failed { .. }]),
+        matches!(&outcomes[..], [Outcome::Failed { error }] if says_in_use(error)),
         "{outcomes:?}"
     );
     fixture.assert_dumps_hold(true);
+}
+
+/// Nor a folder while a program has a file inside it open, whether it's being deleted or
+/// quarantined. Windows says only that access is denied, so the outcome says what that means.
+#[cfg(windows)]
+#[test]
+fn leaves_a_folder_with_a_file_a_program_has_open() {
+    use std::os::windows::fs::OpenOptionsExt;
+    const SHARE_READ_WRITE: u32 = 0x1 | 0x2;
+
+    for disposal in [Disposal::Delete, Disposal::Quarantine] {
+        let fixture = Fixture::new();
+        let mut plan = fixture.plan();
+        plan.items[0].disposal = disposal;
+        let open = File::options()
+            .read(true)
+            .share_mode(SHARE_READ_WRITE)
+            .open(fixture.path("web/node_modules/left-pad/index.js"))
+            .unwrap();
+
+        let outcomes = fixture.apply(&plan);
+        drop(open);
+
+        assert!(
+            matches!(&outcomes[..], [Outcome::Failed { error }] if says_in_use(error)),
+            "{disposal:?}: {outcomes:?}"
+        );
+        fixture.assert_web_untouched();
+        assert!(fixture.quarantine_is_empty());
+    }
+}
+
+#[cfg(windows)]
+fn says_in_use(error: &str) -> bool {
+    error.contains("a program has it, or a file inside it, open")
+}
+
+#[test]
+fn says_what_stopped_a_move_only_when_windows_refused_it() {
+    let refused = std::io::Error::from_raw_os_error(5);
+    let missing = std::io::Error::from(std::io::ErrorKind::NotFound);
+
+    let said = delete::not_moved("Couldn't start removing it", &refused);
+    assert!(said.starts_with("Couldn't start removing it: "), "{said}");
+    assert_eq!(
+        said.contains("a program has it, or a file inside it, open"),
+        cfg!(windows),
+        "{said}"
+    );
+    assert_eq!(
+        delete::not_moved("Couldn't start removing it", &missing),
+        format!("Couldn't start removing it: {missing}")
+    );
 }
 
 #[test]

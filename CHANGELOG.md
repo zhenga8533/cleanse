@@ -6,6 +6,14 @@ All notable changes to Cleanse are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- When Windows won't move an item because a program has it, or a file inside it, open, a
+  cleanup says so, and to close that program and try again, rather than only that access is
+  denied.
+- In the desktop app, text copied from a cleanup's report, or from History, keeps each path
+  apart from what's said about it.
+
 ### Fixed
 
 - In the desktop app, ticking an item's checkbox could scroll the whole window down into empty
