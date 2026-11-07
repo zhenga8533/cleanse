@@ -7,15 +7,23 @@
     reason = "cleanse-exec is the one crate that changes the filesystem (ADR 0002)"
 )]
 
+use std::ffi::OsStr;
+use std::fmt;
 use std::fs;
 use std::io;
+use std::num::NonZero;
 use std::path::{Path, PathBuf};
 use std::process;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cleanse_model::{EntryKind, FileIdentity, Outcome, Size, SkipReason};
 use cleanse_platform::Probe;
+use cleanse_platform::privileged::Folder;
+use rayon::prelude::*;
+use rayon::{ThreadPool, ThreadPoolBuilder};
 
 pub(crate) use cleanse_core::TOMBSTONE_PREFIX;
 
@@ -33,8 +41,34 @@ pub(crate) fn tombstone_for(path: &Path) -> Option<PathBuf> {
     )))
 }
 
+/// Never set, for removals that always run to the end.
+pub(crate) static NEVER_STOP: AtomicBool = AtomicBool::new(false);
+
+/// Why removing something ended before all of it was gone.
+#[derive(Debug)]
+pub(crate) enum Unfinished {
+    /// Stopping was asked for.
+    Stopped,
+    Failed(io::Error),
+}
+
+impl From<io::Error> for Unfinished {
+    fn from(error: io::Error) -> Self {
+        Self::Failed(error)
+    }
+}
+
+impl fmt::Display for Unfinished {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Stopped => f.write_str("Stopped before all of it was removed"),
+            Self::Failed(error) => error.fmt(f),
+        }
+    }
+}
+
 /// Deletes the `kind` of item at `path` by way of `tombstone`, provided it's still the item with
-/// `identity`. `size` is what it's reported to free.
+/// `identity`. `size` is what it's reported to free. Once `stop` is set, nothing more is removed.
 pub(crate) fn delete(
     probe: &dyn Probe,
     path: &Path,
@@ -42,6 +76,7 @@ pub(crate) fn delete(
     kind: EntryKind,
     identity: FileIdentity,
     size: Size,
+    stop: &AtomicBool,
 ) -> Outcome {
     // On Unix, renaming a folder onto an empty one replaces it, so the name has to be free.
     if fs::symlink_metadata(tombstone).is_ok() {
@@ -63,7 +98,7 @@ pub(crate) fn delete(
     if !moved.is_ok_and(|facts| facts.kind == kind && facts.identity == identity) {
         return put_back(path, tombstone);
     }
-    finish(tombstone, kind, size)
+    finish(tombstone, kind, size, stop)
 }
 
 /// Why moving an item failed, after `what` couldn't be done.
@@ -91,23 +126,87 @@ pub(crate) fn not_moved(what: &str, error: &io::Error) -> String {
 
 /// Removes the approved `kind` of item at `tombstone`, or what's left of it after a removal that
 /// didn't finish. The caller has checked that it's the approved item. `size` is what it's
-/// reported to free.
-pub(crate) fn finish(tombstone: &Path, kind: EntryKind, size: Size) -> Outcome {
-    match remove(tombstone, kind) {
+/// reported to free. Once `stop` is set, nothing more is removed, and what's left stays in the
+/// tombstone, where History lists it.
+pub(crate) fn finish(tombstone: &Path, kind: EntryKind, size: Size, stop: &AtomicBool) -> Outcome {
+    match remove(tombstone, kind, stop) {
         Ok(()) => Outcome::Deleted { size },
-        Err(error) => Outcome::Failed {
-            error: format!("{error}. What's left of it is in {}", tombstone.display()),
+        Err(unfinished @ Unfinished::Stopped) => Outcome::Failed {
+            error: format!(
+                "{unfinished}. What's left of it is in {}, and History can remove the rest",
+                tombstone.display()
+            ),
+        },
+        Err(unfinished @ Unfinished::Failed(_)) => Outcome::Failed {
+            error: format!(
+                "{unfinished}. What's left of it is in {}",
+                tombstone.display()
+            ),
         },
     }
 }
 
-/// Removes a folder with everything inside, or a file.
-pub(crate) fn remove(path: &Path, kind: EntryKind) -> io::Result<()> {
-    if kind == EntryKind::Dir {
-        fs::remove_dir_all(path)
-    } else {
-        fs::remove_file(path)
+/// Removes a folder with everything inside, or a file. A folder's contents go from many threads
+/// at once, through each folder's handle, so a link inside is only ever removed as itself. Once
+/// `stop` is set, nothing more is removed.
+pub(crate) fn remove(path: &Path, kind: EntryKind, stop: &AtomicBool) -> Result<(), Unfinished> {
+    if stop.load(Ordering::Relaxed) {
+        return Err(Unfinished::Stopped);
     }
+    if kind != EntryKind::Dir {
+        return Ok(fs::remove_file(path)?);
+    }
+    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "It has no parent folder").into());
+    };
+    let parent = Folder::open(parent)?;
+    let remove = || remove_inside(&parent, name, true, stop);
+    match pool() {
+        Some(pool) => pool.install(remove),
+        None => remove(),
+    }
+}
+
+/// Removes `name` from inside `folder`, and if it's a folder, everything inside it first.
+fn remove_inside(
+    folder: &Folder,
+    name: &OsStr,
+    is_folder: bool,
+    stop: &AtomicBool,
+) -> Result<(), Unfinished> {
+    if stop.load(Ordering::Relaxed) {
+        return Err(Unfinished::Stopped);
+    }
+    // A folder that turns out to be a link put in its place goes as a link.
+    if is_folder && let Some(inside) = folder.open_folder(name)? {
+        inside
+            .children()?
+            .into_par_iter()
+            .try_for_each(|child| remove_inside(&inside, &child.name, child.is_folder, stop))?;
+        drop(inside);
+        return Ok(folder.remove_folder(name)?);
+    }
+    Ok(folder.remove_file(name)?)
+}
+
+/// The threads removals run on, or `None` if they couldn't be started, when they run on rayon's
+/// own.
+///
+/// Removing a file mostly waits on the filesystem, and any antivirus checking it, rather than the
+/// processor, so having more removals going than there are processors keeps it busy. On a laptop
+/// with 12 logical processors and endpoint protection, 16 to 24 threads removed small files about
+/// five times as fast as std's `remove_dir_all`, and 32 no faster.
+fn pool() -> Option<&'static ThreadPool> {
+    static POOL: OnceLock<Option<ThreadPool>> = OnceLock::new();
+    POOL.get_or_init(|| {
+        let processors = thread::available_parallelism().map_or(4, NonZero::get);
+        ThreadPoolBuilder::new()
+            .num_threads((processors * 2).clamp(4, 32))
+            .thread_name(|index| format!("cleanse-remove-{index}"))
+            .build()
+            .ok()
+    })
+    .as_ref()
 }
 
 /// Moves whatever is at `moved` back to `path`, where it was before something swapped it in

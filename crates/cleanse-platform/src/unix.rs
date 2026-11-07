@@ -8,6 +8,9 @@ use cleanse_model::{EntryKind, FileIdentity};
 
 use crate::{Elevation, FileFacts, FileOwner, ListedFacts, SystemFolders};
 
+#[cfg(any(test, feature = "privileged"))]
+pub(crate) mod folder;
+
 /// `st_blocks` counts 512-byte units on Linux and macOS, whatever the filesystem's block size.
 const STAT_BLOCK_BYTES: u64 = 512;
 

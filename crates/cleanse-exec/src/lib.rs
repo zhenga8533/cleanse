@@ -290,8 +290,9 @@ impl<'a> Executor<'a> {
                 let matcher = Matcher::new(self.rules.rules(), folders, Os::current())
                     .with_large_files(config.large_file_size);
                 let policy = ProtectedPolicy::for_system(folders, self.probe, &config.exclude);
-                let assessor =
-                    Assessor::new(self.probe, policy, &plan.roots, now).map_err(ApplyError::Io)?;
+                let assessor = Assessor::new(self.probe, policy, &plan.roots, now)
+                    .map_err(ApplyError::Io)?
+                    .stopping_on(cancel);
                 (matcher, assessor, plan.roots.as_slice())
             }
             // The plan's roots are ignored: system cleanup only removes what's directly inside
@@ -300,7 +301,9 @@ impl<'a> Executor<'a> {
                 let matcher = Matcher::system(self.rules.rules(), folders, Os::current());
                 let policy = ProtectedPolicy::for_system_cleanup(folders, self.probe);
                 let roots = SystemRoots::verify(self.rules, folders, self.probe);
-                let assessor = Assessor::system(self.probe, policy, roots, now).thorough();
+                let assessor = Assessor::system(self.probe, policy, roots, now)
+                    .thorough()
+                    .stopping_on(cancel);
                 (matcher, assessor, &[][..])
             }
         };
@@ -318,7 +321,7 @@ impl<'a> Executor<'a> {
                     done: outcomes.len(),
                     current: Some(&item.path),
                 });
-                if let Ok(outcome) = self.remove(item, &matcher, &assessor, &mut journal) {
+                if let Ok(outcome) = self.remove(item, &matcher, &assessor, &mut journal, cancel) {
                     outcome
                 } else {
                     // The journal failed before anything was touched.
@@ -352,12 +355,14 @@ impl<'a> Executor<'a> {
     }
 
     /// Fails only if the journal can't record the removal, in which case nothing was touched.
+    /// Once `cancel` is set, nothing more is checked or removed.
     fn remove(
         &self,
         item: &PlanItem,
         matcher: &Matcher<'_>,
         assessor: &Assessor<'_>,
         journal: &mut Journal,
+        cancel: &AtomicBool,
     ) -> io::Result<Outcome> {
         if item.disposal == Disposal::Trash {
             return Ok(skipped(SkipReason::Unsupported {
@@ -367,7 +372,7 @@ impl<'a> Executor<'a> {
         let Some(path) = item.path.to_str() else {
             return Ok(skipped(SkipReason::UnrecordablePath));
         };
-        let candidate = match self.check(item, matcher, assessor) {
+        let candidate = match self.check(item, matcher, assessor, cancel) {
             Ok(candidate) => candidate,
             Err(outcome) => return Ok(outcome),
         };
@@ -418,6 +423,7 @@ impl<'a> Executor<'a> {
             item.kind,
             item.identity,
             candidate.found.size,
+            cancel,
         ))
     }
 
@@ -460,7 +466,12 @@ impl<'a> Executor<'a> {
                 let size = measure(&leftover.tombstone)
                     .map(|measurement| measurement.size)
                     .unwrap_or_default();
-                delete::finish(&leftover.tombstone, leftover.kind, size)
+                delete::finish(
+                    &leftover.tombstone,
+                    leftover.kind,
+                    size,
+                    &delete::NEVER_STOP,
+                )
             };
             if journal_ok {
                 let done = Record::Done {
@@ -569,6 +580,7 @@ impl<'a> Executor<'a> {
         item: &PlanItem,
         matcher: &Matcher<'_>,
         assessor: &Assessor<'_>,
+        cancel: &AtomicBool,
     ) -> Result<Candidate, Outcome> {
         let facts = match self.probe.inspect(&item.path) {
             Ok(facts) => facts,
@@ -598,6 +610,10 @@ impl<'a> Executor<'a> {
         };
 
         let candidate = assessor.assess(CandidateId(0), &detection);
+        // Stopping cuts the measuring short, so what it found is incomplete, and can't be relied on.
+        if cancel.load(Ordering::Relaxed) {
+            return Err(skipped(SkipReason::Cancelled));
+        }
         if candidate.risk() == Risk::Protected {
             let concerns = candidate
                 .concerns()

@@ -22,6 +22,7 @@
   - [0009: The desktop app's web view can only name what the engine showed it](adr/0009-desktop-web-view.md)
   - [0010: System cleanup runs elevated, apart from everything else](adr/0010-elevated-system-cleanup.md)
   - [0011: The user's cleanup runs elevated only when there's no other way](adr/0011-cleanup-with-uac-off.md)
+  - [0012: Cleanse removes folders through their handles, so it can stop partway](adr/0012-remove-folders-through-handles.md)
 
 # Maintaining
 

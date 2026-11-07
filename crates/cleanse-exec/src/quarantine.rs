@@ -177,9 +177,9 @@ impl Quarantine {
         {
             return failed(format!("{} isn't what Cleanse quarantined", item.display()));
         }
-        if let Err(error) = delete::remove(&item, entry.kind) {
+        if let Err(unfinished) = delete::remove(&item, entry.kind, &delete::NEVER_STOP) {
             return failed(format!(
-                "{error}. What's left of it is in {}",
+                "{unfinished}. What's left of it is in {}",
                 item.display()
             ));
         }
