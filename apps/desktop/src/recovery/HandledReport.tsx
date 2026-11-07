@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { Button } from "react-aria-components";
 import type { Handled } from "../bindings/Handled";
 import { bytes, items } from "../format";
+import { Separator } from "../Separator";
 
 export type Done = "restore" | "purge" | "finish";
 
@@ -51,7 +52,10 @@ export function HandledReport({ done, handled, onDismiss }: Props) {
           <ul className="problems">
             {handled.failed.map((problem) => (
               <li key={problem.path}>
-                <span className="path">{problem.path}</span>
+                <span className="path">
+                  {problem.path}
+                  <Separator />
+                </span>
                 <span className="item-note warns">{problem.reason}</span>
               </li>
             ))}

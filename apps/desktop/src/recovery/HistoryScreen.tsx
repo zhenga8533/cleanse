@@ -6,6 +6,7 @@ import type { HistoryView } from "../bindings/HistoryView";
 import type { RunView } from "../bindings/RunView";
 import { useCleanup } from "../cleanup";
 import { ago, bytes, count, items, now } from "../format";
+import { Separator } from "../Separator";
 import { HandledReport } from "./HandledReport";
 
 /** How many runs show before asking for the rest, as `cleanse history` lists without `--all`. */
@@ -75,7 +76,10 @@ export function HistoryScreen({ elevated }: Props) {
           <ul className="problems">
             {view.leftovers.map((leftover) => (
               <li key={leftover.tombstone}>
-                <span className="path">{leftover.tombstone}</span>
+                <span className="path">
+                  {leftover.tombstone}
+                  <Separator />
+                </span>
                 <span className="muted">
                   Was <span className="path">{leftover.original}</span>
                 </span>
