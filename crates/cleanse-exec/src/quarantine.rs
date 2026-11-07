@@ -124,7 +124,9 @@ impl Quarantine {
         if let Err(error) = fs::rename(&entry.original, &item) {
             // A record without its item isn't listed, so a leftover one changes nothing.
             let _ = fs::remove_file(&record);
-            return failed("Couldn't move it into quarantine", error);
+            return Outcome::Failed {
+                error: delete::not_moved("Couldn't move it into quarantine", &error),
+            };
         }
 
         // If something replaced the item after it was checked, that's what moved, so it goes

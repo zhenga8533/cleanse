@@ -155,7 +155,10 @@ it("cleans what was chosen once confirmed, and reports what happened", async () 
   expect(clean?.args.items).toEqual([1, 2]);
   expect(report.textContent).toContain("Deleted 2 items, 3.1 GiB.");
   expect(report.textContent).toContain("Skipped: 1 item");
-  expect(report.textContent).toContain("Something else is there now");
+  // Copied, each path and its reason stay apart.
+  expect(within(report).getByRole("listitem").textContent).toBe(
+    "C:\\Users\\sample\\code\\engine\\target: Something else is there now",
+  );
   expect(document.activeElement).toBe(within(report).getByRole("heading", { level: 2 }));
   // The results are read again, without what was removed, and nothing stays chosen.
   expect(await screen.findByRole("heading", { name: /^Can be removed: 1 item/ })).toBeTruthy();

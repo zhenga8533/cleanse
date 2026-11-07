@@ -82,6 +82,18 @@ code {
   overflow-wrap: anywhere;
 }
 
+/* Not shown, but read out by screen readers and copied with the text around it. Inline rather
+   than absolutely positioned, which would put it on a line of its own in copied text. */
+.visually-hidden {
+  display: inline-block;
+  width: 1px;
+  height: 1px;
+  margin-right: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 /* A column, since the banners come and go and the sections take whatever height is left. */
 .app {
   display: flex;
