@@ -1,5 +1,6 @@
 #![allow(clippy::disallowed_methods, reason = "tests build fixture files")]
 
+use std::ffi::OsStr;
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -7,6 +8,7 @@ use std::time::{Duration, SystemTime};
 
 use cleanse_model::{EntryKind, FileIdentity};
 
+use crate::privileged::Folder;
 use crate::{
     FakeProbe, FileFacts, FileOwner, KnownFolders, Probe, System, SystemFolders, process_name,
 };
@@ -880,4 +882,85 @@ fn links_arent_only_admins() {
 #[test]
 fn only_root_can_change_usr() {
     assert!(system().only_admins_can_change(Path::new("/usr")).unwrap());
+}
+
+/// What's inside a folder, by name, and whether each is a folder rather than a link to one.
+fn children(folder: &Folder) -> Vec<(String, bool)> {
+    let mut children: Vec<(String, bool)> = folder
+        .children()
+        .unwrap()
+        .into_iter()
+        .map(|child| (child.name.into_string().unwrap(), child.is_folder))
+        .collect();
+    children.sort();
+    children
+}
+
+#[test]
+fn a_folder_lists_whats_inside_and_which_are_folders() {
+    let root = tempfile::tempdir().unwrap();
+    fs::create_dir(root.path().join("sub")).unwrap();
+    fs::write(root.path().join("file.txt"), "x").unwrap();
+    link_dir(&root.path().join("sub"), &root.path().join("link"));
+
+    let folder = Folder::open(root.path()).unwrap();
+
+    assert_eq!(
+        children(&folder),
+        [
+            ("file.txt".to_owned(), false),
+            ("link".to_owned(), false),
+            ("sub".to_owned(), true),
+        ]
+    );
+}
+
+#[test]
+fn a_link_is_never_opened_as_a_folder() {
+    let root = tempfile::tempdir().unwrap();
+    let target = root.path().join("target");
+    fs::create_dir(&target).unwrap();
+    link_dir(&target, &root.path().join("link"));
+
+    let folder = Folder::open(root.path()).unwrap();
+
+    assert!(folder.open_folder(OsStr::new("link")).unwrap().is_none());
+    assert!(Folder::open(&root.path().join("link")).is_err());
+}
+
+#[test]
+fn removing_a_link_leaves_what_it_points_to() {
+    let root = tempfile::tempdir().unwrap();
+    let target = root.path().join("target");
+    fs::create_dir(&target).unwrap();
+    fs::write(target.join("keep.txt"), "important").unwrap();
+    link_dir(&target, &root.path().join("link"));
+
+    Folder::open(root.path())
+        .unwrap()
+        .remove_file(OsStr::new("link"))
+        .unwrap();
+
+    assert!(fs::symlink_metadata(root.path().join("link")).is_err());
+    assert_eq!(
+        fs::read_to_string(target.join("keep.txt")).unwrap(),
+        "important"
+    );
+}
+
+#[test]
+fn removes_files_and_empty_folders_by_name() {
+    let root = tempfile::tempdir().unwrap();
+    fs::create_dir_all(root.path().join("full/inner")).unwrap();
+    fs::write(root.path().join("file.txt"), "x").unwrap();
+    let folder = Folder::open(root.path()).unwrap();
+
+    folder.remove_file(OsStr::new("file.txt")).unwrap();
+    assert!(folder.remove_folder(OsStr::new("full")).is_err());
+    let full = folder.open_folder(OsStr::new("full")).unwrap().unwrap();
+    full.remove_folder(OsStr::new("inner")).unwrap();
+    drop(full);
+    folder.remove_folder(OsStr::new("full")).unwrap();
+
+    assert_eq!(children(&folder), []);
 }

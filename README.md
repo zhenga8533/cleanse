@@ -7,12 +7,12 @@ mind. It looks for regenerable build output, package-manager caches, AI coding a
 and everyday junk; tells you why each item is safe to remove and how it comes back; and never
 removes anything you haven't approved.
 
-> **Status: v1.1.** The command line and the desktop app are complete: `cleanse scan` and
+> **Status: v1.2.** The command line and the desktop app are complete: `cleanse scan` and
 > `cleanse analyze` find what could be removed and where space goes, `cleanse explain` says why,
 > and `cleanse clean` deletes what you approve, or quarantines it so `cleanse restore` can put it
 > back. [`cleanse system`](#system-cleanup) does the same for the operating system's own folders
 > on Windows and Linux, and the [desktop app](#desktop-app) does all of it in a window.
-> [v1.1.1](https://github.com/zhenga8533/cleanse/releases/tag/v1.1.1) has prebuilt binaries and
+> [v1.2.0](https://github.com/zhenga8533/cleanse/releases/tag/v1.2.0) has prebuilt binaries and
 > installers for both, not signed.
 
 ## Install

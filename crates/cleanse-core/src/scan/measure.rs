@@ -1,6 +1,7 @@
 use std::fs::{self, Metadata};
 use std::io;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
 use std::time::SystemTime;
 
@@ -68,12 +69,13 @@ pub struct Measurement {
 
 /// Walks everything below `path` without following links, or measures it alone if it's a file.
 pub fn measure(path: &Path) -> io::Result<Measurement> {
-    measure_with(path, |_| None)
+    measure_with(path, |_| None, None)
 }
 
 /// Like [`measure`], and also asks `check` about each entry inside, from many threads at once,
-/// recording what it says is wrong.
-pub fn measure_with<F>(path: &Path, check: F) -> io::Result<Measurement>
+/// recording what it says is wrong. Once `stop` is set, it goes no deeper, so what it returns
+/// leaves out whatever it didn't reach.
+pub fn measure_with<F>(path: &Path, check: F, stop: Option<&AtomicBool>) -> io::Result<Measurement>
 where
     F: Fn(&Entry<'_>) -> Option<Concern> + Sync,
 {
@@ -103,7 +105,11 @@ where
             EntryKind::Dir => measurement.changed(entry.metadata.modified().ok()),
             EntryKind::Link | EntryKind::Other => {}
         }
-        Descend::Yes
+        if stop.is_some_and(|stop| stop.load(Ordering::Relaxed)) {
+            Descend::No
+        } else {
+            Descend::Yes
+        }
     })?;
 
     let mut measurement = measurement

@@ -176,10 +176,13 @@ contents that couldn't be read, and other filesystems mounted inside.
 - **Delete** first renames the item, a file or a folder, to a sibling tombstone, so a project
   never sees a half-deleted `node_modules`. If what landed there isn't the approved item,
   because something replaced it after the re-check, it's put back untouched. Otherwise the
-  tombstone is removed, along with any links inside, never what they point to. On Windows the
-  rename fails while a program has the file, or a file inside the folder, open, so nothing is
-  removed. A program can open a file in a way that allows deleting it, and then, as on macOS and
-  Linux, the file disappears but its space isn't freed until the program closes it.
+  tombstone is removed, along with any links inside, never what they point to. Each folder is
+  emptied through its handle, by name, from many threads at once, so a link swapped in while it
+  runs is removed as a link too ([ADR 0012](adr/0012-remove-folders-through-handles.md)). On
+  Windows the rename fails while a program has the file, or a file inside the folder, open, so
+  nothing is removed. A program can open a file in a way that allows deleting it, and then, as
+  on macOS and Linux, the file disappears but its space isn't freed until the program closes
+  it.
 - **Quarantine** moves the item into the `quarantine` folder in Cleanse's data folder, with a
   record of where it came from written first. It's a rename, so it only works on the same drive;
   items elsewhere are skipped rather than copied. If what moved isn't the approved item, it's
@@ -192,10 +195,12 @@ contents that couldn't be read, and other filesystems mounted inside.
 - Every run writes an append-only journal in Cleanse's data folder, which is itself protected.
   Each removal is flushed to disk before it starts and after it ends. `cleanse history` reads
   it back.
-- If a removal stops partway, such as when the computer shuts down, what's left stays in its
-  tombstone. `cleanse history` lists it, and `cleanse history --finish` removes it, but only if
-  the tombstone still holds the file or folder that was approved, by identity, under the name
-  Cleanse gave it, beside where it was.
+- Stopping a cleanup takes effect partway through an item. If it's still being re-checked, the
+  check is cut short and the item is left untouched, since what was found can't be relied on.
+- If a removal stops partway, because Stop was pressed or the computer shut down, what's left
+  stays in its tombstone. `cleanse history` lists it, and `cleanse history --finish` removes it,
+  but only if the tombstone still holds the file or folder that was approved, by identity, under
+  the name Cleanse gave it, beside where it was.
 
 ### Not built yet
 
