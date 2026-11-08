@@ -60,6 +60,8 @@ use windows_sys::Win32::UI::Shell::{FOLDERID_UserProfiles, KF_FLAG_DEFAULT, SHGe
 use crate::{Elevation, FileFacts, FileOwner, ListedFacts, SystemFolders};
 
 #[cfg(any(test, feature = "privileged"))]
+pub(crate) mod folder;
+#[cfg(any(test, feature = "privileged"))]
 pub mod launch;
 #[cfg(any(test, feature = "privileged"))]
 pub mod pipe;

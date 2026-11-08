@@ -11,6 +11,15 @@ All notable changes to Cleanse are documented here. The format is based on
 - A Homebrew formula for the command line, on macOS and Linux:
   `brew install zhenga8533/tap/cleanse-cli`.
 
+## [1.2.0] - 2026-11-07
+
+Faster cleanup, and stopping that doesn't wait. A cleanup emptied each folder one file at a time,
+and Stop waited for the item it was on, so a large folder, such as Rust's `target` or npm's cache,
+was slow to remove and slow to stop. Folders are now emptied from many threads at once, about five
+times as fast on a Windows laptop with endpoint protection, and Stop takes effect partway through
+an item. A cleanup also says when a program has an item open, which is what Windows' "Access is
+denied" usually means.
+
 ### Changed
 
 - When Windows won't move an item because a program has it, or a file inside it, open, a
@@ -18,9 +27,18 @@ All notable changes to Cleanse are documented here. The format is based on
   denied.
 - In the desktop app, text copied from a cleanup's report, or from History, keeps each path
   apart from what's said about it.
+- A cleanup removes what's inside a folder from many threads at once, so folders of many small
+  files, such as `node_modules`, Rust's `target`, and npm's cache, go several times as fast:
+  about five times on a Windows laptop with endpoint protection. Each folder is still emptied
+  through its handle, so links inside are removed as links, never followed
+  ([ADR 0012](https://github.com/zhenga8533/cleanse/blob/main/docs/src/adr/0012-remove-folders-through-handles.md)).
 
 ### Fixed
 
+- Stopping a cleanup takes effect partway through the item it's on, rather than once that item
+  is done, which for a large folder could take minutes. An item still being checked is left
+  untouched. What's left of one being removed stays out of sight in its tombstone, and History
+  can remove the rest.
 - In the desktop app, ticking an item's checkbox could scroll the whole window down into empty
   space, with a second scroll bar beside the section's own. The window no longer scrolls.
 
@@ -285,7 +303,8 @@ and Linux. It never removes anything; cleanup arrives in 0.2.
   cloud-synced folders, folders containing possible secrets or virtual machine disks, and
   anything that couldn't be fully read.
 
-[Unreleased]: https://github.com/zhenga8533/cleanse/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/zhenga8533/cleanse/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/zhenga8533/cleanse/releases/tag/v1.2.0
 [1.1.1]: https://github.com/zhenga8533/cleanse/releases/tag/v1.1.1
 [1.1.0]: https://github.com/zhenga8533/cleanse/releases/tag/v1.1.0
 [1.0.0]: https://github.com/zhenga8533/cleanse/releases/tag/v1.0.0

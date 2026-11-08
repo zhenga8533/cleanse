@@ -15,6 +15,7 @@ fake = []
 cleanse-core.workspace = true
 cleanse-model.workspace = true
 cleanse-platform = { workspace = true, features = ["privileged"] }
+rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
