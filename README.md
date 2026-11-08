@@ -41,10 +41,18 @@ set `CARGO_HOME`, and add that folder to your `PATH`. Each release also has the 
 archive for x64 Windows, Intel and Apple silicon Macs, and x64 and ARM64 Linux, or you can
 [build it from source](#building-from-source).
 
+On Windows, [Scoop](https://scoop.sh) can install it from Cleanse's own bucket, and
+`scoop update cleanse` updates it:
+
+```powershell
+scoop bucket add zhenga8533 https://github.com/zhenga8533/scoop-bucket
+scoop install zhenga8533/cleanse
+```
+
 Before using [`cleanse system`](#system-cleanup), install a copy that only administrators or root
-can change, since the installers put `cleanse` in a folder your own account can change. Download
-the archive for your system from the release and check it, then on Linux (`aarch64` in place of
-`x86_64` on ARM64):
+can change, since the installers and Scoop put `cleanse` in a folder your own account can change.
+Download the archive for your system from the release and check it, then on Linux (`aarch64` in
+place of `x86_64` on ARM64):
 
 ```sh
 tar -xf cleanse-cli-x86_64-unknown-linux-gnu.tar.xz

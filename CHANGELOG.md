@@ -6,6 +6,12 @@ All notable changes to Cleanse are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- A Scoop bucket for the command line on Windows, `zhenga8533/scoop-bucket`: after
+  `scoop bucket add zhenga8533 https://github.com/zhenga8533/scoop-bucket`,
+  `scoop install zhenga8533/cleanse` installs it.
+
 ## [1.2.0] - 2026-11-07
 
 Faster cleanup, and stopping that doesn't wait. A cleanup emptied each folder one file at a time,
