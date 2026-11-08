@@ -8,7 +8,11 @@ cargo-dist-version = "0.32.0"
 # CI backends to support
 ci = "github"
 # The installers to generate for each app
-installers = ["shell", "powershell"]
+installers = ["shell", "powershell", "homebrew"]
+# The tap the Homebrew formula goes to, which makes the release notes say
+# `brew install zhenga8533/tap/cleanse-cli`. publish-homebrew.yml publishes it, not dist's own
+# Homebrew job, so `dist plan` warns that the job is off.
+tap = "zhenga8533/homebrew-tap"
 # Target platforms to build apps for (Rust target-triple syntax)
 targets = [
     "aarch64-apple-darwin",
@@ -30,8 +34,9 @@ local-artifacts-jobs = ["./desktop-installers"]
 # Build only the packages dist ships, the CLI, rather than the whole workspace: the desktop app
 # needs GTK's development files to compile on Linux, which the CLI's runners don't have.
 precise-builds = true
-# Publishes the CLI and its crates to crates.io, once the GitHub Release exists. See the workflow.
-publish-jobs = ["./publish-crates"]
+# Once the GitHub Release exists, these publish the CLI and its crates to crates.io, and its
+# formula to the Homebrew tap. See the workflows.
+publish-jobs = ["./publish-crates", "./publish-homebrew"]
 
 # Pin the generated workflow's actions by commit, like the other workflows.
 # Dependabot bumps to release.yml fail dist's up-to-date check until the
@@ -49,6 +54,8 @@ aarch64-apple-darwin = "macos-15"
 
 # The desktop installers' job attests what it builds, as dist does for the CLI. Publishing to
 # crates.io trades the job's OIDC token for a short-lived crates.io token (trusted publishing).
+# The Homebrew job writes only to the tap, with the tap's own token.
 [dist.github-custom-job-permissions]
 "desktop-installers" = { contents = "read", attestations = "write", id-token = "write" }
 "publish-crates" = { contents = "read", id-token = "write" }
+"publish-homebrew" = { contents = "read" }

@@ -6,6 +6,11 @@ All notable changes to Cleanse are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- A Homebrew formula for the command line, on macOS and Linux:
+  `brew install zhenga8533/tap/cleanse-cli`.
+
 ## [1.2.0] - 2026-11-07
 
 Faster cleanup, and stopping that doesn't wait. A cleanup emptied each folder one file at a time,
